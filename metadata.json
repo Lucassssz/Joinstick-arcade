@@ -1,0 +1,6 @@
+{
+  "name": "JoinStick Arcade",
+  "description": "Multiplayer browser arcade platform where up to 8 smartphones connect via QR code or room code as game-adaptive virtual controllers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
