@@ -6,6 +6,7 @@ import {
   type BotDifficulty,
   type ClientMessage,
   type ControllerInput,
+  type FrenzyState,
   type GameId,
   type GameSnapshot,
   type PlayerColorSpec,
@@ -18,12 +19,25 @@ import {
   type RoomStatus,
   type ServerMessage,
   type SoundEvent,
+  type TournamentMatchRecord,
+  type TournamentPlayerStanding,
+  type TournamentState,
 } from '../src/shared/types.ts';
 import {
   filterGamesByPlayerMode,
+  GAME_CATALOG,
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../src/shared/games.ts';
+import {
+  CHAOS_WHEEL_MUTATORS,
+  computeTournamentMarks,
+  getMutatorSpec,
+  MUTATOR_BY_ID,
+  pickTournamentGameIds,
+  TOURNAMENT_TOTAL_GAMES,
+  type MutatorId,
+} from '../src/shared/modifiers.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
 import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
 
@@ -39,6 +53,8 @@ interface ConnectedPlayer {
   botDifficulty?: BotDifficulty;
   botMemory?: BotMemory;
   score: number;
+  rawGameScore: number;
+  bonusScore: number;
   alive: boolean;
   statText: string;
   cooldownA: number;
@@ -61,6 +77,11 @@ interface RoomRecord {
   gameSettingValue: number;
   lobbyFilter: PlayerFilterMode;
   remoteFocus: RemoteFocusState;
+  activeMutator: MutatorId;
+  mutatorSpinSeq: number;
+  frenzy: FrenzyState;
+  matchElapsedSec: number;
+  tournament: TournamentState | null;
   countdownValue: number;
   countdownTimer: number;
   players: Map<string, ConnectedPlayer>;
@@ -281,6 +302,17 @@ export class RoomManager {
       hostPlayerId: room.hostPlayerId,
       lobbyFilter: room.lobbyFilter,
       remoteFocus: { ...room.remoteFocus },
+      activeMutator: room.activeMutator,
+      mutatorSpinSeq: room.mutatorSpinSeq,
+      frenzy: { ...room.frenzy },
+      tournament: room.tournament
+        ? {
+            ...room.tournament,
+            gameQueue: [...room.tournament.gameQueue],
+            standings: room.tournament.standings.map((s) => ({ ...s })),
+            history: room.tournament.history.map((h) => ({ ...h })),
+          }
+        : null,
       countdownValue: room.countdownValue,
       players,
       rankings: room.rankings,
@@ -363,6 +395,17 @@ export class RoomManager {
           gameSettingValue: meta.defaultSetting,
           lobbyFilter: 'all',
           remoteFocus: { zone: 'games', index: 0, modalIndex: 0 },
+          activeMutator: 'normal',
+          mutatorSpinSeq: 0,
+          frenzy: {
+            active: false,
+            freezing: false,
+            freezeRemaining: 0,
+            freezeTotal: 2.6,
+            triggerCount: 0,
+          },
+          matchElapsedSec: 0,
+          tournament: null,
           countdownValue: 3,
           countdownTimer: 0,
           players: new Map(),
@@ -478,6 +521,8 @@ export class RoomManager {
           ready: false,
           isBot: false,
           score: 0,
+          rawGameScore: 0,
+          bonusScore: 0,
           alive: true,
           statText: room.status === 'SETUP' ? 'In Setup' : 'In Lobby',
           cooldownA: 0,
@@ -588,6 +633,24 @@ export class RoomManager {
           this.send(target.ws, { type: 'player:haptic', pattern: [45, 30, 85], reason: 'host' });
         }
         this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:set-mutator': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (!MUTATOR_BY_ID[msg.mutatorId]) return;
+        room.activeMutator = msg.mutatorId;
+        room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'confirm');
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:spin-mutator': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        this.spinRoomMutator(room);
         return;
       }
 
@@ -802,6 +865,36 @@ export class RoomManager {
         return;
       }
 
+      case 'tournament:start': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        this.attemptStartTournament(room, ws);
+        return;
+      }
+
+      case 'tournament:next': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (!room.tournament?.active || room.tournament.completed) return;
+        const nextIdx = room.tournament.currentGameIndex + 1;
+        if (nextIdx >= room.tournament.gameQueue.length) return;
+        room.tournament.currentGameIndex = nextIdx;
+        const nextGameId = room.tournament.gameQueue[nextIdx];
+        room.selectedGameId = nextGameId;
+        room.gameSettingValue = getGameMeta(nextGameId).defaultSetting;
+        this.playHostSound(room, 'confirm');
+        this.startMatch(room, true);
+        return;
+      }
+
+      case 'tournament:exit': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        room.tournament = null;
+        this.returnToLobby(room);
+        return;
+      }
+
       case 'controller:input': {
         const binding = this.bindings.get(ws);
         if (!binding || binding.role !== 'player' || !binding.playerId) return;
@@ -867,6 +960,8 @@ export class RoomManager {
       botDifficulty: difficulty,
       botMemory: createBotMemory(),
       score: 0,
+      rawGameScore: 0,
+      bonusScore: 0,
       alive: true,
       statText: 'Bot Ready',
       cooldownA: 0,
@@ -923,9 +1018,91 @@ export class RoomManager {
     return true;
   }
 
+  private spinRoomMutator(room: RoomRecord): void {
+    const pool = CHAOS_WHEEL_MUTATORS.filter((m) => m.id !== room.activeMutator);
+    const list = pool.length > 0 ? pool : CHAOS_WHEEL_MUTATORS;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    room.activeMutator = picked.id;
+    room.mutatorSpinSeq += 1;
+    room.lastActivityAt = Date.now();
+    this.playHostSound(room, 'wheel');
+    this.broadcastRoom(room);
+  }
+
+  private attemptStartTournament(room: RoomRecord, senderWs: WebSocket): boolean {
+    if (room.players.size === 0) {
+      this.send(senderWs, {
+        type: 'error',
+        message: 'Connect at least 1 player (or add a robot) before starting.',
+      });
+      return false;
+    }
+
+    const unreadyHumans = [...room.players.values()]
+      .filter((p) => !p.isBot && p.connected && !p.ready)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+
+    if (unreadyHumans.length > 0) {
+      const names = unreadyHumans.map((p) => p.name).join(', ');
+      this.send(senderWs, {
+        type: 'error',
+        code: 'PLAYERS_NOT_READY',
+        message: `Everyone must press Ready on their phone first. Waiting for: ${names}`,
+      });
+      if (room.hostWs && room.hostWs !== senderWs) {
+        this.send(room.hostWs, {
+          type: 'error',
+          code: 'PLAYERS_NOT_READY',
+          message: `Waiting for ${names} to press Ready on their phone!`,
+        });
+      }
+      return false;
+    }
+
+    const gameQueue = pickTournamentGameIds(GAME_CATALOG, room.players.size, TOURNAMENT_TOTAL_GAMES);
+    const standings: TournamentPlayerStanding[] = [...room.players.values()]
+      .sort((a, b) => a.slotIndex - b.slotIndex)
+      .map((p, idx) => ({
+        playerId: p.id,
+        slotIndex: p.slotIndex,
+        name: p.name,
+        color: p.color,
+        isBot: p.isBot,
+        totalMarks: 0,
+        wins: 0,
+        lastGameMarks: 0,
+        rank: idx + 1,
+      }));
+
+    room.tournament = {
+      active: true,
+      totalGames: TOURNAMENT_TOTAL_GAMES,
+      currentGameIndex: 0,
+      gameQueue,
+      standings,
+      history: [],
+      completed: false,
+    };
+
+    const firstGameId = gameQueue[0];
+    room.selectedGameId = firstGameId;
+    room.gameSettingValue = getGameMeta(firstGameId).defaultSetting;
+    this.playHostSound(room, 'confirm');
+    this.startMatch(room, true);
+    return true;
+  }
+
   private returnToLobby(room: RoomRecord): void {
     this.stopGameLoop(room);
     room.status = 'LOBBY';
+    room.tournament = null;
+    room.frenzy = {
+      active: false,
+      freezing: false,
+      freezeRemaining: 0,
+      freezeTotal: 2.6,
+      triggerCount: 0,
+    };
     room.gameState = null;
     room.lastSnapshot = null;
     room.rankings = [];
@@ -938,6 +1115,8 @@ export class RoomManager {
     for (const p of room.players.values()) {
       p.ready = p.isBot ? true : false;
       p.score = 0;
+      p.rawGameScore = 0;
+      p.bonusScore = 0;
       p.alive = true;
       p.statText = p.isBot ? 'Bot Ready' : 'Waiting for Ready';
       p.cooldownA = 0;
@@ -954,12 +1133,22 @@ export class RoomManager {
   private returnToSetup(room: RoomRecord): void {
     this.stopGameLoop(room);
     room.status = 'SETUP';
+    room.tournament = null;
+    room.frenzy = {
+      active: false,
+      freezing: false,
+      freezeRemaining: 0,
+      freezeTotal: 2.6,
+      triggerCount: 0,
+    };
     room.gameState = null;
     room.lastSnapshot = null;
     room.rankings = [];
     for (const p of room.players.values()) {
       p.ready = p.isBot ? true : false;
       p.score = 0;
+      p.rawGameScore = 0;
+      p.bonusScore = 0;
       p.alive = true;
       p.statText = p.isBot ? 'Bot Ready' : 'In Setup';
       p.cooldownA = 0;
@@ -1033,7 +1222,25 @@ export class RoomManager {
         this.playHostSound(room, 'nav');
         this.broadcastRoom(room);
       } else if (action === 'ok') {
-        if (room.remoteFocus.modalIndex === 0) {
+        if (room.tournament?.active) {
+          if (room.remoteFocus.modalIndex === 0) {
+            if (!room.tournament.completed) {
+              const nextIdx = room.tournament.currentGameIndex + 1;
+              if (nextIdx < room.tournament.gameQueue.length) {
+                room.tournament.currentGameIndex = nextIdx;
+                const nextGameId = room.tournament.gameQueue[nextIdx];
+                room.selectedGameId = nextGameId;
+                room.gameSettingValue = getGameMeta(nextGameId).defaultSetting;
+                this.playHostSound(room, 'confirm');
+                this.startMatch(room, true);
+              }
+            } else {
+              this.attemptStartTournament(room, senderWs);
+            }
+          } else {
+            this.returnToLobby(room);
+          }
+        } else if (room.remoteFocus.modalIndex === 0) {
           this.playHostSound(room, 'confirm');
           this.startMatch(room, false);
         } else {
@@ -1047,7 +1254,7 @@ export class RoomManager {
     if (room.status !== 'LOBBY') return;
 
     const COLS = 4;
-    const ACTION_COUNT = 5; // 0: Start Game, 1: Match Setting, 2: Add Robot, 3: Bot Difficulty, 4: Room Setup
+    const ACTION_COUNT = 7; // 0: Start Game, 1: 5-Game Tournament, 2: Chaos Wheel, 3: Match Setting, 4: Add Robot, 5: Bot Level, 6: Room Setup
     const filteredGames = filterGamesByPlayerMode(room.lobbyFilter);
     const focus = room.remoteFocus;
 
@@ -1169,6 +1376,10 @@ export class RoomManager {
       if (focus.index === 0) {
         this.attemptStartMatch(room, senderWs);
       } else if (focus.index === 1) {
+        this.attemptStartTournament(room, senderWs);
+      } else if (focus.index === 2) {
+        this.spinRoomMutator(room);
+      } else if (focus.index === 3) {
         const meta = getGameMeta(room.selectedGameId);
         const opts = meta.settingOptions;
         const curIdx = opts.findIndex((o) => o.value === room.gameSettingValue);
@@ -1178,9 +1389,9 @@ export class RoomManager {
           this.playHostSound(room, 'confirm');
           this.broadcastRoom(room);
         }
-      } else if (focus.index === 2) {
+      } else if (focus.index === 4) {
         this.addBotToRoom(room, senderWs);
-      } else if (focus.index === 3) {
+      } else if (focus.index === 5) {
         const order: BotDifficulty[] = ['chill', 'arcade', 'spicy'];
         const nextDiff = order[(order.indexOf(room.botDifficulty) + 1) % order.length];
         room.botDifficulty = nextDiff;
@@ -1189,7 +1400,7 @@ export class RoomManager {
         }
         this.playHostSound(room, 'confirm');
         this.broadcastRoom(room);
-      } else if (focus.index === 4) {
+      } else if (focus.index === 6) {
         this.returnToSetup(room);
       }
     }
@@ -1243,11 +1454,182 @@ export class RoomManager {
     }
   }
 
+  private shouldTriggerFrenzy(
+    snap: GameSnapshot,
+    elapsedSec: number,
+    earlyFrenzy: boolean
+  ): boolean {
+    if (elapsedSec < 5) return false;
+    switch (snap.gameId) {
+      case 'astro-blaster':
+      case 'ricochet-tanks':
+      case 'turbo-striker':
+      case 'paint-rush':
+      case 'laser-gauntlet':
+      case 'vault-heist':
+      case 'cannon-siege':
+      case 'crown-heist':
+      case 'freeze-tag':
+      case 'ghost-hunt':
+      case 'meteor-swarm':
+      case 'hook-shot':
+      case 'gravity-flip':
+      case 'kitchen-rush':
+      case 'treasure-dig':
+      case 'fruit-drop': {
+        const threshold = earlyFrenzy
+          ? snap.totalTime * 0.52
+          : Math.min(15.2, Math.max(10, snap.totalTime * 0.35));
+        return snap.timeLeft <= threshold && snap.timeLeft > 2.2;
+      }
+      case 'bumper-brawl':
+      case 'hex-drop':
+      case 'grid-runners':
+      case 'bomb-grid':
+      case 'red-light-dash': {
+        if (earlyFrenzy) {
+          return (
+            snap.round >= Math.max(1, Math.ceil(snap.totalRounds / 2)) ||
+            snap.roundTimer <= 22
+          );
+        }
+        return snap.totalRounds > 1 ? snap.round >= snap.totalRounds : snap.roundTimer <= 15.2;
+      }
+      case 'fuse-pass':
+        return earlyFrenzy
+          ? snap.round >= Math.max(1, Math.ceil(snap.totalRounds / 2))
+          : snap.totalRounds > 1
+          ? snap.round >= snap.totalRounds
+          : snap.bombTimer <= 10;
+      case 'color-match':
+        return earlyFrenzy
+          ? snap.wave >= Math.max(2, Math.ceil(snap.totalWaves * 0.5))
+          : snap.wave >= Math.max(2, snap.totalWaves - 1);
+      case 'lucky-auction':
+        return earlyFrenzy
+          ? snap.round >= Math.max(2, Math.ceil(snap.totalRounds * 0.5))
+          : snap.round >= snap.totalRounds;
+      case 'turbo-drift':
+        return (
+          snap.finishCountdown !== null ||
+          snap.players.some((p) => p.lap >= snap.totalLaps) ||
+          (earlyFrenzy && elapsedSec >= 18)
+        );
+      case 'hyper-pong':
+        return (
+          Math.max(snap.scoreLeft, snap.scoreRight) >= Math.max(1, snap.targetScore - 1) ||
+          elapsedSec >= (earlyFrenzy ? 15 : 32)
+        );
+      case 'blade-duel':
+        return (
+          snap.players.some((p) => p.roundsWon >= Math.max(1, snap.targetWins - 1)) ||
+          (earlyFrenzy && elapsedSec >= 16)
+        );
+      case 'pinball-clash':
+        return (
+          Math.max(snap.scoreLeft, snap.scoreRight) >= Math.max(1, snap.targetGoals - 1) ||
+          elapsedSec >= (earlyFrenzy ? 15 : 32)
+        );
+      case 'rich-street':
+        return earlyFrenzy
+          ? snap.round >= Math.max(2, Math.ceil(snap.totalRounds * 0.5))
+          : snap.round >= Math.max(2, snap.totalRounds - 1);
+      case 'jungle-ladders':
+        return snap.players.some(
+          (p) => p.tile >= snap.targetTile * (earlyFrenzy ? 0.5 : 0.72)
+        );
+    }
+  }
+
+  private applyTournamentMatchResult(room: RoomRecord): void {
+    const t = room.tournament;
+    if (!t || !t.active) return;
+
+    const isFinale = t.currentGameIndex >= t.totalGames - 1;
+    const marksMap = new Map<string, number>();
+    const marksObj: Record<string, number> = {};
+
+    for (const r of room.rankings) {
+      const m = computeTournamentMarks(r.rank, isFinale);
+      marksMap.set(r.playerId, m);
+      marksObj[r.playerId] = m;
+    }
+
+    // Ensure every currently connected/known player has a standing entry
+    const byId = new Map(t.standings.map((s) => [s.playerId, s]));
+    for (const p of room.players.values()) {
+      if (!byId.has(p.id)) {
+        const entry: TournamentPlayerStanding = {
+          playerId: p.id,
+          slotIndex: p.slotIndex,
+          name: p.name,
+          color: p.color,
+          isBot: p.isBot,
+          totalMarks: 0,
+          wins: 0,
+          lastGameMarks: 0,
+          rank: t.standings.length + 1,
+        };
+        t.standings.push(entry);
+        byId.set(p.id, entry);
+      }
+    }
+
+    for (const st of t.standings) {
+      const gained = marksMap.get(st.playerId) ?? 0;
+      const pObj = room.players.get(st.playerId);
+      if (pObj) {
+        st.name = pObj.name;
+        st.color = pObj.color;
+      }
+      st.lastGameMarks = gained;
+      st.totalMarks += gained;
+      const rankEntry = room.rankings.find((r) => r.playerId === st.playerId);
+      if (rankEntry?.rank === 1) {
+        st.wins += 1;
+      }
+    }
+
+    t.standings.sort((a, b) => {
+      if (b.totalMarks !== a.totalMarks) return b.totalMarks - a.totalMarks;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.slotIndex - b.slotIndex;
+    });
+    t.standings.forEach((st, idx) => {
+      st.rank = idx + 1;
+    });
+
+    const winner = room.rankings[0] ?? null;
+    const record: TournamentMatchRecord = {
+      roundIndex: t.currentGameIndex,
+      gameId: room.selectedGameId,
+      winnerId: winner?.playerId ?? null,
+      winnerName: winner?.name ?? null,
+      winnerColorHex: winner?.color.hex ?? null,
+      marksAwarded: marksObj,
+    };
+    t.history.push(record);
+    if (isFinale) {
+      t.completed = true;
+    }
+  }
+
   private startMatch(room: RoomRecord, showBriefing = true): void {
     this.stopGameLoop(room);
     const engine = SERVER_GAMES[room.selectedGameId];
+    room.frenzy = {
+      active: false,
+      freezing: false,
+      freezeRemaining: 0,
+      freezeTotal: 2.6,
+      triggerCount: 0,
+    };
+    room.matchElapsedSec = 0;
+
     for (const p of room.players.values()) {
       p.score = 0;
+      p.rawGameScore = 0;
+      p.bonusScore = 0;
       p.alive = true;
       // During Rules Briefing, every human taps "I'm Ready!" once they finish reading (bots stay auto-ready)
       if (showBriefing) {
@@ -1286,6 +1668,7 @@ export class RoomManager {
     }
 
     let hudBroadcastCounter = 0;
+    let freezeBroadcastCounter = 0;
     let lastTickTime = Date.now();
 
     room.tickInterval = setInterval(() => {
@@ -1335,6 +1718,32 @@ export class RoomManager {
 
       if (room.status !== 'PLAYING' || !room.gameState) return;
 
+      // --- 2.6-SECOND DRAMATIC FRENZY FREEZE TO DISPLAY THE FIRE BANNER ---
+      if (room.frenzy.freezing) {
+        room.frenzy.freezeRemaining = Math.max(0, room.frenzy.freezeRemaining - dt);
+        freezeBroadcastCounter += 1;
+        if (room.frenzy.freezeRemaining <= 0) {
+          room.frenzy.freezing = false;
+          freezeBroadcastCounter = 0;
+          this.broadcastRoom(room);
+          if (room.lastSnapshot) {
+            this.broadcastTick(room, room.lastSnapshot, [{ type: 'go' }]);
+          }
+          for (const p of room.players.values()) {
+            if (p.connected && !p.isBot && p.ws) {
+              this.send(p.ws, { type: 'player:haptic', pattern: [45, 25, 85], reason: 'go' });
+            }
+          }
+        } else if (freezeBroadcastCounter >= 3) {
+          freezeBroadcastCounter = 0;
+          this.broadcastRoom(room);
+        }
+        return;
+      }
+
+      const mutator = getMutatorSpec(room.activeMutator);
+      room.matchElapsedSec += dt;
+
       // Drive every manually assigned Robot via the universal game-aware AI controller
       for (const p of room.players.values()) {
         if (p.isBot) {
@@ -1349,24 +1758,71 @@ export class RoomManager {
         }
       }
 
-      const currentInputs = this.toInputPlayers(room);
-      const result = engine.step(room.gameState, currentInputs, dt);
+      const currentInputs = this.toInputPlayers(room).map((ip) =>
+        mutator.invertControls
+          ? { ...ip, input: { ...ip.input, dx: -ip.input.dx, dy: -ip.input.dy } }
+          : ip
+      );
 
-      // Persist edge-trigger states & live HUD telemetry
+      const speedScale = mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
+      const simDt = Math.min(0.085, dt * speedScale);
+      const scoreMult = mutator.scoreMult * (room.frenzy.active ? 2 : 1);
+
+      const result = engine.step(room.gameState, currentInputs, simDt);
+
+      // Persist edge-trigger states & live HUD telemetry (with Frenzy + Mutator score multiplier)
       for (const p of room.players.values()) {
         p.prevA = p.input.a;
         p.prevB = p.input.b;
         const hud = result.hudUpdates[p.id];
         if (hud) {
-          p.score = hud.score;
+          const rawScore = hud.score;
+          if (rawScore > p.rawGameScore && scoreMult > 1) {
+            const gain = rawScore - p.rawGameScore;
+            p.bonusScore += Math.round(gain * (scoreMult - 1));
+          }
+          p.rawGameScore = rawScore;
+          p.score = rawScore + p.bonusScore;
           p.alive = hud.alive;
-          p.statText = hud.statText;
+          p.statText =
+            p.bonusScore > 0 && hud.statText.includes(`${rawScore}`)
+              ? hud.statText.replace(`${rawScore}`, `${p.score}`)
+              : hud.statText;
           p.cooldownA = hud.cooldownA;
           p.cooldownB = hud.cooldownB;
         }
       }
 
       room.lastSnapshot = result.snapshot;
+
+      // Check whether Frenzy Mode should erupt right now!
+      if (
+        !result.finished &&
+        room.frenzy.triggerCount === 0 &&
+        this.shouldTriggerFrenzy(result.snapshot, room.matchElapsedSec, mutator.earlyFrenzy)
+      ) {
+        room.frenzy = {
+          active: true,
+          freezing: true,
+          freezeRemaining: 2.6,
+          freezeTotal: 2.6,
+          triggerCount: 1,
+        };
+        freezeBroadcastCounter = 0;
+        this.broadcastTick(room, result.snapshot, [...result.sounds, { type: 'frenzy' }]);
+        for (const p of room.players.values()) {
+          if (p.connected && !p.isBot && p.ws) {
+            this.send(p.ws, {
+              type: 'player:haptic',
+              pattern: [60, 35, 95, 35, 120],
+              reason: 'frenzy',
+            });
+          }
+        }
+        this.broadcastRoom(room);
+        return;
+      }
+
       this.broadcastTick(room, result.snapshot, result.sounds);
 
       // Coalesce & dispatch targeted phone haptics (human phones only)
@@ -1403,8 +1859,32 @@ export class RoomManager {
       if (result.finished) {
         this.stopGameLoop(room);
         room.status = 'RESULTS';
+        room.frenzy.freezing = false;
         room.remoteFocus.modalIndex = 0;
-        room.rankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
+
+        const baseRankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
+        const anyBonus = [...room.players.values()].some((p) => p.bonusScore > 0);
+        if (anyBonus) {
+          const merged = baseRankings.map((r) => {
+            const pObj = room.players.get(r.playerId);
+            return {
+              ...r,
+              score: r.score + (pObj?.bonusScore ?? 0),
+            };
+          });
+          merged.sort((a, b) => b.score - a.score);
+          merged.forEach((entry, idx) => {
+            entry.rank = idx + 1;
+          });
+          room.rankings = merged;
+        } else {
+          room.rankings = baseRankings;
+        }
+
+        if (room.tournament?.active) {
+          this.applyTournamentMatchResult(room);
+        }
+
         for (const p of room.players.values()) {
           if (p.connected && !p.isBot && p.ws) {
             this.send(p.ws, { type: 'player:haptic', pattern: [70, 40, 120], reason: 'win' });

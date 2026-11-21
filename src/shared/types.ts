@@ -1,3 +1,5 @@
+import type { MutatorId } from './modifiers.ts';
+
 export type GameId =
   | 'bumper-brawl'
   | 'astro-blaster'
@@ -165,7 +167,9 @@ export interface SoundEvent {
     | 'lap'
     | 'win'
     | 'nav'
-    | 'confirm';
+    | 'confirm'
+    | 'frenzy'
+    | 'wheel';
   playerId?: string;
   intensity?: number;
 }
@@ -1356,6 +1360,45 @@ export type GameSnapshot =
   | LuckyAuctionSnapshot
   | PinballClashSnapshot;
 
+export interface FrenzyState {
+  active: boolean;
+  freezing: boolean;
+  freezeRemaining: number;
+  freezeTotal: number;
+  triggerCount: number;
+}
+
+export interface TournamentMatchRecord {
+  roundIndex: number;
+  gameId: GameId;
+  winnerId: string | null;
+  winnerName: string | null;
+  winnerColorHex: string | null;
+  marksAwarded: Record<string, number>;
+}
+
+export interface TournamentPlayerStanding {
+  playerId: string;
+  slotIndex: number;
+  name: string;
+  color: PlayerColorSpec;
+  isBot?: boolean;
+  totalMarks: number;
+  wins: number;
+  lastGameMarks: number;
+  rank: number;
+}
+
+export interface TournamentState {
+  active: boolean;
+  totalGames: number;
+  currentGameIndex: number;
+  gameQueue: GameId[];
+  standings: TournamentPlayerStanding[];
+  history: TournamentMatchRecord[];
+  completed: boolean;
+}
+
 export interface RoomSnapshot {
   code: string;
   status: RoomStatus;
@@ -1366,6 +1409,10 @@ export interface RoomSnapshot {
   hostPlayerId: string | null;
   lobbyFilter: PlayerFilterMode;
   remoteFocus: RemoteFocusState;
+  activeMutator: MutatorId;
+  mutatorSpinSeq: number;
+  frenzy: FrenzyState;
+  tournament: TournamentState | null;
   players: PlayerSummary[];
   rankings: RankingEntry[];
   hostConnected: boolean;
@@ -1381,6 +1428,8 @@ export type ClientMessage =
   | { type: 'room:remove-bot'; botId: string }
   | { type: 'room:set-bot-difficulty'; difficulty: BotDifficulty; botId?: string }
   | { type: 'room:set-host-player'; playerId: string }
+  | { type: 'room:set-mutator'; mutatorId: MutatorId }
+  | { type: 'room:spin-mutator' }
   | { type: 'room:enter-game-room' }
   | { type: 'room:return-setup' }
   | { type: 'room:close' }
@@ -1395,6 +1444,9 @@ export type ClientMessage =
   | { type: 'game:pause'; paused: boolean }
   | { type: 'game:restart' }
   | { type: 'game:return-lobby' }
+  | { type: 'tournament:start' }
+  | { type: 'tournament:next' }
+  | { type: 'tournament:exit' }
   | { type: 'controller:input'; input: ControllerInput }
   | { type: 'ping' };
 

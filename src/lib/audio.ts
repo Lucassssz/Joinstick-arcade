@@ -1,6 +1,6 @@
 import { SoundEvent } from '../shared/types';
 
-export type BgmMode = 'lobby' | 'battle' | null;
+export type BgmMode = 'lobby' | 'battle' | 'frenzy' | null;
 
 // MIDI helper -> frequency in Hz
 function midiToFreq(midi: number): number {
@@ -302,7 +302,7 @@ class ArcadeAudioEngine {
     if (this.ctx.state !== 'running') return;
 
     const lookAhead = 0.14;
-    const bpm = this.bgmMode === 'battle' ? 144 : 116;
+    const bpm = this.bgmMode === 'frenzy' ? 162 : this.bgmMode === 'battle' ? 144 : 116;
     const stepDuration = 60 / bpm / 4; // 16th note
 
     // Prevent catch-up burst if tab throttled
@@ -311,8 +311,8 @@ class ArcadeAudioEngine {
     }
 
     while (this.nextNoteTime < this.ctx.currentTime + lookAhead) {
-      if (this.bgmMode === 'battle') {
-        this.scheduleBattleStep(this.stepIndex, this.nextNoteTime, stepDuration);
+      if (this.bgmMode === 'battle' || this.bgmMode === 'frenzy') {
+        this.scheduleBattleStep(this.stepIndex, this.nextNoteTime, stepDuration, this.bgmMode === 'frenzy');
       } else {
         this.scheduleLobbyStep(this.stepIndex, this.nextNoteTime, stepDuration);
       }
@@ -433,12 +433,12 @@ class ArcadeAudioEngine {
     }
   }
 
-  private scheduleBattleStep(step: number, time: number, stepDur: number): void {
+  private scheduleBattleStep(step: number, time: number, stepDur: number, isFrenzy = false): void {
     // 1. Driving filtered saw bass
     const bassMidi = BATTLE_BASS[step];
     if (bassMidi !== null) {
-      this.scheduleBgmTone(midiToFreq(bassMidi), time, stepDur * 0.92, 'sawtooth', 0.095, {
-        filterFreqStart: 880,
+      this.scheduleBgmTone(midiToFreq(bassMidi), time, stepDur * 0.92, 'sawtooth', isFrenzy ? 0.11 : 0.095, {
+        filterFreqStart: isFrenzy ? 1150 : 880,
         filterFreqEnd: 200,
       });
     }
@@ -446,18 +446,24 @@ class ArcadeAudioEngine {
     // 2. High-energy 16th-note synth arp
     const arpMidi = BATTLE_ARP[step];
     if (arpMidi !== null) {
-      this.scheduleBgmTone(midiToFreq(arpMidi), time, stepDur * 0.72, 'triangle', 0.036);
+      this.scheduleBgmTone(
+        midiToFreq(isFrenzy ? arpMidi + 2 : arpMidi),
+        time,
+        stepDur * 0.72,
+        'triangle',
+        isFrenzy ? 0.044 : 0.036
+      );
     }
 
-    // 3. Competitive soaring lead riff
+    // 3. Competitive soaring lead riff (shifted +2 semitones up during Frenzy heat!)
     const leadMidi = BATTLE_LEAD[step];
     if (leadMidi !== null) {
-      const freq = midiToFreq(leadMidi);
-      this.scheduleBgmTone(freq, time, stepDur * 1.65, 'square', 0.048, {
-        filterFreqStart: 2800,
+      const freq = midiToFreq(isFrenzy ? leadMidi + 2 : leadMidi);
+      this.scheduleBgmTone(freq, time, stepDur * 1.65, 'square', isFrenzy ? 0.056 : 0.048, {
+        filterFreqStart: isFrenzy ? 3400 : 2800,
         filterFreqEnd: 1100,
       });
-      this.scheduleBgmTone(freq * 1.004, time, stepDur * 1.5, 'sawtooth', 0.026, {
+      this.scheduleBgmTone(freq * 1.004, time, stepDur * 1.5, 'sawtooth', isFrenzy ? 0.032 : 0.026, {
         filterFreqStart: 2600,
         filterFreqEnd: 1000,
       });
@@ -577,6 +583,17 @@ class ArcadeAudioEngine {
       case 'confirm':
         this.tone(523.25, 0.06, 'triangle', 0.1);
         this.tone(783.99, 0.11, 'triangle', 0.11, undefined, 0.05);
+        break;
+      case 'frenzy':
+        this.tone(220, 0.16, 'sawtooth', 0.16, 440, 0);
+        this.tone(440, 0.16, 'sawtooth', 0.16, 880, 0.1);
+        this.tone(587.33, 0.18, 'square', 0.12, undefined, 0.22);
+        this.tone(880, 0.34, 'triangle', 0.18, 1174.66, 0.3);
+        break;
+      case 'wheel':
+        this.tone(660, 0.055, 'triangle', 0.11, 880, 0);
+        this.tone(880, 0.065, 'triangle', 0.11, 1046, 0.06);
+        this.tone(1046.5, 0.12, 'triangle', 0.13, undefined, 0.12);
         break;
     }
   }

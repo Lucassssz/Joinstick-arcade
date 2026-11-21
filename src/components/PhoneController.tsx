@@ -13,6 +13,7 @@ import {
   ChevronUp,
   Crosshair,
   Crown,
+  Dices,
   Flame,
   Footprints,
   Gauge,
@@ -27,6 +28,7 @@ import {
   Shield,
   SlidersHorizontal,
   Target,
+  Trophy,
   Vibrate,
   Waves,
   WifiOff,
@@ -47,6 +49,7 @@ import {
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
+import { getMutatorSpec } from '../shared/modifiers';
 import {
   ActionButtonSpec,
   ControllerInput,
@@ -1279,6 +1282,9 @@ export function PhoneController({
     setPassHostOpen(false);
   };
 
+  const activeMutatorSpec = getMutatorSpec(room.activeMutator);
+  const activeTournament = room.tournament?.active ? room.tournament : null;
+
   const describeRemoteTarget = (): { kicker: string; title: string } => {
     const focus = room.remoteFocus;
     if (focus.zone === 'filter') {
@@ -1301,12 +1307,18 @@ export function PhoneController({
       };
     }
     const diffLabel = getLocalizedDifficulty(room.botDifficulty, lang).label;
+    const mutatorLabel =
+      room.activeMutator === 'normal'
+        ? t('Spin Chaos Wheel', '转动混沌轮盘')
+        : `${t('Chaos Wheel:', '混沌轮盘:')} ${lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}`;
     const actionLabels = [
       t(`Open ${gameMeta.name}`, `进入 ${gameMeta.name}`),
+      t('Start 5-Game Tournament', '开启 5 局锦标赛'),
+      mutatorLabel,
       t(`Change ${gameMeta.settingLabel}`, `切换 ${gameMeta.settingLabel}`),
       t('+ Add Robot', '+ 添加机器人'),
       t(`Bot Level: ${diffLabel}`, `机器人难度：${diffLabel}`),
-      t('Room Setup / QR', '房间设置 / 二维码'),
+      t('Room Setup / QR', '房间设置 / 扫码'),
     ];
     return {
       kicker: t('Bottom Action · Press OK', '底部功能 · 按 OK 执行'),
@@ -1741,7 +1753,7 @@ export function PhoneController({
                 <div className="font-display text-lg font-extrabold text-white truncate mt-0.5">
                   {focusInfo.title}
                 </div>
-                <div className="mt-2 pt-2 border-t border-[#262C38] flex items-center justify-between text-xs">
+                <div className="mt-2 pt-2 border-t border-[#262C38] flex items-center justify-between text-xs gap-2">
                   <span className="text-[#9CA3AF]">{t('Ready Check', '准备进度')}</span>
                   <span
                     className={`font-mono font-bold tabular-nums ${
@@ -1754,6 +1766,17 @@ export function PhoneController({
                       : ''}
                   </span>
                 </div>
+                {room.activeMutator !== 'normal' && (
+                  <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                    <span className="text-[#9CA3AF] inline-flex items-center gap-1">
+                      <Dices className="w-3 h-3" style={{ color: activeMutatorSpec.accentHex }} />
+                      {t('Active Rule', '当前规则')}
+                    </span>
+                    <span className="font-bold" style={{ color: activeMutatorSpec.accentHex }}>
+                      {lang === 'zh' ? activeMutatorSpec.nameZh : activeMutatorSpec.name}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Host's own Ready Toggle */}
@@ -1946,6 +1969,17 @@ export function PhoneController({
                     : ''}
                 </span>
               </div>
+              {room.activeMutator !== 'normal' && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[#9CA3AF] inline-flex items-center gap-1">
+                    <Dices className="w-3 h-3" style={{ color: activeMutatorSpec.accentHex }} />
+                    {t('Chaos Rule', '混沌规则')}
+                  </span>
+                  <span className="font-bold" style={{ color: activeMutatorSpec.accentHex }}>
+                    {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2065,39 +2099,81 @@ export function PhoneController({
   }
 
   // =====================================================================
-  // STATE 4: RESULTS SUMMARY ON PHONE (With Host Remote Controls!)
+  // STATE 4: RESULTS SUMMARY ON PHONE (With Host Remote & Tournament Marks!)
   // =====================================================================
   if (room.status === 'RESULTS') {
     const myRank = room.rankings.find((r) => r.playerId === me.id);
-    const resultsOptionLabel =
-      room.remoteFocus.modalIndex === 0 ? t('Play Again', '再来一局') : t('Game Room', '返回游戏厅');
+    const myStanding = activeTournament?.standings.find((s) => s.playerId === me.id) ?? null;
+
+    const resultsOptionLabel = activeTournament
+      ? room.remoteFocus.modalIndex === 0
+        ? activeTournament.completed
+          ? t('New Tournament', '再来一届锦标赛')
+          : t(
+              `Next (${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames})`,
+              `下一局 (${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames})`
+            )
+        : t('Game Room', '返回游戏厅')
+      : room.remoteFocus.modalIndex === 0
+      ? t('Play Again', '再来一局')
+      : t('Game Room', '返回游戏厅');
 
     return renderConnectedShell(
-      <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3">
+      <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-2.5">
         {passHostOverlay}
         {!embedded && (
           <div className="absolute top-1 right-1">
             <LanguageToggle compact />
           </div>
         )}
+        {activeTournament && (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FFB800]/18 border border-[#FFB800]/50 text-[#FFB800] font-mono text-[11px] font-black">
+            <Trophy className="w-3.5 h-3.5" />
+            <span>
+              {activeTournament.completed
+                ? t('5-GAME TOURNAMENT FINAL', '5局锦标赛总决赛')
+                : t(
+                    `TOURNAMENT ${activeTournament.currentGameIndex + 1}/${activeTournament.totalGames}`,
+                    `锦标赛 第 ${activeTournament.currentGameIndex + 1}/${activeTournament.totalGames} 局`
+                  )}
+            </span>
+          </div>
+        )}
         <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center font-display text-2xl font-extrabold"
+          className="w-13 h-13 rounded-2xl flex items-center justify-center font-display text-2xl font-extrabold"
           style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
         >
-          #{myRank?.rank ?? '-'}
+          #{activeTournament?.completed && myStanding ? myStanding.rank : myRank?.rank ?? '-'}
         </div>
         <div>
           <h2 className="font-display text-2xl font-extrabold">
-            {myRank?.rank === 1 ? t('Victory!', '胜利！') : t('Match Complete', '本局结束')}
+            {activeTournament?.completed
+              ? myStanding?.rank === 1
+                ? t('Grand Champion!', '荣耀夺冠！')
+                : t('Tournament Complete', '锦标赛结束')
+              : myRank?.rank === 1
+              ? t('Victory!', '胜利！')
+              : t('Match Complete', '本局结束')}
           </h2>
           <p className="text-sm text-[#A5AEBD] mt-0.5">
             {me.name} · {myRank?.score ?? me.score} {t('pts', '分')}
             {myRank?.highlight ? ` · ${translateGameText(myRank.highlight, lang)}` : ''}
           </p>
+          {myStanding && (
+            <div className="mt-1.5 inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#1A1E26] border border-[#2F3747] text-xs font-mono">
+              <span className="text-[#10D98B] font-extrabold">
+                +{myStanding.lastGameMarks} {t('Marks', '积分')}
+              </span>
+              <span className="text-[#6B7280]">·</span>
+              <span className="text-[#FFB800] font-black">
+                {t('Total', '累计')}: {myStanding.totalMarks} (#{myStanding.rank})
+              </span>
+            </div>
+          )}
         </div>
 
         {isRoomHost ? (
-          <div className="w-full max-w-md space-y-2.5">
+          <div className="w-full max-w-md space-y-2">
             <div className="text-xs font-bold text-[#FFB800]">
               {t('TV Highlighted:', '大屏当前选中：')}{' '}
               <span className="text-white">{resultsOptionLabel}</span>
@@ -2114,7 +2190,7 @@ export function PhoneController({
               <button
                 type="button"
                 onClick={() => sendRemote('ok')}
-                className="tactile-btn h-12 px-8 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
+                className="tactile-btn h-12 px-7 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
               >
                 OK · {resultsOptionLabel}
               </button>
@@ -2142,7 +2218,9 @@ export function PhoneController({
           <p className="text-xs text-[#9CA3AF]">
             {t('Waiting for', '等待')}{' '}
             <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
-            {t("'s remote to play again or switch games.", ' 遥控选择再来一局或切换游戏。')}
+            {activeTournament
+              ? t("'s remote for next tournament game.", ' 遥控进入下一局锦标赛。')
+              : t("'s remote to play again or switch games.", ' 遥控选择再来一局或切换游戏。')}
           </p>
         )}
       </div>
@@ -2229,10 +2307,17 @@ export function PhoneController({
             >
               P{me.slotIndex + 1}
             </span>
+            {activeTournament && (
+              <span className="px-1.5 py-0.5 rounded bg-[#FFB800]/20 text-[#FFB800] font-mono text-[10px] font-black shrink-0">
+                🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
+              </span>
+            )}
             <span className="font-display font-bold text-base text-white truncate">
               {gameMeta.name}
             </span>
-            <span className="text-xs text-[#9CA3AF] truncate">· {t('How to Play', '玩法说明')}</span>
+            <span className="text-xs text-[#9CA3AF] truncate hidden sm:inline">
+              · {t('How to Play', '玩法说明')}
+            </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact />}
@@ -2262,10 +2347,25 @@ export function PhoneController({
           }`}
         >
           <div className="p-3.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] space-y-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
-              {t('How to Win', '获胜方式')}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
+                {t('How to Win', '获胜方式')}
+              </span>
+              {room.activeMutator !== 'normal' && (
+                <span
+                  className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-[#101217]"
+                  style={{ color: activeMutatorSpec.accentHex }}
+                >
+                  {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
+                </span>
+              )}
             </div>
             <p className="text-sm font-bold text-white leading-snug">{gameMeta.tagline}</p>
+            {activeMutatorSpec.invertControls && (
+              <p className="text-[11px] font-extrabold text-[#FF3B9A] leading-tight">
+                ⚠ {t('Mirror Curse active: Joystick directions are flipped!', '镜像反转生效中：本局摇杆方向上下左右反转！')}
+              </p>
+            )}
             <div className="pt-1.5 border-t border-[#262C38] space-y-1 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-[#9CA3AF]">{t('Joystick', '摇杆')}</span>
@@ -2523,7 +2623,23 @@ export function PhoneController({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden sm:inline">
+            {room.frenzy.active && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FF4D2E]/25 border border-[#FF4D2E] text-[#FF9B8A] font-mono text-[10px] font-black animate-pulse">
+                <Flame className="w-3 h-3 text-[#FFB800]" />
+                <span>{t('2× FRENZY', '2× 狂热')}</span>
+              </span>
+            )}
+            {activeMutatorSpec.invertControls && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FF3B9A]/20 border border-[#FF3B9A]/70 text-[#FF8DC7] font-mono text-[10px] font-black">
+                {t('MIRROR', '反转')}
+              </span>
+            )}
+            {activeTournament && (
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FFB800]/18 text-[#FFB800] font-mono text-[10px] font-black">
+                🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
+              </span>
+            )}
+            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden md:inline">
               {gameMeta.name}
             </span>
             {!embedded && <LanguageToggle compact />}
