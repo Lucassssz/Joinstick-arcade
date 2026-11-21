@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,7 +17,9 @@ import {
   RotateCcw,
   Settings2,
   Smartphone,
+  Sparkles,
   Trophy,
+  Users,
   Volume2,
   VolumeX,
   X,
@@ -47,12 +50,20 @@ interface HostMonitorProps {
   onExit: () => void;
 }
 
+interface FloatingEmote {
+  id: string;
+  playerName: string;
+  colorHex: string;
+  emoji: string;
+  xPercent: number;
+}
+
 const HOST_SESSION_KEY = 'joinstick_host_session';
 
 const DIFFICULTY_OPTIONS: { id: BotDifficulty; label: string; color: string; hint: string }[] = [
-  { id: 'chill', label: 'Chill', color: '#10D98B', hint: 'Relaxed pace & forgiving timing' },
-  { id: 'arcade', label: 'Arcade', color: '#00C2FF', hint: 'Balanced intermediate challenge' },
-  { id: 'spicy', label: 'Spicy', color: '#FF4D2E', hint: 'Fast reactions & sharp abilities' },
+  { id: 'chill', label: 'Chill', color: '#10D98B', hint: 'Easy & friendly pace' },
+  { id: 'arcade', label: 'Arcade', color: '#00C2FF', hint: 'Fun medium challenge' },
+  { id: 'spicy', label: 'Spicy', color: '#FF4D2E', hint: 'Fast & sharp rivals' },
 ];
 
 const NEXT_DIFFICULTY: Record<BotDifficulty, BotDifficulty> = {
@@ -83,6 +94,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
+  const [floatingEmotes, setFloatingEmotes] = useState<FloatingEmote[]>([]);
 
   const wsRef = useRef<ManagedWebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -129,6 +141,20 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             setRoom(msg.room);
             setErrorMsg(null);
             break;
+          case 'room:emote': {
+            const emoteItem: FloatingEmote = {
+              id: msg.id,
+              playerName: msg.playerName,
+              colorHex: msg.colorHex,
+              emoji: msg.emoji,
+              xPercent: 14 + Math.random() * 72,
+            };
+            setFloatingEmotes((prev) => [...prev.slice(-14), emoteItem]);
+            window.setTimeout(() => {
+              setFloatingEmotes((prev) => prev.filter((item) => item.id !== emoteItem.id));
+            }, 2400);
+            break;
+          }
           case 'game:tick':
             if (msg.snapshot) {
               latestSnapshotRef.current = msg.snapshot;
@@ -181,7 +207,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     QRCode.toDataURL(url, {
       width: 280,
       margin: 2,
-      color: { dark: '#121419', light: '#F8FAFC' },
+      color: { dark: '#121419', light: '#FFFFFF' },
     })
       .then((dataUrl) => setQrDataUrl(dataUrl))
       .catch(() => setQrDataUrl(''));
@@ -206,22 +232,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
     rafId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(rafId);
-  }, [room?.status]);
-
-  // Allow host keyboard Enter/Space to skip the pre-match briefing immediately
-  useEffect(() => {
-    if (room?.status !== 'BRIEFING') return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Enter' || e.code === 'Space') {
-        const target = e.target as HTMLElement | null;
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
-        e.preventDefault();
-        arcadeAudio.unlock();
-        wsRef.current?.send({ type: 'game:dismiss-briefing' });
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
   }, [room?.status]);
 
   const toggleMute = () => {
@@ -293,15 +303,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
   if (!room) {
     return (
-      <div className="min-h-screen bg-[#121419] text-white flex flex-col items-center justify-center p-6">
+      <div className="min-h-screen bg-[#111326] text-white flex flex-col items-center justify-center p-6">
         <div className="font-display text-2xl font-bold">Creating Game Room...</div>
-        <p className="mt-2 text-sm text-[#9CA3AF]">Connecting to live multiplayer server</p>
+        <p className="mt-2 text-sm text-[#A5B4FC]">Connecting to live multiplayer server</p>
       </div>
     );
   }
 
   const selectedGame = getGameMeta(room.selectedGameId);
   const joinUrl = getJoinUrl(room.code);
+  const displayJoinHost =
+    typeof window !== 'undefined' ? `${window.location.host}` : 'joinstick.arcade';
   const humans = room.players.filter((p) => !p.isBot);
   const connectedHumans = humans.filter((p) => p.connected);
   const bots = room.players.filter((p) => p.isBot);
@@ -310,45 +322,88 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const canStartMatch = room.players.length > 0 && unreadyHumans.length === 0;
   const isRoomFull = room.players.length >= MAX_PLAYERS_PER_ROOM;
 
+  // Shared floating Kahoot-style live reaction overlay
+  const floatingEmoteOverlay = (
+    <div className="pointer-events-none fixed inset-0 overflow-hidden z-40">
+      <AnimatePresence>
+        {floatingEmotes.map((item) => (
+          <motion.div
+            key={item.id}
+            initial={{ opacity: 0, y: 120, scale: 0.5 }}
+            animate={{ opacity: [0, 1, 1, 0], y: -260, scale: [0.6, 1.15, 1, 0.9] }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 2.3, ease: 'easeOut' }}
+            style={{ left: `${item.xPercent}%` }}
+            className="absolute bottom-14 -translate-x-1/2 flex flex-col items-center gap-1"
+          >
+            <span className="text-4xl drop-shadow-lg">{item.emoji}</span>
+            <span
+              className="px-2.5 py-0.5 rounded-md text-xs font-extrabold shadow-md whitespace-nowrap"
+              style={{ backgroundColor: item.colorHex, color: '#0B1016' }}
+            >
+              {item.playerName}
+            </span>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+
   // =========================================================================
-  // VIEW A1: ROOM SETUP STAGE (QR / Join Code + Assign Bots + Choose Host)
+  // VIEW A1: KAHOOT-STYLE INTERACTIVE ROOM SETUP STAGE
   // =========================================================================
   if (room.status === 'SETUP') {
     const activeDifficultyMeta =
       DIFFICULTY_OPTIONS.find((d) => d.id === room.botDifficulty) ?? DIFFICULTY_OPTIONS[1];
 
     return (
-      <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col">
-        {/* Setup Header */}
-        <header className="border-b border-[#232833] bg-[#151820]">
-          <div className="max-w-[1360px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
+      <div className="min-h-screen bg-[#121029] text-white flex flex-col relative overflow-hidden">
+        {/* Vibrant Kahoot-inspired party spotlight & geometric backdrop */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+        >
+          <div className="absolute -top-32 -left-24 w-[480px] h-[480px] rounded-full bg-[#5B21B6]/35 blur-[110px]" />
+          <div className="absolute top-1/3 -right-24 w-[460px] h-[460px] rounded-full bg-[#0284C7]/25 blur-[120px]" />
+          <div className="absolute -bottom-32 left-1/3 w-[440px] h-[440px] rounded-full bg-[#FF4D2E]/20 blur-[120px]" />
+          <div className="absolute top-24 left-12 w-20 h-20 rounded-2xl border-2 border-white/6 rotate-12" />
+          <div className="absolute bottom-24 right-16 w-28 h-28 rounded-full border-2 border-white/6" />
+          <div className="absolute top-1/2 left-8 w-12 h-12 rounded-lg bg-white/[0.03] -rotate-12" />
+        </div>
+
+        {floatingEmoteOverlay}
+
+        {/* Top Bar */}
+        <header className="relative z-10 border-b border-white/10 bg-[#0E0D22]/75 backdrop-blur-md">
+          <div className="max-w-[1380px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
               <button
                 type="button"
                 onClick={handleLeaveHost}
-                className="min-h-[40px] px-3 rounded-lg bg-[#1F2430] hover:bg-[#293040] text-sm font-medium text-[#D1D5DB] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                className="min-h-[40px] px-3 rounded-xl bg-white/10 hover:bg-white/15 text-sm font-semibold text-white inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Home
               </button>
               <span className="font-display text-lg font-extrabold text-white whitespace-nowrap shrink-0">
-                JoinStick Monitor
+                JoinStick Party Stage
               </span>
-              <div className="hidden md:flex items-center gap-2 text-xs font-medium text-[#9CA3AF]">
-                <span className="text-white font-semibold">1. Room Setup</span>
-                <span className="text-[#4B5563]">→</span>
-                <span>2. Game Room</span>
-              </div>
+              <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#C4B5FD]">
+                <span
+                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
+                />
+                {wsConnected ? 'Live Room Open' : 'Reconnecting...'}
+              </span>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setTestDrawerOpen((v) => !v)}
-                className={`tactile-btn h-10 px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`tactile-btn h-10 px-4 rounded-xl text-sm font-bold inline-flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
                   testDrawerOpen
                     ? 'bg-[#00C2FF] text-[#0B1219]'
-                    : 'bg-[#212633] hover:bg-[#2B3242] text-white border border-[#323A4C]'
+                    : 'bg-white/10 hover:bg-white/15 text-white border border-white/15'
                 }`}
               >
                 <Smartphone className="w-4 h-4" />
@@ -359,7 +414,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 type="button"
                 onClick={toggleMute}
                 aria-label={muted ? 'Unmute audio' : 'Mute audio'}
-                className="h-10 w-10 rounded-xl bg-[#212633] hover:bg-[#2B3242] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
+                className="h-10 w-10 rounded-xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center cursor-pointer"
               >
                 {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
@@ -367,112 +422,116 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           </div>
         </header>
 
-        {/* Main 2-Column Setup Workspace */}
-        <main className="flex-1 max-w-[1360px] w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
-          {/* LEFT COLUMN (5 cols): QR Code & 4-Letter Room Code */}
-          <section className="lg:col-span-5 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-7 flex flex-col">
-            <div className="flex items-center justify-between text-xs font-medium text-[#9CA3AF]">
-              <span className="inline-flex items-center gap-1.5 text-white font-semibold">
-                <QrCode className="w-4 h-4 text-[#00C2FF]" />
-                Scan or Enter Code to Join
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
-                />
-                {wsConnected ? 'Live Server' : 'Reconnecting'}
-              </span>
-            </div>
-
-            <div className="mt-5 bg-[#F8FAFC] rounded-2xl p-4 flex items-center justify-center aspect-square max-w-[290px] w-full mx-auto">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`QR code to join room ${room.code}`}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="text-xs text-[#6B7280]">Generating QR...</div>
-              )}
-            </div>
-
-            <div className="mt-6 text-center">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[#9CA3AF]">
-                Room Code
-              </div>
-              <div className="mt-1.5 font-mono text-5xl font-extrabold tracking-[0.26em] text-white tabular-nums pl-[0.26em]">
-                {room.code}
-              </div>
-              <p className="mt-2 text-xs text-[#9CA3AF]">
-                Open this site on any phone, tap <strong className="text-white">Join Room</strong>,
-                or scan the QR code above.
-              </p>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={handleCopyJoinLink}
-                className="h-11 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-white inline-flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {copied ? <Check className="w-4 h-4 text-[#10D98B]" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'Link Copied!' : 'Copy Join Link'}
-              </button>
-              <a
-                href={joinUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-11 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-[#00C2FF] inline-flex items-center justify-center gap-1.5"
-              >
-                Open Controller Tab
-                <ExternalLink className="w-4 h-4" />
-              </a>
-            </div>
-          </section>
-
-          {/* RIGHT COLUMN (7 cols): Players, Robot Assignment, Difficulty & Host Selection */}
-          <section className="lg:col-span-7 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-7 flex flex-col">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-5 border-b border-[#262D3B]">
-              <div>
-                <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
-                  Assemble Your Room
+        {/* Main Kahoot-Style Party Stage */}
+        <main className="relative z-10 flex-1 max-w-[1380px] w-full mx-auto px-6 py-7 flex flex-col gap-6">
+          {/* HERO JOIN PIN + QR BANNER (Just like Kahoot's iconic top PIN banner!) */}
+          <section className="rounded-3xl bg-[#1A173B]/90 border-2 border-white/15 shadow-2xl p-5 sm:p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
+              {/* Left: Join instructions & quick links */}
+              <div className="lg:col-span-4 space-y-3 text-center lg:text-left">
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#38BDF8]">
+                  <Sparkles className="w-4 h-4" />
+                  Step 1 · Join on Your Phone
+                </div>
+                <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white leading-tight">
+                  Scan QR or enter the PIN to jump in!
                 </h1>
-                <p className="mt-1 text-sm text-[#9CA3AF]">
-                  Wait for players to connect, assign optional AI robots, and choose who leads as
-                  Room Host.
+                <p className="text-xs text-[#C7D2FE] truncate">
+                  Open <strong className="text-white">{displayJoinHost}</strong> on any phone
                 </p>
-              </div>
-              <div className="font-mono text-xs font-semibold text-[#9CA3AF] whitespace-nowrap tabular-nums">
-                <strong className="text-white">{room.players.length}</strong> / {MAX_PLAYERS_PER_ROOM}{' '}
-                Seats · {humans.length} Human{humans.length === 1 ? '' : 's'} · {bots.length} Bot
-                {bots.length === 1 ? '' : 's'}
-              </div>
-            </div>
-
-            {/* Robot Controls Bar: + Add Robot & Chill / Arcade / Spicy Difficulty */}
-            <div className="mt-5 p-4 rounded-xl bg-[#13161D] border border-[#262C39] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleAddBot}
-                  disabled={isRoomFull}
-                  className="tactile-btn h-11 px-4 rounded-xl bg-[#222938] hover:bg-[#2C3548] disabled:opacity-40 disabled:cursor-not-allowed border border-[#384359] text-sm font-bold text-white inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
-                >
-                  <Plus className="w-4 h-4 text-[#00C2FF]" />
-                  <Bot className="w-4 h-4 text-[#00C2FF]" />
-                  <span>Add Robot</span>
-                </button>
-                <div className="text-xs text-[#9CA3AF] leading-snug">
-                  <div className="text-white font-semibold">Manual AI Bots</div>
-                  <div>Each press adds 1 robot ({bots.length} assigned)</div>
+                <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCopyJoinLink}
+                    className="h-10 px-4 rounded-xl bg-white/12 hover:bg-white/20 text-xs font-bold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {copied ? <Check className="w-4 h-4 text-[#10D98B]" /> : <Copy className="w-4 h-4" />}
+                    {copied ? 'Link Copied!' : 'Copy Join Link'}
+                  </button>
+                  <a
+                    href={joinUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="h-10 px-4 rounded-xl bg-white/12 hover:bg-white/20 text-xs font-bold text-[#38BDF8] inline-flex items-center gap-1.5"
+                  >
+                    Open Phone Tab
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
                 </div>
               </div>
 
-              <div className="flex flex-col sm:items-end gap-1">
+              {/* Center: Giant Game PIN Card */}
+              <div className="lg:col-span-5 flex flex-col items-center justify-center">
+                <div className="w-full max-w-md rounded-2xl bg-white text-[#111322] px-6 py-5 shadow-[0_8px_0_rgba(0,0,0,0.35)] text-center">
+                  <div className="text-xs font-extrabold uppercase tracking-[0.22em] text-[#4F46E5]">
+                    Game PIN
+                  </div>
+                  <div className="mt-1 font-mono text-5xl sm:text-6xl font-black tracking-[0.26em] text-[#0F1020] tabular-nums pl-[0.26em]">
+                    {room.code}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Crisp Big QR Card */}
+              <div className="lg:col-span-3 flex justify-center lg:justify-end">
+                <div className="bg-white rounded-2xl p-3 shadow-[0_8px_0_rgba(0,0,0,0.35)] w-[164px] h-[164px] flex items-center justify-center">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt={`QR code to join room ${room.code}`}
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <div className="text-xs text-[#6B7280]">Loading QR...</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* LIVE ACTION BAR: Player Counter + Robot Assignment + Difficulty + Enter Game Room CTA */}
+          <section className="rounded-2xl bg-[#181636]/90 border border-white/12 px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+            {/* Big Player Counter */}
+            <div className="flex items-center gap-3">
+              <motion.div
+                key={room.players.length}
+                initial={{ scale: 1.25 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 18 }}
+                className="h-12 px-4 rounded-xl bg-[#4F46E5] text-white font-display font-extrabold text-lg inline-flex items-center gap-2 shadow-[0_4px_0_#312E81]"
+              >
+                <Users className="w-5 h-5" />
+                <span className="tabular-nums">
+                  {room.players.length} / {MAX_PLAYERS_PER_ROOM}
+                </span>
+              </motion.div>
+              <div className="text-xs leading-snug text-[#C7D2FE]">
+                <div className="text-white font-bold text-sm">
+                  {humans.length} Player{humans.length === 1 ? '' : 's'} · {bots.length} Robot
+                  {bots.length === 1 ? '' : 's'}
+                </div>
+                <div>Players can tap emojis on their phone while waiting!</div>
+              </div>
+            </div>
+
+            {/* Robot Controls: + Add Robot & Chill / Arcade / Spicy */}
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleAddBot}
+                disabled={isRoomFull}
+                className="tactile-btn h-12 px-4 rounded-xl bg-[#0EA5E9] hover:bg-[#38BDF8] disabled:opacity-40 disabled:cursor-not-allowed text-[#08131E] font-display font-extrabold text-sm shadow-[0_4px_0_#0369A1] inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <Bot className="w-4 h-4" />
+                <span>Add Robot</span>
+              </button>
+
+              <div className="flex flex-col items-start sm:items-end gap-0.5">
                 <div
                   role="radiogroup"
                   aria-label="Robot difficulty"
-                  className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#0D1016] border border-[#242B38]"
+                  className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#0E0D22] border border-white/12"
                 >
                   {DIFFICULTY_OPTIONS.map((opt) => {
                     const active = room.botDifficulty === opt.id;
@@ -483,10 +542,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         role="radio"
                         aria-checked={active}
                         onClick={() => handleSetBotDifficulty(opt.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
-                          active
-                            ? 'text-[#0B1016]'
-                            : 'text-[#9CA3AF] hover:text-white'
+                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors whitespace-nowrap cursor-pointer ${
+                          active ? 'text-[#0B1016]' : 'text-[#C7D2FE] hover:text-white'
                         }`}
                         style={active ? { backgroundColor: opt.color } : undefined}
                       >
@@ -495,138 +552,171 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     );
                   })}
                 </div>
-                <span className="text-[11px] text-[#8B95A7]">{activeDifficultyMeta.hint}</span>
+                <span className="text-[11px] text-[#A5B4FC]">{activeDifficultyMeta.hint}</span>
               </div>
-            </div>
-
-            {/* 8-Slot Roster Grid */}
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {Array.from({ length: MAX_PLAYERS_PER_ROOM }, (_, slotIdx) => {
-                const player = room.players.find((p) => p.slotIndex === slotIdx);
-                if (!player) {
-                  return (
-                    <div
-                      key={slotIdx}
-                      className="h-14 px-3.5 rounded-xl bg-[#13161D] border border-dashed border-[#262C39] flex items-center justify-between text-xs text-[#566073]"
-                    >
-                      <span className="font-mono font-semibold">P{slotIdx + 1}</span>
-                      <span>Empty seat</span>
-                    </div>
-                  );
-                }
-
-                const isHost = !player.isBot && room.hostPlayerId === player.id;
-
-                return (
-                  <div
-                    key={player.id}
-                    className={`h-14 px-3.5 rounded-xl border flex items-center justify-between gap-2 ${
-                      isHost
-                        ? 'bg-[#232631] border-[#FFB800]/60'
-                        : 'bg-[#212734] border-[#30384A]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className="w-7 h-7 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0"
-                        style={{
-                          backgroundColor: player.color.hex,
-                          color: player.color.textOnColor,
-                        }}
-                      >
-                        P{player.slotIndex + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          {player.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
-                          <span className="text-sm font-semibold text-white truncate">
-                            {player.name}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-[#9CA3AF]">
-                          {player.isBot
-                            ? 'AI Robot · Auto-Ready'
-                            : !player.connected
-                            ? 'Reconnecting...'
-                            : isHost
-                            ? 'Room Host'
-                            : 'Phone Connected'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {player.isBot ? (
-                        <>
-                          <button
-                            type="button"
-                            title="Cycle robot difficulty"
-                            onClick={() =>
-                              handleSetBotDifficulty(
-                                NEXT_DIFFICULTY[player.botDifficulty ?? room.botDifficulty],
-                                player.id
-                              )
-                            }
-                            className="h-7 px-2 rounded-md bg-[#141821] hover:bg-[#1C2230] border border-[#2C3445] text-[11px] font-bold cursor-pointer"
-                            style={{ color: difficultyColor(player.botDifficulty ?? room.botDifficulty) }}
-                          >
-                            {difficultyLabel(player.botDifficulty ?? room.botDifficulty)}
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${player.name}`}
-                            title={`Remove ${player.name}`}
-                            onClick={() => handleRemoveBot(player.id)}
-                            className="h-7 w-7 rounded-md bg-[#181C26] hover:bg-[#FF4D2E]/20 text-[#9CA3AF] hover:text-[#FF7A63] flex items-center justify-center cursor-pointer"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </>
-                      ) : isHost ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#FFB800]/15 text-[#FFB800] text-xs font-bold">
-                          <Crown className="w-3.5 h-3.5" />
-                          Host
-                        </span>
-                      ) : player.connected ? (
-                        <button
-                          type="button"
-                          onClick={() => handleSetHostPlayer(player.id)}
-                          className="h-7 px-2.5 rounded-md bg-[#161B24] hover:bg-[#2A3244] border border-[#30384A] text-[11px] font-semibold text-[#D1D5DB] hover:text-white cursor-pointer"
-                        >
-                          Make Host
-                        </button>
-                      ) : (
-                        <span className="text-xs font-semibold text-[#FFB800]">Offline</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {errorMsg && (
-              <div className="mt-4 p-3 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-xs text-[#FF9B8A]">
-                {errorMsg}
-              </div>
-            )}
-
-            {/* Primary CTA to advance into the real Game Room */}
-            <div className="mt-6 pt-5 border-t border-[#262D3B] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <p className="text-xs text-[#9CA3AF] leading-relaxed max-w-md">
-                Everything settled? Enter the Game Room to choose from all 20 games. Matches start
-                once every player taps <strong className="text-white">Ready</strong> on their phone.
-              </p>
 
               <button
                 type="button"
                 onClick={handleEnterGameRoom}
                 disabled={room.players.length === 0}
-                className="tactile-btn min-h-[52px] px-7 py-3.5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-base shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer"
+                className="tactile-btn h-12 px-6 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6548] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-extrabold text-base shadow-[0_4px_0_#B82E17] inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
               >
                 <span>Enter Game Room</span>
-                <ArrowRight className="w-4 h-4 shrink-0" />
+                <ArrowRight className="w-4 h-4" />
               </button>
             </div>
+          </section>
+
+          {errorMsg && (
+            <div className="p-3.5 rounded-xl bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-sm text-[#FFD2C9] font-medium">
+              {errorMsg}
+            </div>
+          )}
+
+          {/* LIVE INTERACTIVE PLAYER STAGE (Kahoot-style spring pop-in name cards!) */}
+          <section className="flex-1 rounded-3xl bg-[#161433]/75 border border-white/12 p-6 sm:p-8 flex flex-col justify-center min-h-[260px]">
+            {room.players.length === 0 ? (
+              <div className="text-center max-w-lg mx-auto py-8">
+                <motion.div
+                  animate={{ scale: [1, 1.06, 1] }}
+                  transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
+                  className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/10 text-[#38BDF8] mb-4"
+                >
+                  <Smartphone className="w-8 h-8" />
+                </motion.div>
+                <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
+                  Waiting for players to join...
+                </h2>
+                <p className="mt-2 text-sm text-[#C7D2FE]">
+                  Scan the QR code or type PIN <strong className="font-mono text-white">{room.code}</strong> on your phone — or add AI robots to play right now!
+                </p>
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTestDrawerOpen(true)}
+                    className="tactile-btn h-11 px-5 rounded-xl bg-white/12 hover:bg-white/20 text-sm font-bold text-white inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Smartphone className="w-4 h-4 text-[#38BDF8]" />
+                    Open Test Controller
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddBot}
+                    className="tactile-btn h-11 px-5 rounded-xl bg-[#0EA5E9]/20 hover:bg-[#0EA5E9]/30 border border-[#38BDF8]/40 text-sm font-bold text-[#7DD3FC] inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <Bot className="w-4 h-4" />
+                    Add a Robot
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-5">
+                  <div className="text-xs font-bold uppercase tracking-wider text-[#A5B4FC]">
+                    Players on Stage · Click &ldquo;Make Host&rdquo; to pick who leads the room
+                  </div>
+                  <div className="text-xs font-mono text-[#A5B4FC] tabular-nums">
+                    {MAX_PLAYERS_PER_ROOM - room.players.length} open seat
+                    {MAX_PLAYERS_PER_ROOM - room.players.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <AnimatePresence mode="popLayout">
+                    {room.players.map((player) => {
+                      const isHost = !player.isBot && room.hostPlayerId === player.id;
+                      return (
+                        <motion.div
+                          key={player.id}
+                          layout
+                          initial={{ scale: 0.55, opacity: 0, y: 24 }}
+                          animate={{ scale: 1, opacity: 1, y: 0 }}
+                          exit={{ scale: 0.6, opacity: 0 }}
+                          transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                          className={`rounded-2xl p-4 border-2 shadow-[0_6px_0_rgba(0,0,0,0.3)] flex flex-col justify-between gap-3 ${
+                            isHost
+                              ? 'bg-[#252154] border-[#FFB800]'
+                              : 'bg-[#211E47] border-white/15'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className="h-8 px-2.5 rounded-lg font-mono text-xs font-black inline-flex items-center gap-1"
+                              style={{
+                                backgroundColor: player.color.hex,
+                                color: player.color.textOnColor,
+                              }}
+                            >
+                              {player.isBot && <Bot className="w-3.5 h-3.5" />}
+                              P{player.slotIndex + 1}
+                            </span>
+
+                            {player.isBot ? (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  title="Click to change bot difficulty"
+                                  onClick={() =>
+                                    handleSetBotDifficulty(
+                                      NEXT_DIFFICULTY[player.botDifficulty ?? room.botDifficulty],
+                                      player.id
+                                    )
+                                  }
+                                  className="h-7 px-2 rounded-lg bg-[#111026] hover:bg-[#19173A] text-[11px] font-extrabold cursor-pointer"
+                                  style={{
+                                    color: difficultyColor(player.botDifficulty ?? room.botDifficulty),
+                                  }}
+                                >
+                                  {difficultyLabel(player.botDifficulty ?? room.botDifficulty)}
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${player.name}`}
+                                  title={`Remove ${player.name}`}
+                                  onClick={() => handleRemoveBot(player.id)}
+                                  className="h-7 w-7 rounded-lg bg-[#111026] hover:bg-[#FF4D2E] text-[#C7D2FE] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : isHost ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#1A1300] text-xs font-extrabold">
+                                <Crown className="w-3.5 h-3.5" />
+                                Host
+                              </span>
+                            ) : player.connected ? (
+                              <button
+                                type="button"
+                                onClick={() => handleSetHostPlayer(player.id)}
+                                className="h-7 px-2.5 rounded-lg bg-white/10 hover:bg-[#FFB800] hover:text-[#1A1300] text-[11px] font-bold text-white transition-colors cursor-pointer"
+                              >
+                                Make Host
+                              </button>
+                            ) : (
+                              <span className="text-xs font-bold text-[#FFB800]">Offline</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="font-display text-xl font-extrabold text-white truncate">
+                              {player.name}
+                            </div>
+                            <div className="text-xs text-[#C7D2FE] mt-0.5">
+                              {player.isBot
+                                ? 'AI Robot · Always Ready'
+                                : isHost
+                                ? 'Room Host · Can start games'
+                                : 'Phone Controller Connected'}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </div>
+            )}
           </section>
         </main>
 
@@ -644,7 +734,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   // =========================================================================
   if (room.status === 'LOBBY') {
     return (
-      <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col">
+      <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col relative">
+        {floatingEmoteOverlay}
+
         {/* Game Room Header */}
         <header className="border-b border-[#232833] bg-[#151820]">
           <div className="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
@@ -666,7 +758,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 Home
               </button>
               <span className="hidden md:inline text-xs font-medium text-[#9CA3AF] whitespace-nowrap pl-1">
-                Room <strong className="font-mono text-white">{room.code}</strong> ·{' '}
+                PIN <strong className="font-mono text-white">{room.code}</strong> ·{' '}
                 {room.players.length}/{MAX_PLAYERS_PER_ROOM} Players
                 {bots.length > 0 ? ` (${bots.length} Bot${bots.length === 1 ? '' : 's'})` : ''}
               </span>
@@ -705,15 +797,14 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
                 <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
-                  Game Room · Choose a Game
+                  Game Room · Pick a Game
                 </h1>
                 <p className="mt-1 text-sm text-[#9CA3AF]">
-                  Pick any of the 20 arcade titles — connected phones adapt automatically once
-                  everyone readies up.
+                  Choose any of the 20 games — every phone controller switches automatically!
                 </p>
               </div>
               <span className="font-mono text-xs font-semibold text-[#9CA3AF] whitespace-nowrap tabular-nums">
-                {filterGamesByPlayerMode(playerFilter).length} Titles
+                {filterGamesByPlayerMode(playerFilter).length} Games
               </span>
             </div>
 
@@ -821,7 +912,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               })}
             </div>
 
-            {/* Selected Game Briefing & Match Settings */}
+            {/* Selected Game Rules & Settings */}
             <div className="rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[#272D3B]">
                 <div>
@@ -863,7 +954,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
               <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <h3 className="text-xs font-semibold text-[#9CA3AF] mb-2">How to Win</h3>
+                  <h3 className="text-xs font-semibold text-[#9CA3AF] mb-2">How to Play</h3>
                   <ul className="space-y-1.5 text-sm text-[#D1D5DB]">
                     {selectedGame.rules.map((rule, idx) => (
                       <li key={idx} className="leading-snug">
@@ -875,12 +966,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
                 <div className="rounded-xl bg-[#13161D] p-4 flex flex-col justify-between">
                   <div>
-                    <h3 className="text-xs font-semibold text-[#9CA3AF] mb-2">
-                      Phone Controller Mapping
-                    </h3>
+                    <h3 className="text-xs font-semibold text-[#9CA3AF] mb-2">Phone Buttons</h3>
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="text-[#9CA3AF]">Left Thumbstick</span>
+                        <span className="text-[#9CA3AF]">Joystick</span>
                         <span className="font-semibold text-white">
                           {selectedGame.controllerSchema.joystickLabel}
                         </span>
@@ -914,10 +1003,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
           {/* RIGHT COLUMN (4 cols): Ready Check Roster, Robot Controls & Strict Start CTA */}
           <section className="lg:col-span-4 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-6 flex flex-col">
-            {/* Compact Join Code Bar */}
+            {/* Compact Join PIN Bar */}
             <div className="flex items-center justify-between gap-2 pb-4 mb-4 border-b border-[#262D3B]">
               <div>
-                <div className="text-[11px] font-medium text-[#9CA3AF]">Room Code</div>
+                <div className="text-[11px] font-medium text-[#9CA3AF]">Game PIN</div>
                 <div className="font-mono text-2xl font-extrabold tracking-[0.2em] text-white tabular-nums">
                   {room.code}
                 </div>
@@ -943,7 +1032,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             </div>
 
             {/* + Add Robot & Chill / Arcade / Spicy Difficulty right in Lobby Roster */}
-            <div className="p-3 rounded-xl bg-[#13161D] border border-[#262C39] mb-4 space-y-2.5">
+            <div className="p-3 rounded-xl bg-[#13161D] border border-[#262C39] mb-4">
               <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
@@ -1010,11 +1099,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 const isHost = !player.isBot && room.hostPlayerId === player.id;
 
                 return (
-                  <div
+                  <motion.div
                     key={player.id}
-                    className={`h-11 px-3 rounded-xl border flex items-center justify-between gap-2 ${
+                    layout
+                    className={`h-11 px-3 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
                       player.ready && player.connected
-                        ? 'bg-[#1D2828] border-[#10D98B]/40'
+                        ? 'bg-[#172B24] border-[#10D98B]/55'
                         : 'bg-[#212734] border-[#30384A]'
                     }`}
                   >
@@ -1081,7 +1171,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         </span>
                       )}
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
@@ -1092,7 +1182,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 <strong className="text-white">
                   {unreadyHumans.map((p) => p.name).join(', ')}
                 </strong>{' '}
-                to tap <strong>Ready</strong> on their phone controller.
+                to press <strong>Ready</strong> on their phone.
               </div>
             )}
 
@@ -1111,7 +1201,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               <Play className="w-4 h-4 fill-current shrink-0" />
               <span className="truncate">
                 {canStartMatch
-                  ? `Start ${selectedGame.name}`
+                  ? `Open ${selectedGame.name}`
                   : room.players.length === 0
                   ? 'Add Players or Robots'
                   : 'Waiting for All Ready...'}
@@ -1142,8 +1232,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   // =========================================================================
   // VIEW B: ACTIVE 60FPS GAME MONITOR STAGE (BRIEFING / COUNTDOWN / PLAYING / PAUSED / RESULTS)
   // =========================================================================
+  const briefingReadyPercent =
+    connectedHumans.length > 0
+      ? Math.round((readyHumans.length / connectedHumans.length) * 100)
+      : 100;
+
   return (
-    <div className="h-screen bg-[#0D0F14] text-white flex flex-col overflow-hidden">
+    <div className="h-screen bg-[#0D0F14] text-white flex flex-col overflow-hidden relative">
+      {floatingEmoteOverlay}
+
       {/* Compact Unobtrusive Top HUD Bar */}
       <header className="h-14 border-b border-[#222733] bg-[#14171E] px-4 flex items-center justify-between gap-4 shrink-0">
         <div className="flex items-center gap-4 min-w-0">
@@ -1151,7 +1248,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             {selectedGame.name}
           </span>
           <span className="text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
-            Room {room.code}
+            PIN {room.code}
           </span>
 
           {/* Live Player Score Strip */}
@@ -1233,13 +1330,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             className="max-w-full max-h-full aspect-[5/3] rounded-2xl border border-[#282F3D] shadow-2xl bg-[#0D0F14]"
           />
 
-          {/* Pre-Match Objective & Controls Briefing Modal */}
+          {/* Interactive Rules Briefing Modal — NO Auto-Countdown! Waits until everyone taps Ready */}
           {room.status === 'BRIEFING' && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/78 backdrop-blur-xs rounded-2xl p-4 sm:p-6 z-20">
-              <div className="max-w-2xl w-full rounded-2xl bg-[#181C24] border border-[#313A4B] shadow-2xl overflow-hidden">
+            <div className="absolute inset-0 flex items-center justify-center bg-[#0B0D18]/86 backdrop-blur-sm rounded-2xl p-4 sm:p-6 z-20">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="max-w-3xl w-full rounded-3xl bg-[#181A2E] border-2 border-white/15 shadow-2xl overflow-hidden"
+              >
                 {/* Header strip with game artwork thumbnail */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6 border-b border-[#272E3D] bg-[#14171F]">
-                  <div className="w-full sm:w-36 aspect-video rounded-xl overflow-hidden bg-[#0E1117] border border-[#2A3140] shrink-0">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6 border-b border-white/10 bg-[#131426]">
+                  <div className="w-full sm:w-40 aspect-video rounded-xl overflow-hidden bg-[#0E1117] border border-white/15 shrink-0">
                     {!failedImages[selectedGame.id] ? (
                       <img
                         src={selectedGame.coverImage}
@@ -1258,30 +1360,33 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium text-[#9CA3AF]">
-                      How to Play · {selectedGame.category} · {selectedGame.playerModeLabel}
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#38BDF8]">
+                      How to Play · {selectedGame.category}
                     </div>
                     <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white mt-0.5 truncate">
                       {selectedGame.name}
                     </h2>
-                    <p className="text-sm text-[#B8C0CE] mt-1">{selectedGame.tagline}</p>
+                    <p className="text-sm sm:text-base text-[#E2E8F0] mt-1">{selectedGame.tagline}</p>
                   </div>
                 </div>
 
-                {/* Body: Objective + Visual Phone Controls */}
+                {/* Body: Simple Rules + Clear Phone Controls */}
                 <div className="p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9CA3AF] mb-2.5">
-                      Objective & Rules
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#A5B4FC] mb-3">
+                      Simple Rules
                     </h3>
-                    <ul className="space-y-2 text-sm text-[#E2E8F0]">
+                    <ul className="space-y-2.5 text-sm sm:text-[15px] text-white">
                       {selectedGame.rules.map((rule, idx) => (
-                        <li key={idx} className="flex items-start gap-2 leading-snug">
+                        <li key={idx} className="flex items-start gap-2.5 leading-snug">
                           <span
-                            className="font-mono text-xs font-bold mt-0.5 shrink-0"
-                            style={{ color: selectedGame.accentHex }}
+                            className="w-6 h-6 rounded-md font-mono text-xs font-black flex items-center justify-center shrink-0 mt-0.5"
+                            style={{
+                              backgroundColor: `${selectedGame.accentHex}24`,
+                              color: selectedGame.accentHex,
+                            }}
                           >
-                            0{idx + 1}
+                            {idx + 1}
                           </span>
                           <span>{rule}</span>
                         </li>
@@ -1289,27 +1394,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     </ul>
                   </div>
 
-                  <div className="rounded-xl bg-[#11141B] border border-[#262C39] p-4 flex flex-col justify-between">
+                  <div className="rounded-2xl bg-[#111322] border border-white/10 p-4 flex flex-col justify-between">
                     <div>
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9CA3AF] mb-3">
-                        Phone Controller
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#A5B4FC] mb-3">
+                        Your Phone Controls
                       </h3>
 
                       <div className="space-y-3">
-                        {/* Left Thumbstick */}
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-[#1C222E] border-2 border-[#3C465A] flex items-center justify-center shrink-0">
-                            <div className="w-4 h-4 rounded-full bg-white/85" />
+                          <div className="w-10 h-10 rounded-full bg-[#1F233A] border-2 border-[#4B5580] flex items-center justify-center shrink-0">
+                            <div className="w-4 h-4 rounded-full bg-white/90" />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-xs text-[#9CA3AF]">Left Joystick</div>
+                            <div className="text-xs text-[#A5B4FC]">Left Joystick</div>
                             <div className="text-sm font-bold text-white truncate">
                               {selectedGame.controllerSchema.joystickLabel}
                             </div>
                           </div>
                         </div>
 
-                        {/* Action Button A */}
                         <div className="flex items-center gap-3">
                           <div
                             className="w-10 h-10 rounded-full font-display font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm"
@@ -1327,13 +1430,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                             >
                               {selectedGame.controllerSchema.actionA.label}
                             </div>
-                            <div className="text-xs text-[#B8C0CE] truncate">
+                            <div className="text-xs text-[#CBD5E1] truncate">
                               {selectedGame.controllerSchema.actionA.sublabel}
                             </div>
                           </div>
                         </div>
 
-                        {/* Action Button B */}
                         <div className="flex items-center gap-3">
                           <div
                             className="w-10 h-10 rounded-full font-display font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm"
@@ -1351,7 +1453,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                             >
                               {selectedGame.controllerSchema.actionB.label}
                             </div>
-                            <div className="text-xs text-[#B8C0CE] truncate">
+                            <div className="text-xs text-[#CBD5E1] truncate">
                               {selectedGame.controllerSchema.actionB.sublabel}
                             </div>
                           </div>
@@ -1359,42 +1461,92 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       </div>
                     </div>
 
-                    <p className="mt-4 pt-3 border-t border-[#222835] text-xs text-[#9CA3AF] leading-relaxed">
+                    <p className="mt-4 pt-3 border-t border-white/10 text-xs text-[#C7D2FE] leading-relaxed">
                       <strong className="text-white">Tip:</strong>{' '}
                       {selectedGame.controllerSchema.controlTip}
                     </p>
                   </div>
                 </div>
 
-                {/* Footer Action Bar */}
-                <div className="px-5 sm:px-6 py-4 bg-[#14171F] border-t border-[#272E3D] flex flex-wrap items-center justify-between gap-3">
-                  <span className="font-mono text-xs text-[#9CA3AF] tabular-nums">
-                    Auto-starting in{' '}
-                    <strong className="text-[#FFB800]">{room.countdownValue}s</strong>
-                  </span>
+                {/* Live Ready Progress + Per-Player Ready Chips (NO auto-countdown!) */}
+                <div className="px-5 sm:px-6 py-4 bg-[#121325] border-t border-white/10 space-y-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-bold text-white">
+                      {connectedHumans.length > 0
+                        ? `Tap "I'm Ready!" on your phone when finished reading (${readyHumans.length}/${connectedHumans.length} Ready)`
+                        : 'All robots are ready — press Start Match!'}
+                    </div>
+                    <span className="font-mono text-xs font-extrabold text-[#10D98B] tabular-nums">
+                      {briefingReadyPercent}% Ready
+                    </span>
+                  </div>
 
-                  <div className="flex items-center gap-2.5">
+                  {/* Smooth Progress Bar */}
+                  <div className="h-2.5 w-full rounded-full bg-white/10 overflow-hidden">
+                    <motion.div
+                      className="h-full bg-[#10D98B] rounded-full"
+                      initial={false}
+                      animate={{ width: `${briefingReadyPercent}%` }}
+                      transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+                    />
+                  </div>
+
+                  {/* Player Ready Chips */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {room.players.map((p) => {
+                      const isReady = p.isBot || (p.connected && p.ready);
+                      return (
+                        <motion.div
+                          key={p.id}
+                          animate={{ scale: isReady ? [1, 1.08, 1] : 1 }}
+                          transition={{ duration: 0.28 }}
+                          className={`px-3 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 ${
+                            isReady
+                              ? 'bg-[#10D98B]/20 border-[#10D98B] text-[#6EE7B7]'
+                              : 'bg-white/6 border-white/15 text-[#CBD5E1]'
+                          }`}
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: p.color.hex }}
+                          />
+                          {p.isBot && <Bot className="w-3.5 h-3.5 text-[#38BDF8]" />}
+                          <span>{p.name}</span>
+                          {isReady ? (
+                            <Check className="w-3.5 h-3.5 text-[#10D98B]" />
+                          ) : (
+                            <span className="text-[10px] text-[#FFB800]">Reading...</span>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                     <button
                       type="button"
                       onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
-                      className="h-11 px-4 rounded-xl bg-[#222734] hover:bg-[#2C3344] text-xs font-semibold text-[#D1D5DB] cursor-pointer"
+                      className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-[#E2E8F0] cursor-pointer"
                     >
                       Back to Game Room
                     </button>
+
                     <button
                       type="button"
                       onClick={() => {
                         arcadeAudio.unlock();
                         wsRef.current?.send({ type: 'game:dismiss-briefing' });
                       }}
-                      className="tactile-btn h-11 px-6 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
+                      className="tactile-btn h-10 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-xs sm:text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
                     >
                       <Play className="w-4 h-4 fill-current shrink-0" />
-                      <span>Got It — Start Now</span>
+                      <span>
+                        {connectedHumans.length === 0 ? 'Start Match' : 'Host Override: Start Now'}
+                      </span>
                     </button>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
           )}
 
@@ -1404,9 +1556,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               <div className="font-mono text-xs uppercase tracking-[0.25em] text-[#FFB800] mb-2">
                 Get Ready
               </div>
-              <div className="font-display text-8xl sm:text-9xl font-extrabold text-white drop-shadow-lg tabular-nums">
+              <motion.div
+                key={room.countdownValue}
+                initial={{ scale: 1.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+                className="font-display text-8xl sm:text-9xl font-extrabold text-white drop-shadow-lg tabular-nums"
+              >
                 {room.countdownValue > 0 ? room.countdownValue : 'GO!'}
-              </div>
+              </motion.div>
             </div>
           )}
 
@@ -1442,13 +1600,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
           {/* Victory Podium Modal Overlay */}
           {room.status === 'RESULTS' && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/75 backdrop-blur-xs rounded-2xl p-6">
-              <div className="max-w-lg w-full rounded-2xl bg-[#181C24] border border-[#313847] p-7 text-center shadow-2xl">
-                <Trophy className="w-10 h-10 text-[#FFB800] mx-auto" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/78 backdrop-blur-xs rounded-2xl p-6">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 24 }}
+                className="max-w-lg w-full rounded-3xl bg-[#181A2E] border-2 border-white/15 p-7 text-center shadow-2xl"
+              >
+                <Trophy className="w-11 h-11 text-[#FFB800] mx-auto" />
                 <h2 className="mt-2 font-display text-3xl font-extrabold text-white">
                   {room.rankings[0] ? `${room.rankings[0].name} Wins!` : 'Match Complete'}
                 </h2>
-                <p className="text-sm text-[#9CA3AF] mt-1">
+                <p className="text-sm text-[#A5B4FC] mt-1">
                   {selectedGame.name} · Final Standings
                 </p>
 
@@ -1458,7 +1621,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     return (
                       <div
                         key={entry.playerId}
-                        className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#12151C] border border-[#262C39]"
+                        className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#111322] border border-white/10"
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="font-mono text-sm font-bold text-[#FFB800] w-6 tabular-nums">
@@ -1481,7 +1644,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           <span className="font-mono text-sm font-bold text-white tabular-nums">
                             {entry.score} pts
                           </span>
-                          <span className="text-xs text-[#9CA3AF] ml-2">· {entry.highlight}</span>
+                          <span className="text-xs text-[#A5B4FC] ml-2">· {entry.highlight}</span>
                         </div>
                       </div>
                     );
@@ -1504,12 +1667,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   <button
                     type="button"
                     onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
-                    className="tactile-btn px-5 py-3 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-white font-semibold text-sm cursor-pointer"
+                    className="tactile-btn px-5 py-3 rounded-xl bg-white/12 hover:bg-white/20 text-white font-semibold text-sm cursor-pointer"
                   >
                     Switch Game
                   </button>
                 </div>
-              </div>
+              </motion.div>
             </div>
           )}
         </div>

@@ -109,6 +109,8 @@ const CALLSIGNS = [
   'Echo',
 ];
 
+const QUICK_EMOTES = ['🔥', '😂', '⚡', '👑', '🎉', '👏'];
+
 function ActionIcon({ icon, className }: { icon: ActionButtonSpec['icon']; className?: string }) {
   switch (icon) {
     case 'zap':
@@ -1065,8 +1067,29 @@ export function PhoneController({
           </div>
         </div>
 
-        <div className="text-center text-[11px] text-[#6B7280] shrink-0">
-          Once the Game Room opens, tap Ready on your phone to unlock the match start.
+        <div className="flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1.5">
+            {QUICK_EMOTES.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => {
+                  if (!embedded) {
+                    controllerHaptics.unlock();
+                    vibrate(25, { fromUserGesture: true, intensity: 'light', force: true });
+                  }
+                  wsRef.current?.send({ type: 'player:emote', emoji });
+                }}
+                className="tactile-btn h-9 w-9 rounded-lg bg-[#22273A] hover:bg-[#2F3652] text-base flex items-center justify-center cursor-pointer"
+                aria-label={`Send ${emoji} reaction`}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11px] text-[#8B95A7] truncate">
+            Tap emojis to pop reactions on the big screen!
+          </span>
         </div>
       </div>
     );
@@ -1264,12 +1287,33 @@ export function PhoneController({
           </div>
         </div>
 
-        <div className="text-center text-[11px] text-[#6B7280] shrink-0">
-          {keyboardProfile === 'wasd'
-            ? 'Keyboard active: W A S D to move · Space (A) · Left Shift (B)'
-            : keyboardProfile === 'arrows'
-            ? 'Keyboard active: Arrow Keys to move · Enter (A) · Right Shift (B)'
-            : 'Every player must tap Ready before the game can start.'}
+        <div className="flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1.5">
+            {QUICK_EMOTES.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => {
+                  if (!embedded) {
+                    controllerHaptics.unlock();
+                    vibrate(25, { fromUserGesture: true, intensity: 'light', force: true });
+                  }
+                  wsRef.current?.send({ type: 'player:emote', emoji });
+                }}
+                className="tactile-btn h-9 w-9 rounded-lg bg-[#22273A] hover:bg-[#2F3652] text-base flex items-center justify-center cursor-pointer"
+                aria-label={`Send ${emoji} reaction`}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11px] text-[#8B95A7] truncate">
+            {keyboardProfile === 'wasd'
+              ? 'WASD · Space (A) · Shift (B)'
+              : keyboardProfile === 'arrows'
+              ? 'Arrows · Enter (A) · Shift (B)'
+              : 'Everyone must press Ready to start!'}
+          </span>
         </div>
       </div>
     );
@@ -1302,7 +1346,7 @@ export function PhoneController({
   }
 
   // =====================================================================
-  // STATE 4B: PRE-MATCH OBJECTIVE & CONTROLS BRIEFING ON PHONE
+  // STATE 4B: INTERACTIVE RULES BRIEFING ON PHONE (NO COUNTDOWN — TAP READY!)
   // =====================================================================
   if (room.status === 'BRIEFING') {
     const schema = gameMeta.controllerSchema;
@@ -1321,8 +1365,8 @@ export function PhoneController({
             </span>
             <span className="text-xs text-[#9CA3AF] truncate">· How to Play</span>
           </div>
-          <span className="font-mono text-xs font-bold text-[#FFB800] shrink-0 tabular-nums">
-            Starting in {room.countdownValue}s
+          <span className="font-mono text-xs font-bold text-[#10D98B] shrink-0 tabular-nums">
+            {readyHumans.length}/{connectedHumans.length} Ready
           </span>
         </div>
 
@@ -1331,43 +1375,78 @@ export function PhoneController({
             embedded ? 'grid-cols-1 gap-2.5 my-2' : 'grid-cols-2 gap-4 my-2 items-center'
           }`}
         >
-          <div className="p-3.5 rounded-xl bg-[#1A1E27] border border-[#2A3142]">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
-              Objective
+          <div className="p-3.5 rounded-xl bg-[#1A1E27] border border-[#2A3142] space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#38BDF8]">
+              How to Win
             </div>
-            <p className="mt-1 text-sm font-semibold text-white leading-snug">
-              {gameMeta.tagline}
-            </p>
-            <p className="mt-2 text-xs text-[#A5AEBD] leading-relaxed">
-              {schema.controlTip}
-            </p>
+            <p className="text-sm font-bold text-white leading-snug">{gameMeta.tagline}</p>
+            <div className="pt-1.5 border-t border-[#2A3142] space-y-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Joystick</span>
+                <span className="font-bold text-white">{schema.joystickLabel}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Button A</span>
+                <span className="font-bold" style={{ color: schema.actionA.colorHex }}>
+                  {schema.actionA.label} · {schema.actionA.sublabel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Button B</span>
+                <span className="font-bold" style={{ color: schema.actionB.colorHex }}>
+                  {schema.actionB.label} · {schema.actionB.sublabel}
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-[#1A1E27] border border-[#2A3142] space-y-2.5">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
-              Your Controls
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-[#9CA3AF]">Left Joystick</span>
-              <span className="font-bold text-white">{schema.joystickLabel}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-[#9CA3AF]">Button A</span>
-              <span className="font-bold" style={{ color: schema.actionA.colorHex }}>
-                {schema.actionA.label} · {schema.actionA.sublabel}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-[#9CA3AF]">Button B</span>
-              <span className="font-bold" style={{ color: schema.actionB.colorHex }}>
-                {schema.actionB.label} · {schema.actionB.sublabel}
-              </span>
-            </div>
+          <div className="flex flex-col gap-2.5 justify-center">
+            <label
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                if (!embedded) {
+                  controllerHaptics.unlock();
+                  vibrate(65, {
+                    fromUserGesture: true,
+                    intensity: 'medium',
+                    force: true,
+                    skipIosSwitch: true,
+                  });
+                }
+                enterFullscreenAndLandscape();
+                wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+              }}
+              className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
+              style={
+                me.ready
+                  ? {
+                      backgroundColor: '#10D98B',
+                      color: '#0A1913',
+                      boxShadow: '0 4px 0 #0A915D',
+                    }
+                  : {
+                      backgroundColor: '#FF4D2E',
+                      color: '#FFFFFF',
+                      boxShadow: '0 4px 0 #B82E17',
+                    }
+              }
+            >
+              <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
+              {me.ready && <Check className="w-6 h-6" />}
+              <span>{me.ready ? "Ready! Waiting for Others" : "I'm Ready!"}</span>
+            </label>
+
+            <p className="text-[11px] text-center text-[#A5AEBD] leading-snug">
+              {me.ready
+                ? `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`
+                : 'Read the rules at your own pace — game starts once everyone taps Ready!'}
+            </p>
           </div>
         </div>
 
         <div className="text-center text-[11px] text-[#8B95A7] shrink-0">
-          Your live gamepad opens automatically when the countdown begins.
+          Your gamepad opens automatically as soon as everyone is Ready!
         </div>
       </div>
     );

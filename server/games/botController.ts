@@ -777,6 +777,65 @@ export function computeBotInput(
       }
       break;
     }
+
+    default: {
+      // Universal fallback AI for any newly added future game without a custom tactic block:
+      // Inspects generic player positions when present, stays away from arena edges, chases rivals
+      // or wanders smoothly, and triggers A/B abilities scaled by Chill / Arcade / Spicy difficulty.
+      const genericSnap = snapshot as unknown as {
+        players?: { id: string; x?: number; y?: number; alive?: boolean }[];
+      };
+      const roster = Array.isArray(genericSnap.players) ? genericSnap.players : [];
+      const me = roster.find((p) => p.id === botId);
+
+      if (me && typeof me.x === 'number' && typeof me.y === 'number') {
+        const margin = 95;
+        if (
+          me.x < margin ||
+          me.x > ARENA_WIDTH - margin ||
+          me.y < margin ||
+          me.y > ARENA_HEIGHT - margin
+        ) {
+          const toCenter = steerToward(me.x, me.y, ARENA_WIDTH / 2, ARENA_HEIGHT / 2, tuning);
+          dx = toCenter.dx;
+          dy = toCenter.dy;
+        } else {
+          const rivals = roster.filter(
+            (p) =>
+              p.id !== botId &&
+              p.alive !== false &&
+              typeof p.x === 'number' &&
+              typeof p.y === 'number'
+          ) as { id: string; x: number; y: number }[];
+          const { item: rival, dist } = nearestOf(me.x, me.y, rivals);
+          if (rival && dist < 480) {
+            const aim = steerToward(me.x, me.y, rival.x, rival.y, tuning, mem.wanderAngle);
+            dx = aim.dx;
+            dy = aim.dy;
+            if (dist < 190 && canAct() && Math.random() < 0.22) {
+              a = true;
+              markActed();
+            } else if (dist < 130 && canAct() && Math.random() < 0.14) {
+              b = true;
+              markActed();
+            }
+          } else {
+            dx = Math.cos(mem.wanderAngle) * 0.78 * tuning.moveScale;
+            dy = Math.sin(mem.wanderAngle) * 0.78 * tuning.moveScale;
+          }
+        }
+      } else {
+        dx = Math.cos(mem.wanderAngle) * 0.75 * tuning.moveScale;
+        dy = Math.sin(mem.wanderAngle) * 0.75 * tuning.moveScale;
+      }
+
+      if (!a && !b && canAct() && Math.random() < 0.06) {
+        if (Math.random() < 0.65) a = true;
+        else b = true;
+        markActed();
+      }
+      break;
+    }
   }
 
   return {

@@ -930,6 +930,7 @@ export type ClientMessage =
   | { type: 'room:enter-game-room' }
   | { type: 'room:return-setup' }
   | { type: 'player:ready'; ready: boolean }
+  | { type: 'player:emote'; emoji: string }
   | { type: 'player:leave' }
   | { type: 'game:select'; gameId: GameId; settingValue?: number }
   | { type: 'game:start' }
@@ -944,6 +945,14 @@ export type ServerMessage =
   | { type: 'room:created'; code: string; hostToken: string; room: RoomSnapshot }
   | { type: 'room:joined'; playerId: string; room: RoomSnapshot }
   | { type: 'room:snapshot'; room: RoomSnapshot }
+  | {
+      type: 'room:emote';
+      id: string;
+      playerId: string;
+      playerName: string;
+      colorHex: string;
+      emoji: string;
+    }
   | { type: 'game:tick'; snapshot: GameSnapshot; sounds: SoundEvent[] }
   | { type: 'player:haptic'; pattern: number | number[]; reason?: string }
   | { type: 'room:closed'; reason: string }

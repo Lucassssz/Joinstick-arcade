@@ -81,6 +81,7 @@ const BOT_CALLSIGNS = [
   'Bot Glitch',
 ];
 const VALID_DIFFICULTIES = new Set<BotDifficulty>(['chill', 'arcade', 'spicy']);
+const ALLOWED_EMOTES = new Set(['🔥', '😂', '⚡', '👑', '🎉', '🤖', '👏', '😎']);
 const TICK_MS = 33; // ~30Hz authoritative server tick
 const PLAYER_RECONNECT_GRACE_MS = 30_000;
 const HOST_RECONNECT_GRACE_MS = 120_000;
@@ -607,9 +608,52 @@ export class RoomManager {
         const player = room.players.get(binding.playerId);
         if (!player || player.isBot) return;
         player.ready = Boolean(msg.ready);
-        player.statText = player.ready ? 'Ready' : 'Waiting for Ready';
+        player.statText = player.ready ? 'Ready' : room.status === 'BRIEFING' ? 'Reading Rules' : 'Waiting for Ready';
         room.lastActivityAt = Date.now();
+
+        if (player.ready) {
+          this.send(room.hostWs, {
+            type: 'game:tick',
+            snapshot: room.lastSnapshot as any,
+            sounds: [{ type: 'ready', playerId: player.id }],
+          });
+        }
+
+        // During Rules Briefing: as soon as EVERY connected human presses Ready, start immediately (no auto-countdown!)
+        if (room.status === 'BRIEFING') {
+          const connectedHumans = [...room.players.values()].filter((p) => !p.isBot && p.connected);
+          if (connectedHumans.length > 0 && connectedHumans.every((p) => p.ready)) {
+            this.beginCountdown(room);
+            return;
+          }
+        }
+
         this.broadcastRoom(room);
+        return;
+      }
+
+      case 'player:emote': {
+        const binding = this.bindings.get(ws);
+        if (!binding || binding.role !== 'player' || !binding.playerId) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room) return;
+        const player = room.players.get(binding.playerId);
+        if (!player || player.isBot) return;
+        const emoji = typeof msg.emoji === 'string' && ALLOWED_EMOTES.has(msg.emoji) ? msg.emoji : '🔥';
+        room.lastActivityAt = Date.now();
+        this.send(room.hostWs, {
+          type: 'room:emote',
+          id: crypto.randomUUID(),
+          playerId: player.id,
+          playerName: player.name,
+          colorHex: player.color.hex,
+          emoji,
+        });
+        this.send(room.hostWs, {
+          type: 'game:tick',
+          snapshot: room.lastSnapshot as any,
+          sounds: [{ type: 'pickup', playerId: player.id }],
+        });
         return;
       }
 
@@ -781,7 +825,13 @@ export class RoomManager {
     for (const p of room.players.values()) {
       p.score = 0;
       p.alive = true;
-      p.statText = showBriefing ? 'How to Play' : 'Get Ready!';
+      // During Rules Briefing, every human taps "I'm Ready!" once they finish reading (bots stay auto-ready)
+      if (showBriefing) {
+        p.ready = p.isBot ? true : false;
+        p.statText = p.isBot ? 'Bot Ready' : 'Reading Rules';
+      } else {
+        p.statText = 'Get Ready!';
+      }
       p.cooldownA = 0;
       p.cooldownB = 0;
       p.input = { dx: 0, dy: 0, a: false, b: false };
@@ -800,8 +850,8 @@ export class RoomManager {
 
     if (showBriefing) {
       room.status = 'BRIEFING';
-      room.countdownValue = 8;
-      room.countdownTimer = 8.0;
+      room.countdownValue = 0;
+      room.countdownTimer = 0;
       this.broadcastRoom(room);
       if (room.lastSnapshot) {
         this.broadcastTick(room, room.lastSnapshot, []);
@@ -820,17 +870,9 @@ export class RoomManager {
 
       if (room.status === 'PAUSED') return;
 
+      // Wait patiently while players read the rules — no auto-countdown!
+      // Starts automatically as soon as every connected human taps Ready on their phone (or host clicks Start Now).
       if (room.status === 'BRIEFING') {
-        const prevVal = room.countdownValue;
-        room.countdownTimer -= dt;
-        const nextVal = Math.max(0, Math.ceil(room.countdownTimer));
-        if (nextVal !== prevVal && nextVal > 0) {
-          room.countdownValue = nextVal;
-          this.broadcastRoom(room);
-        }
-        if (room.countdownTimer <= 0) {
-          this.beginCountdown(room);
-        }
         return;
       }
 
