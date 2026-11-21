@@ -8,7 +8,7 @@ import {
   type PinballClashSnapshot,
   type RedLightDashSnapshot,
 } from '../shared/types';
-import { drawNameplate, tCanvas } from './renderers';
+import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -161,15 +161,34 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
       const { pu } = it;
       const cx = gridLeft + (pu.col + 0.5) * cell;
       const cy = gridTop + (pu.row + 0.5) * cell;
-      const col = pu.kind === 'flame' ? '#FF7A1A' : pu.kind === 'bomb' ? '#00C2FF' : '#9EE622';
+      const col =
+        pu.kind === 'flame'
+          ? '#FF7A1A'
+          : pu.kind === 'bomb'
+            ? '#00C2FF'
+            : pu.kind === 'shield'
+              ? '#38BDF8'
+              : pu.kind === 'mega'
+                ? '#FF3B9A'
+                : '#9EE622';
+      const txt =
+        pu.kind === 'flame'
+          ? 'F+'
+          : pu.kind === 'bomb'
+            ? 'B+'
+            : pu.kind === 'shield'
+              ? 'SHD'
+              : pu.kind === 'mega'
+                ? 'M+'
+                : 'S+';
       const bob = Math.sin(performance.now() * 0.005 + cx) * 3;
       drawSphere3D(ctx, cx, cy, 17, col, '#FFFFFF', 5 + bob, true);
       ctx.save();
       ctx.fillStyle = '#0D0F14';
-      ctx.font = '800 13px "JetBrains Mono", monospace';
+      ctx.font = '800 12px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(pu.kind === 'flame' ? 'F+' : pu.kind === 'bomb' ? 'B+' : 'S+', cx, cy - 5 - bob);
+      ctx.fillText(tCanvas(txt), cx, cy - 5 - bob);
       ctx.restore();
     } else if (it.kind === 'bomb') {
       const { bm } = it;
@@ -183,12 +202,21 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
       ctx.restore();
     } else {
       const { p } = it;
+      if (p.hasShield) {
+        ctx.save();
+        ctx.strokeStyle = '#38BDF8';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 4, 27, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
       drawCharacterPod3D(ctx, p.x, p.y, 20, p.angle, p.colorHex, {
         height: 12,
-        rimColor: '#FFFFFF',
+        rimColor: (p.megaBombs ?? 0) > 0 ? '#FF3B9A' : '#FFFFFF',
         visorColor: '#0F131A',
       });
-      drawNameplate(ctx, p.x, p.y - 40, p.slotIndex, p.name, p.colorHex);
+      drawNameplate(ctx, p.x, p.y - 40, p.slotIndex, p.name, p.colorHex, (p.megaBombs ?? 0) > 0 ? 'MEGA' : undefined);
     }
   }
 
@@ -209,7 +237,9 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
     ctx.restore();
   }
 
-  drawHudChip(ctx, ARENA_WIDTH / 2, 12, `ROUND ${snap.round}/${snap.totalRounds} · ${Math.ceil(snap.roundTimer)}s`, '#FF7A1A');
+  drawPopupTexts(ctx, snap.popups);
+
+  drawHudChip(ctx, ARENA_WIDTH / 2, 12, `ROUND ${snap.round}/${snap.totalRounds} · ${Math.ceil(snap.roundTimer)}s${snap.suddenDeath ? ' · SHRINK!' : ''}`, snap.suddenDeath ? '#FF4D2E' : '#FF7A1A');
   if (snap.roundBanner) drawBanner(ctx, snap.roundBanner, '#FF7A1A');
 }
 
@@ -258,6 +288,30 @@ export function renderRedLightDash(ctx: CanvasRenderingContext2D, snap: RedLight
   // 3D Finish Gate Pillars at top & bottom of finish line
   drawExtrudedCylinder3D(ctx, snap.finishX + 16, trackTop, 11, 22, '#F8FAFC', '#64748B', '#FFB800');
   drawExtrudedCylinder3D(ctx, snap.finishX + 16, trackBottom, 11, 22, '#F8FAFC', '#64748B', '#FFB800');
+
+  // Sticky Mud Puddles & Golden Sprint Apples
+  for (const pd of snap.puddles ?? []) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(101, 67, 33, 0.72)';
+    ctx.strokeStyle = '#78350F';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(pd.x, pd.y, pd.rx, pd.ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+  const apBob = Math.sin(performance.now() * 0.006) * 3;
+  for (const ap of snap.apples ?? []) {
+    drawShadowOval(ctx, ap.x, ap.y + 10, 12, 6, 0.35);
+    drawSphere3D(ctx, ap.x, ap.y + apBob, 12, '#FFB800', '#FEF08A', 3, false);
+    ctx.save();
+    ctx.fillStyle = '#10D98B';
+    ctx.beginPath();
+    ctx.ellipse(ap.x + 3, ap.y - 12 + apBob, 5, 2.5, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Red scanning overlay when Red Light is active
   if (snap.lightState === 'red') {
@@ -339,6 +393,8 @@ export function renderRedLightDash(ctx: CanvasRenderingContext2D, snap: RedLight
 
     drawNameplate(ctx, p.x, p.y - 38, p.slotIndex, p.name, p.colorHex, p.finished ? `#${p.finishOrder}` : undefined);
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   const lightWord =
     snap.lightState === 'green' ? 'GREEN LIGHT — RUN!' : snap.lightState === 'yellow' ? 'YELLOW — SLOW DOWN!' : 'RED LIGHT — FREEZE!';
@@ -435,17 +491,23 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
       68,
       12,
       5,
-      '#1E232F',
+      ord.vip ? '#2B2214' : '#1E232F',
       '#10131B',
       ord.timeLeft < 7 ? '#FF4D2E' : '#FFB800',
-      2
+      ord.vip ? 2.6 : 2
     );
 
     drawDishIcon(ctx, ord.dish, ox + 36, oy + 32, true, 1.05);
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = ord.vip ? '#FDE047' : '#FFFFFF';
     ctx.font = '800 14px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(tCanvas(ord.dish.toUpperCase()), ox + 66, oy + 26);
+    if (ord.vip) {
+      ctx.fillStyle = '#FFB800';
+      ctx.font = '800 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('VIP', ox + 178, oy + 26);
+    }
 
     ctx.fillStyle = '#0E1117';
     ctx.fillRect(ox + 66, oy + 42, 108, 10);
@@ -454,6 +516,19 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
   });
 
   drawHudChip(ctx, ARENA_WIDTH - 120, 32, `TIME ${Math.ceil(snap.timeLeft)}s`, '#FF7A1A');
+
+  // Chef Speed Boots pickups on kitchen floor
+  for (const bt of snap.boots ?? []) {
+    drawShadowOval(ctx, bt.x, bt.y + 10, 15, 6, 0.35);
+    drawSphere3D(ctx, bt.x, bt.y, 15, '#00C2FF', '#E0F2FE', 5, true);
+    ctx.save();
+    ctx.fillStyle = '#0D0F14';
+    ctx.font = '800 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('SPD', bt.x, bt.y - 5);
+    ctx.restore();
+  }
 
   // Y-sort 3D Kitchen Stations & Chefs
   type KitchenItem =
@@ -512,9 +587,20 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
       ctx.restore();
     } else {
       const { p } = it;
+      const hasBoots = (p.bootsTimer ?? 0) > 0;
+      if (hasBoots) {
+        ctx.save();
+        ctx.strokeStyle = '#00C2FF';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 4, 29, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
       drawCharacterPod3D(ctx, p.x, p.y, 20, p.angle, p.colorHex, {
         height: 12,
-        rimColor: '#FFFFFF',
+        rimColor: hasBoots ? '#00C2FF' : '#FFFFFF',
         hat: 'chef',
         showVisor: false,
       });
@@ -528,7 +614,8 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
           0.95
         );
       }
-      drawNameplate(ctx, p.x, p.y - 46, p.slotIndex, p.name, p.colorHex);
+      const chefTag = (p.combo ?? 0) > 1 ? `x${p.combo}` : undefined;
+      drawNameplate(ctx, p.x, p.y - 46, p.slotIndex, p.name, p.colorHex, chefTag);
     }
   }
 
@@ -561,9 +648,9 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
-  // Subtle stage spotlight
+  // Subtle stage spotlight (warms to gold during Fruit Fever Rain)
   const spot = ctx.createRadialGradient(ARENA_WIDTH / 2, 180, 40, ARENA_WIDTH / 2, 320, 560);
-  spot.addColorStop(0, 'rgba(158, 230, 34, 0.08)');
+  spot.addColorStop(0, snap.feverActive ? 'rgba(255, 184, 0, 0.2)' : 'rgba(158, 230, 34, 0.08)');
   spot.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = spot;
   ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
@@ -584,6 +671,13 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
       ctx.beginPath();
       ctx.arc(it.x, it.y - 20, 6, 0, Math.PI * 2);
       ctx.fill();
+    } else if (it.kind === 'magnet') {
+      drawSphere3D(ctx, it.x, it.y, 18, '#00C2FF', '#E0F2FE', 0, false);
+      ctx.fillStyle = '#0D0F14';
+      ctx.font = '800 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('MAG', it.x, it.y);
     } else {
       ctx.translate(it.x, it.y);
       ctx.rotate(it.rot);
@@ -665,6 +759,16 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
   // 3D Players & Woven Baskets
   for (const p of snap.players) {
     drawShadowOval(ctx, p.x, p.y + 20, 32, 10, 0.45);
+    if ((p.magnetTimer ?? 0) > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#00C2FF';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 12, 46, Math.PI, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     // 3D Woven basket
     drawExtrudedBox3D(
       ctx,
@@ -676,7 +780,7 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
       8,
       '#D99B4E',
       '#8C5C24',
-      p.colorHex
+      (p.magnetTimer ?? 0) > 0 ? '#00C2FF' : p.colorHex
     );
     // Basket interior dark shadow
     ctx.fillStyle = '#523412';
@@ -695,17 +799,12 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
   }
 
   // Popups
-  for (const pp of snap.popups) {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, pp.alpha);
-    ctx.font = '800 18px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = pp.colorHex;
-    ctx.fillText(tCanvas(pp.text), pp.x, pp.y);
-    ctx.restore();
-  }
+  drawPopupTexts(ctx, snap.popups);
 
   drawHudChip(ctx, ARENA_WIDTH / 2, 16, `TIME ${Math.ceil(snap.timeLeft)}s`, '#9EE622');
+  if (snap.feverActive) {
+    drawHudChip(ctx, 136, 16, 'FRUIT FEVER RAIN!', '#FFB800');
+  }
 }
 
 // ============================================================
@@ -809,12 +908,26 @@ export function renderPinballClash(ctx: CanvasRenderingContext2D, snap: PinballC
     }
     ctx.restore();
 
+    const isGiant = (p.giantTimer ?? 0) > 0;
+    const padH = isGiant ? 162 : 112;
     const kickX = p.flipTimer > 0 ? (p.side === 'left' ? 16 : -16) : 0;
     const fx = p.x - 12 + kickX;
-    const fy = p.y - 56;
+    const fy = p.y - padH / 2;
     const fTop = p.flipTimer > 0 ? '#FFFFFF' : p.colorHex;
-    drawExtrudedBox3D(ctx, fx, fy, 24, 112, 10, 12, fTop, shadeHex(p.colorHex, -0.48), '#FFFFFF', true);
-    drawNameplate(ctx, p.x, p.y - 78, p.slotIndex, p.name, p.colorHex);
+    drawExtrudedBox3D(
+      ctx,
+      fx,
+      fy,
+      24,
+      padH,
+      10,
+      12,
+      fTop,
+      shadeHex(p.colorHex, -0.48),
+      isGiant ? '#FFB800' : '#FFFFFF',
+      true
+    );
+    drawNameplate(ctx, p.x, fy - 22, p.slotIndex, p.name, p.colorHex, isGiant ? 'GIANT' : undefined);
   }
 
   // 3D Chrome & Gold Pinballs with trails
@@ -840,6 +953,8 @@ export function renderPinballClash(ctx: CanvasRenderingContext2D, snap: PinballC
       true
     );
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   // Scoreboard HUD
   drawHudChip(

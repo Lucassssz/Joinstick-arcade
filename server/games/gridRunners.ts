@@ -1,6 +1,7 @@
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
+  type GridPickupState,
   type GridRunnerPlayerState,
   type GridRunnersSnapshot,
   type GridTrailPoint,
@@ -23,6 +24,15 @@ interface InternalGridRunner extends GridRunnerPlayerState {
   lastPointY: number;
   wasAirborne: boolean;
   surviveAccum: number;
+  nearMissCd: number;
+}
+
+interface InternalPopup {
+  x: number;
+  y: number;
+  text: string;
+  colorHex: string;
+  alpha: number;
 }
 
 interface GridRunnersInternalState {
@@ -31,6 +41,11 @@ interface GridRunnersInternalState {
   roundTimer: number;
   betweenRoundTimer: number;
   roundBanner: string | null;
+  pickups: GridPickupState[];
+  pickupTimer: number;
+  pickupSeq: number;
+  obstacles: { x: number; y: number; w: number; h: number }[];
+  popups: InternalPopup[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
   players: InternalGridRunner[];
   soloMode: boolean;
@@ -44,7 +59,7 @@ const OVERDRIVE_DURATION = 0.65;
 const OVERDRIVE_COOLDOWN = 2.4;
 const HOP_DURATION = 0.48;
 const HOP_COOLDOWN = 2.5;
-const TURN_RATE = 4.6; // rad/s responsive smooth steering without accidental 180 self-crash
+const TURN_RATE = 4.6;
 const TRAIL_STEP = 10;
 const COLLISION_RADIUS = 10;
 const SELF_SAFE_POINTS = 11;
@@ -71,6 +86,22 @@ function distToSegment(
   if (lenSq < 0.0001) return Math.hypot(px - x1, py - y1);
   const t = Math.max(0, Math.min(1, ((px - x1) * vx + (py - y1) * vy) / lenSq));
   return Math.hypot(px - (x1 + t * vx), py - (y1 + t * vy));
+}
+
+function buildRoundObstacles(round: number): { x: number; y: number; w: number; h: number }[] {
+  if (round <= 1) return [];
+  if (round === 2) {
+    return [
+      { x: 560, y: 175, w: 80, h: 42 },
+      { x: 560, y: 503, w: 80, h: 42 },
+    ];
+  }
+  return [
+    { x: 350, y: 220, w: 58, h: 58 },
+    { x: 792, y: 220, w: 58, h: 58 },
+    { x: 350, y: 442, w: 58, h: 58 },
+    { x: 792, y: 442, w: 58, h: 58 },
+  ];
 }
 
 function spawnRunners(
@@ -109,6 +140,7 @@ function spawnRunners(
       lastPointY: y,
       wasAirborne: false,
       surviveAccum: 0,
+      nearMissCd: 0,
     };
   });
 }
@@ -125,6 +157,9 @@ function toSnapshot(state: GridRunnersInternalState): GridRunnersSnapshot {
       colorHex: p.colorHex,
       points: p.points,
     })),
+    pickups: state.pickups.map((pk) => ({ ...pk })),
+    obstacles: state.obstacles,
+    popups: state.popups.map((p) => ({ ...p })),
     explosions: state.explosions.map((e) => ({ ...e })),
     players: state.players.map((p) => ({
       id: p.id,
@@ -184,6 +219,11 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
       roundTimer: ROUND_TIME_LIMIT,
       betweenRoundTimer: 0,
       roundBanner: null,
+      pickups: [],
+      pickupTimer: 3.5,
+      pickupSeq: 0,
+      obstacles: buildRoundObstacles(1),
+      popups: [],
       explosions: [],
       players: spawnRunners(players),
       soloMode: players.length <= 1,
@@ -219,6 +259,7 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
       lastPointY: y,
       wasAirborne: true,
       surviveAccum: 0,
+      nearMissCd: 0,
     });
     if (state.players.length > 1) state.soloMode = false;
   },
@@ -235,6 +276,13 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
       if (e.alpha <= 0) state.explosions.splice(i, 1);
     }
 
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pop = state.popups[i];
+      pop.y -= 34 * dt;
+      pop.alpha -= 0.9 * dt;
+      if (pop.alpha <= 0) state.popups.splice(i, 1);
+    }
+
     if (state.betweenRoundTimer > 0) {
       state.betweenRoundTimer -= dt;
       if (state.betweenRoundTimer <= 0) {
@@ -245,6 +293,9 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
           state.round += 1;
           state.roundTimer = ROUND_TIME_LIMIT;
           state.roundBanner = null;
+          state.pickups = [];
+          state.pickupTimer = 3.0;
+          state.obstacles = buildRoundObstacles(state.round);
           const prevMap = new Map(
             state.players.map((p) => [p.id, { score: p.score, roundsWon: p.roundsWon }])
           );
@@ -255,7 +306,23 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
     } else {
       state.roundTimer = Math.max(0, state.roundTimer - dt);
 
-      // Update cycle movement & trail recording
+      // Spawn Energy / EMP / Score Cubes
+      state.pickupTimer -= dt;
+      if (state.pickupTimer <= 0 && state.pickups.length < 3) {
+        state.pickupTimer = 4.6;
+        state.pickupSeq += 1;
+        const kinds: GridPickupState['kind'][] = ['energy', 'emp', 'score'];
+        const kind = kinds[state.pickupSeq % kinds.length];
+        const px = 140 + Math.random() * (ARENA_WIDTH - 280);
+        const py = 110 + Math.random() * (ARENA_HEIGHT - 220);
+        const insideOb = state.obstacles.some(
+          (ob) => px > ob.x - 24 && px < ob.x + ob.w + 24 && py > ob.y - 24 && py < ob.y + ob.h + 24
+        );
+        if (!insideOb) {
+          state.pickups.push({ id: `gp_${state.pickupSeq}`, kind, x: px, y: py });
+        }
+      }
+
       for (const r of state.players) {
         if (!r.alive) continue;
         const src = inputMap.get(r.id);
@@ -263,6 +330,7 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
         r.hopCd = Math.max(0, r.hopCd - dt);
         r.overdriveTimer = Math.max(0, r.overdriveTimer - dt);
         r.hopTimer = Math.max(0, r.hopTimer - dt);
+        r.nearMissCd = Math.max(0, r.nearMissCd - dt);
 
         if (src) {
           const { dx, dy, a, b } = src.input;
@@ -294,7 +362,39 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
         r.x += Math.cos(r.angle) * r.speed * dt;
         r.y += Math.sin(r.angle) * r.speed * dt;
 
-        // Survival trickle points
+        // Pickup collection
+        for (let i = state.pickups.length - 1; i >= 0; i--) {
+          const pk = state.pickups[i];
+          if (Math.hypot(r.x - pk.x, r.y - pk.y) < 26) {
+            state.pickups.splice(i, 1);
+            sounds.push({ type: 'pickup', playerId: r.id });
+            haptics.push({ playerId: r.id, pattern: [18, 12, 24], reason: 'pickup' });
+            if (pk.kind === 'energy') {
+              r.overdriveCd = 0;
+              r.hopCd = 0;
+              r.score += 35;
+              state.popups.push({ x: r.x, y: r.y - 24, text: 'RECHARGED!', colorHex: '#00C2FF', alpha: 1 });
+            } else if (pk.kind === 'emp') {
+              // Erase nearby enemy trail points!
+              for (const other of state.players) {
+                if (other.id === r.id) continue;
+                for (const pt of other.points) {
+                  if (Math.hypot(pt.x - r.x, pt.y - r.y) < 175) {
+                    pt.gap = true;
+                  }
+                }
+              }
+              state.explosions.push({ x: r.x, y: r.y, radius: 18, colorHex: '#FF3B9A', alpha: 1 });
+              r.score += 40;
+              state.popups.push({ x: r.x, y: r.y - 24, text: 'EMP CLEAR!', colorHex: '#FF3B9A', alpha: 1 });
+            } else {
+              r.score += 75;
+              r.overdriveTimer = Math.max(r.overdriveTimer, 0.9);
+              state.popups.push({ x: r.x, y: r.y - 24, text: '+75 DATA!', colorHex: '#FFB800', alpha: 1 });
+            }
+          }
+        }
+
         r.surviveAccum += dt;
         if (r.surviveAccum >= 1.0) {
           r.surviveAccum -= 1.0;
@@ -316,12 +416,10 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
         r.wasAirborne = airborne;
       }
 
-      // Check collisions (walls & glowing trails)
       const crashedIds = new Set<string>();
       for (const r of state.players) {
         if (!r.alive) continue;
 
-        // Arena wall crash (even when hopping, outer walls are tall energy barriers)
         if (
           r.x < ARENA_MARGIN ||
           r.x > ARENA_WIDTH - ARENA_MARGIN ||
@@ -332,10 +430,19 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
           continue;
         }
 
-        // Ignore trails while hopping!
         if (r.hopTimer > 0) continue;
 
+        // Obstacle crash check (can hop over them!)
+        const hitOb = state.obstacles.some(
+          (ob) => r.x > ob.x - 8 && r.x < ob.x + ob.w + 8 && r.y > ob.y - 8 && r.y < ob.y + ob.h + 8
+        );
+        if (hitOb) {
+          crashedIds.add(r.id);
+          continue;
+        }
+
         let hitTrail = false;
+        let closeEnemyTrail = false;
         for (const other of state.players) {
           const pts = other.points;
           const endIdx = other.id === r.id ? pts.length - SELF_SAFE_POINTS : pts.length - 1;
@@ -351,6 +458,8 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
                 haptics.push({ playerId: other.id, pattern: 45, reason: 'score' });
               }
               break;
+            } else if (other.id !== r.id && d < 22) {
+              closeEnemyTrail = true;
             }
           }
           if (hitTrail) break;
@@ -358,10 +467,13 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
 
         if (hitTrail) {
           crashedIds.add(r.id);
+        } else if (closeEnemyTrail && r.nearMissCd <= 0) {
+          r.nearMissCd = 1.6;
+          r.score += 15;
+          state.popups.push({ x: r.x, y: r.y - 24, text: 'NEAR MISS! +15', colorHex: '#10D98B', alpha: 1 });
         }
       }
 
-      // Head-on bike crashes
       for (let i = 0; i < state.players.length; i++) {
         const a = state.players[i];
         if (!a.alive || a.hopTimer > 0) continue;
@@ -390,7 +502,6 @@ export const gridRunnersModule: ServerGameModule<GridRunnersInternalState> = {
         haptics.push({ playerId: r.id, pattern: [75, 35, 95], reason: 'ko' });
       }
 
-      // Check round end
       const alive = state.players.filter((p) => p.alive);
       if (state.soloMode) {
         if (alive.length === 0 || state.roundTimer <= 0) {

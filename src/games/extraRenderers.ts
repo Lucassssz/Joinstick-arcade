@@ -9,7 +9,7 @@ import {
   RicochetTanksSnapshot,
   TurboStrikerSnapshot,
 } from '../shared/types';
-import { drawNameplate, tCanvas } from './renderers';
+import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -98,6 +98,23 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
     let innerAccent = 'rgba(16, 217, 139, 0.18)';
     let depth = 15;
 
+    if (tile.kind === 'gold') {
+      fill = '#5A4114';
+      side = '#2F2008';
+      stroke = '#FFB800';
+      innerAccent = 'rgba(255, 184, 0, 0.42)';
+    } else if (tile.kind === 'spring') {
+      fill = '#12463A';
+      side = '#09241E';
+      stroke = '#10D98B';
+      innerAccent = 'rgba(16, 217, 139, 0.48)';
+    } else if (tile.kind === 'ice') {
+      fill = '#1B3F56';
+      side = '#0D212E';
+      stroke = '#38BDF8';
+      innerAccent = 'rgba(56, 189, 248, 0.45)';
+    }
+
     if (tile.state === 'cracking') {
       jitterX = Math.sin(Date.now() * 0.06 + tile.id) * 2.5 * tile.progress;
       oy = tile.progress * 5;
@@ -121,6 +138,42 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
     ctx.scale(scale, scale);
 
     drawExtrudedHex3D(ctx, 0, 0, tile.radius - 2, depth, fill, side, stroke, innerAccent);
+
+    if (tile.state === 'solid') {
+      if (tile.kind === 'gold') {
+        ctx.fillStyle = '#FDE047';
+        ctx.font = '800 16px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★', 0, 0);
+      } else if (tile.kind === 'spring') {
+        ctx.strokeStyle = '#6EE7B7';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-10, 4);
+        ctx.lineTo(0, -6);
+        ctx.lineTo(10, 4);
+        ctx.stroke();
+      } else if (tile.kind === 'ice') {
+        ctx.strokeStyle = 'rgba(224, 242, 254, 0.65)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-10, -5);
+        ctx.lineTo(6, -12);
+        ctx.moveTo(-4, 7);
+        ctx.lineTo(12, 0);
+        ctx.stroke();
+      }
+    }
+
+    if (tile.targeted) {
+      const pulse = 0.55 + Math.sin(Date.now() * 0.02) * 0.35;
+      ctx.strokeStyle = `rgba(255, 77, 46, ${pulse})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, tile.radius * 0.58, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // Crack lines on top hex face
     if (tile.state === 'cracking' && tile.progress > 0.2) {
@@ -180,6 +233,8 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
     }
   }
 
+  drawPopupTexts(ctx, snap.popups);
+
   drawHudChip(
     ctx,
     22,
@@ -228,6 +283,42 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
   }
   ctx.stroke();
 
+  // Workshop Jump Pads
+  for (const jp of snap.jumpPads ?? []) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(16, 217, 139, 0.16)';
+    ctx.strokeStyle = '#10D98B';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(jp.x, jp.y, jp.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = '#A7F3D0';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(jp.x - 9, jp.y + 4);
+    ctx.lineTo(jp.x, jp.y - 6);
+    ctx.lineTo(jp.x + 9, jp.y + 4);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Fuse pickups
+  const fuseNow = Date.now() * 0.0045;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'speed' ? '#10D98B' : pk.kind === 'shield' ? '#00C2FF' : '#38BDF8';
+    const label = pk.kind === 'speed' ? 'SPD' : pk.kind === 'shield' ? 'SHD' : '+2.5';
+    const bob = Math.sin(fuseNow + pk.x * 0.03) * 4;
+    drawSphere3D(ctx, pk.x, pk.y, 15, col, '#FFFFFF', 4 + bob, true);
+    ctx.save();
+    ctx.fillStyle = '#0B0E14';
+    ctx.font = '800 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, pk.x, pk.y - (4 + bob));
+    ctx.restore();
+  }
+
   // Explosions on floor
   for (const e of snap.explosions) {
     ctx.save();
@@ -273,6 +364,22 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
     } else {
       const p = item.p;
       ctx.save();
+      if ((p.shieldTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#00C2FF';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 4, 28, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((p.speedBuffTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 4, 33, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       // Bomb danger aura on floor
       if (p.hasBomb) {
         ctx.strokeStyle = flashFast ? '#FF4D2E' : '#FFB800';
@@ -329,6 +436,8 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
       );
     }
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawHudChip(ctx, 22, 20, 165, `ROUND ${snap.round}/${snap.totalRounds}`);
   if (snap.bombHolderId) {
@@ -416,6 +525,27 @@ export function renderGridRunners(ctx: CanvasRenderingContext2D, snap: GridRunne
     ctx.restore();
   }
 
+  // Cyber Monolith Obstacles (hoppable)
+  for (const obs of snap.obstacles ?? []) {
+    drawExtrudedBox3D(ctx, obs.x, obs.y, obs.w, obs.h, 16, 5, '#1D2940', '#0F1726', '#00C2FF');
+  }
+
+  // Grid pickups
+  const gridNow = Date.now() * 0.0045;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'energy' ? '#10D98B' : pk.kind === 'emp' ? '#FF3B9A' : '#FFB800';
+    const label = pk.kind === 'energy' ? '⚡' : pk.kind === 'emp' ? 'EMP' : '★';
+    const bob = Math.sin(gridNow + pk.x * 0.03) * 4;
+    drawSphere3D(ctx, pk.x, pk.y, 15, col, '#FFFFFF', 5 + bob, true);
+    ctx.save();
+    ctx.fillStyle = '#0B0E14';
+    ctx.font = '800 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, pk.x, pk.y - (5 + bob));
+    ctx.restore();
+  }
+
   // Crash bursts
   for (const e of snap.explosions) {
     ctx.save();
@@ -427,6 +557,8 @@ export function renderGridRunners(ctx: CanvasRenderingContext2D, snap: GridRunne
     ctx.stroke();
     ctx.restore();
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   // Light cycles (Y-sorted)
   const cycles = [...snap.players].filter((p) => p.alive).sort((a, b) => a.y - b.y);
@@ -569,12 +701,30 @@ export function renderRicochetTanks(
     );
   }
 
-  // Y-sort Bunker Walls and Tanks for true 2.5D overlap!
+  // Supply Pickups
+  const nowBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'triple' ? '#FF3B9A' : pk.kind === 'speed' ? '#10D98B' : '#00C2FF';
+    const label = pk.kind === 'triple' ? '3X' : pk.kind === 'speed' ? 'SPD' : 'SHD';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 16, 10, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + nowBob * 0.5, 16, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 4 + nowBob * 0.5);
+    ctx.restore();
+  }
+
+  // Y-sort Bunker Walls, Golden Crates, and Tanks for true 2.5D overlap!
   type Entity =
     | { kind: 'wall'; y: number; w: (typeof snap.walls)[number] }
+    | { kind: 'crate'; y: number; c: NonNullable<typeof snap.crates>[number] }
     | { kind: 'tank'; y: number; t: (typeof snap.players)[number] };
   const entities: Entity[] = [
     ...snap.walls.map((w) => ({ kind: 'wall' as const, y: w.y + w.h, w })),
+    ...(snap.crates ?? []).map((c) => ({ kind: 'crate' as const, y: c.y + c.r, c })),
     ...snap.players.filter((t) => t.alive).map((t) => ({ kind: 'tank' as const, y: t.y + 12, t })),
   ];
   entities.sort((a, b) => a.y - b.y);
@@ -583,6 +733,17 @@ export function renderRicochetTanks(
     if (ent.kind === 'wall') {
       const { w } = ent;
       drawExtrudedBox3D(ctx, w.x, w.y, w.w, w.h, 16, 5, '#343E52', '#1F2533', '#5C6B87');
+    } else if (ent.kind === 'crate') {
+      const { c } = ent;
+      const topCol = c.hp < c.maxHp ? '#D97706' : '#F59E0B';
+      drawExtrudedBox3D(ctx, c.x - c.r, c.y - c.r, c.r * 2, c.r * 2, 14, 5, topCol, '#92400E', '#FDE68A');
+      ctx.save();
+      ctx.fillStyle = '#FFFBEB';
+      ctx.font = '900 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('★', c.x, c.y - 7);
+      ctx.restore();
     } else {
       const t = ent.t;
       drawShadowOval(ctx, t.x + 2, t.y + 8, 22, 15, 0.48);
@@ -595,6 +756,22 @@ export function renderRicochetTanks(
         ctx.lineWidth = 2.8;
         ctx.beginPath();
         ctx.arc(0, -4, 28, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((t.tripleTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#FF3B9A';
+        ctx.lineWidth = 2.4;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(0, -4, 32, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if ((t.speedTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, -4, 36, 0, Math.PI * 2);
         ctx.stroke();
       }
 
@@ -678,6 +855,8 @@ export function renderRicochetTanks(
     ctx.stroke();
     ctx.restore();
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   const secs = Math.ceil(snap.timeLeft);
   const mm = Math.floor(secs / 60);
@@ -785,14 +964,42 @@ export function renderTurboStriker(
   drawExtrudedCylinder3D(ctx, right, cy - goalHalf, 6, 12, '#FFFFFF', '#94A3B8', '#00C2FF');
   drawExtrudedCylinder3D(ctx, right, cy + goalHalf, 6, 12, '#FFFFFF', '#94A3B8', '#00C2FF');
 
-  // Y-sort strikers and soccer ball
+  // Golden Time glow border on pitch
+  if (snap.goldenTime) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 184, 0, 0.72)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(left - 2, top - 2, pitchW + 4, pitchH + 4);
+    ctx.restore();
+  }
+
+  // Pitch Powerups
+  const puPulse = Math.sin(Date.now() * 0.007) * 3;
+  for (const pu of snap.powerups ?? []) {
+    const col = pu.kind === 'mega-kick' ? '#FF7A00' : pu.kind === 'speed' ? '#10D98B' : '#FFB800';
+    const txt = pu.kind === 'mega-kick' ? '⚡' : pu.kind === 'speed' ? 'SPD' : '2●';
+    drawShadowOval(ctx, pu.x, pu.y + 8, 16, 10, 0.35);
+    drawExtrudedCylinder3D(ctx, pu.x, pu.y + puPulse * 0.4, 17, 7, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(txt), pu.x, pu.y - 4 + puPulse * 0.4);
+    ctx.restore();
+  }
+
+  // Y-sort strikers, soccer ball, and bonus balls
   const b = snap.ball;
+  const bonusBalls = snap.bonusBalls ?? [];
   type PitchItem =
     | { kind: 'player'; y: number; p: (typeof snap.players)[number] }
-    | { kind: 'ball'; y: number };
+    | { kind: 'ball'; y: number }
+    | { kind: 'bonusBall'; y: number; bb: (typeof bonusBalls)[number] };
   const pitchItems: PitchItem[] = [
     ...snap.players.map((p) => ({ kind: 'player' as const, y: p.y, p })),
     { kind: 'ball' as const, y: b.y },
+    ...bonusBalls.map((bb) => ({ kind: 'bonusBall' as const, y: bb.y, bb })),
   ];
   pitchItems.sort((a, bItem) => a.y - bItem.y);
 
@@ -803,6 +1010,15 @@ export function renderTurboStriker(
       ctx.fillStyle = '#1E2430';
       ctx.beginPath();
       ctx.arc(b.x, b.y - 4, 6.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (item.kind === 'bonusBall') {
+      const bb = item.bb;
+      drawSphere3D(ctx, bb.x, bb.y, bb.radius, '#FDE047', bb.lastTouchColor ?? '#B45309', 4, true);
+      ctx.save();
+      ctx.fillStyle = '#78350F';
+      ctx.beginPath();
+      ctx.arc(bb.x, bb.y - 4, 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     } else {
@@ -817,6 +1033,22 @@ export function renderTurboStriker(
         ctx.arc(p.x, p.y, 26 + (0.24 - p.kickRingTimer) * 160, 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
+      }
+      if ((p.megaKickTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#FF7A00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 28, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((p.speedTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 33, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       if (p.tackleTimer > 0) {
         ctx.fillStyle = teamColor;
@@ -879,6 +1111,11 @@ export function renderTurboStriker(
   ctx.fillText(tCanvas(`${snap.scoreBlue} BLUE`), ARENA_WIDTH / 2 + 48, 30);
   ctx.restore();
 
+  if (snap.goldenTime) {
+    drawHudChip(ctx, ARENA_WIDTH - 224, 14, 202, 'GOLDEN TIME  2X', '#FFB800', 'rgba(255,184,0,0.65)');
+  }
+  drawPopupTexts(ctx, snap.popups);
+
   if (snap.goalBanner) {
     drawCenterBanner(ctx, snap.goalBanner, snap.goalBannerColor ?? '#FFB800');
   }
@@ -924,6 +1161,44 @@ export function renderPaintRush(ctx: CanvasRenderingContext2D, snap: PaintRushSn
         ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
       }
     }
+  }
+
+  // Golden bonus tiles overlay
+  const bonusSet = new Set(snap.bonusCells ?? []);
+  if (bonusSet.size > 0) {
+    const pulse = 0.55 + Math.sin(Date.now() * 0.008) * 0.25;
+    ctx.save();
+    for (const idx of bonusSet) {
+      const r = Math.floor(idx / snap.cols);
+      const c = idx % snap.cols;
+      const x = c * cellW;
+      const y = r * cellH;
+      ctx.strokeStyle = `rgba(255, 215, 0, ${pulse})`;
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(x + 2.5, y + 2.5, cellW - 5, cellH - 5);
+      ctx.fillStyle = `rgba(255, 225, 100, ${pulse})`;
+      ctx.font = '900 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('★', x + cellW / 2, y + cellH / 2);
+    }
+    ctx.restore();
+  }
+
+  // Paint pickups
+  const pkBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'wide' ? '#00C2FF' : pk.kind === 'bomb' ? '#FF3B9A' : '#10D98B';
+    const label = pk.kind === 'wide' ? 'W' : pk.kind === 'bomb' ? 'B' : '⚡';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 16, 10, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + pkBob * 0.5, 16, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 12px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 4 + pkBob * 0.5);
+    ctx.restore();
   }
 
   // Splash bomb rings
@@ -985,6 +1260,23 @@ export function renderPaintRush(ctx: CanvasRenderingContext2D, snap: PaintRushSn
       showVisor: false,
     });
 
+    if ((p.wideTimer ?? 0) > 0) {
+      ctx.strokeStyle = '#00C2FF';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 4, 29, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if ((p.turboTimer ?? 0) > 0) {
+      ctx.strokeStyle = '#10D98B';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 4, 34, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // Center cap on pod top
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
@@ -1038,4 +1330,6 @@ export function renderPaintRush(ctx: CanvasRenderingContext2D, snap: PaintRushSn
     }
   }
   ctx.restore();
+
+  drawPopupTexts(ctx, snap.popups);
 }

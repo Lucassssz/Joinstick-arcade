@@ -22,6 +22,8 @@ interface InternalHookPlayer extends HookPlayerState {
   parryCd: number;
   lastTouchedBy: string | null;
   lastTouchedTime: number;
+  longHookTimer: number;
+  speedTimer: number;
 }
 
 interface InternalHook {
@@ -44,6 +46,12 @@ interface HookShotState {
   islands: { x: number; y: number; w: number; h: number }[];
   hooks: InternalHook[];
   waves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  coins: { id: string; x: number; y: number; value: number }[];
+  pickups: { id: string; x: number; y: number; kind: 'long-hook' | 'speed-anchor' }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  coinTimer: number;
+  pickupTimer: number;
+  nextId: number;
   entities: InternalHookPlayer[];
 }
 
@@ -108,6 +116,8 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
         parryCd: 0,
         lastTouchedBy: null,
         lastTouchedTime: 0,
+        longHookTimer: 0,
+        speedTimer: 0,
       };
     });
 
@@ -118,6 +128,14 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
       islands: ISLANDS,
       hooks: [],
       waves: [],
+      coins: [
+        { id: 'hc_1', x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, value: 75 },
+      ],
+      pickups: [],
+      popups: [],
+      coinTimer: 3.5,
+      pickupTimer: 5.5,
+      nextId: 2,
       entities,
     };
   },
@@ -149,6 +167,8 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
         parryCd: 0,
         lastTouchedBy: null,
         lastTouchedTime: 0,
+        longHookTimer: 0,
+        speedTimer: 0,
       });
     }
   },
@@ -168,12 +188,45 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
       w.alpha = Math.max(0, 1 - w.radius / w.maxRadius);
       if (w.radius >= w.maxRadius) state.waves.splice(i, 1);
     }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pp = state.popups[i];
+      pp.y -= 36 * dt;
+      pp.alpha -= dt * 0.9;
+      if (pp.alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    state.coinTimer -= dt;
+    if (state.coinTimer <= 0 && state.coins.length < 4) {
+      state.coinTimer = 3.8;
+      const isCenter = Math.random() < 0.65;
+      const isl = isCenter ? ISLANDS[0] : ISLANDS[1 + Math.floor(Math.random() * 4)];
+      state.coins.push({
+        id: `hc_${state.nextId++}`,
+        x: isl.x + 36 + Math.random() * (isl.w - 72),
+        y: isl.y + 36 + Math.random() * (isl.h - 72),
+        value: isCenter ? 75 : 45,
+      });
+    }
+
+    state.pickupTimer -= dt;
+    if (state.pickupTimer <= 0 && state.pickups.length < 2) {
+      state.pickupTimer = 7.5;
+      const isl = ISLANDS[Math.floor(Math.random() * ISLANDS.length)];
+      state.pickups.push({
+        id: `hp_${state.nextId++}`,
+        x: isl.x + 42 + Math.random() * (isl.w - 84),
+        y: isl.y + 42 + Math.random() * (isl.h - 84),
+        kind: Math.random() < 0.55 ? 'long-hook' : 'speed-anchor',
+      });
+    }
 
     for (let idx = 0; idx < state.entities.length; idx++) {
       const e = state.entities[idx];
       e.hookCd = Math.max(0, e.hookCd - dt);
       e.parryCd = Math.max(0, e.parryCd - dt);
       e.parryTimer = Math.max(0, e.parryTimer - dt);
+      e.longHookTimer = Math.max(0, e.longHookTimer - dt);
+      e.speedTimer = Math.max(0, e.speedTimer - dt);
 
       if (e.falling) {
         e.fallProgress += dt * 1.9;
@@ -187,6 +240,7 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
             if (killer && killer.id !== e.id) {
               killer.kos += 1;
               killer.score += 100;
+              state.popups.push({ x: killer.x, y: killer.y - 34, text: '+100 KO!', colorHex: '#FFB800', alpha: 1.2 });
               if (!killer.isBot) haptics.push({ playerId: killer.id, pattern: [35, 25, 55], reason: 'hook-ko' });
             }
           }
@@ -233,16 +287,18 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
 
       // Button A: Fire Grapple Hook
       if (pressA && e.hookCd <= 0 && !e.hookedBy) {
-        e.hookCd = HOOK_CD;
+        e.hookCd = e.longHookTimer > 0 ? HOOK_CD * 0.65 : HOOK_CD;
+        const spd = e.longHookTimer > 0 ? 1040 : 860;
+        const maxD = e.longHookTimer > 0 ? 660 : 470;
         state.hooks.push({
           ownerId: e.id,
           colorHex: e.colorHex,
           x: e.x + Math.cos(e.angle) * 20,
           y: e.y + Math.sin(e.angle) * 20,
-          vx: Math.cos(e.angle) * 860,
-          vy: Math.sin(e.angle) * 860,
+          vx: Math.cos(e.angle) * spd,
+          vy: Math.sin(e.angle) * spd,
           dist: 0,
-          maxDist: 470,
+          maxDist: maxD,
           state: 'extending',
           targetId: null,
         });
@@ -282,8 +338,9 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
       }
 
       if (!e.hookedBy) {
-        const tvx = nx * 315;
-        const tvy = ny * 315;
+        const moveSpd = e.speedTimer > 0 ? 415 : 315;
+        const tvx = nx * moveSpd;
+        const tvy = ny * moveSpd;
         e.vx += (tvx - e.vx) * Math.min(1, 10 * dt);
         e.vy += (tvy - e.vy) * Math.min(1, 10 * dt);
         e.x = Math.max(30, Math.min(ARENA_WIDTH - 30, e.x + e.vx * dt));
@@ -296,7 +353,6 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
             e.falling = true;
             e.fallProgress = 0;
           } else {
-            // Pull back onto nearest island edge gently so accidental joystick slips feel forgiving!
             let bestX = e.x;
             let bestY = e.y;
             let bestD = Infinity;
@@ -318,6 +374,33 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
               e.fallProgress = 0;
             }
           }
+        }
+      }
+
+      // Collect coins & pickups
+      for (let ci = state.coins.length - 1; ci >= 0; ci--) {
+        const c = state.coins[ci];
+        if (Math.hypot(e.x - c.x, e.y - c.y) < PLAYER_R + 18) {
+          e.score += c.value;
+          state.popups.push({ x: c.x, y: c.y - 14, text: `+${c.value}!`, colorHex: c.value >= 75 ? '#10D98B' : '#FFB800', alpha: 1.1 });
+          state.coins.splice(ci, 1);
+          sounds.push({ type: 'pickup', playerId: e.id });
+          if (!e.isBot) haptics.push({ playerId: e.id, pattern: 16, reason: 'coin' });
+        }
+      }
+      for (let pi = state.pickups.length - 1; pi >= 0; pi--) {
+        const pk = state.pickups[pi];
+        if (Math.hypot(e.x - pk.x, e.y - pk.y) < PLAYER_R + 20) {
+          if (pk.kind === 'long-hook') {
+            e.longHookTimer = 9;
+            state.popups.push({ x: pk.x, y: pk.y - 16, text: 'LONG HOOK!', colorHex: '#00C2FF', alpha: 1.2 });
+          } else {
+            e.speedTimer = 8;
+            state.popups.push({ x: pk.x, y: pk.y - 16, text: 'ANCHOR BOOST!', colorHex: '#FFB800', alpha: 1.2 });
+          }
+          state.pickups.splice(pi, 1);
+          sounds.push({ type: 'boost', playerId: e.id });
+          if (!e.isBot) haptics.push({ playerId: e.id, pattern: 22, reason: 'pickup' });
         }
       }
 
@@ -452,6 +535,9 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
       islands: state.islands,
       hooks: hookLines,
       waves: state.waves.map((w) => ({ ...w })),
+      coins: state.coins.map((c) => ({ ...c })),
+      pickups: state.pickups.map((pk) => ({ ...pk })),
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: state.entities.map((e) => ({
         id: e.id,
         slotIndex: e.slotIndex,
@@ -471,6 +557,8 @@ export const hookShotModule: ServerGameModule<HookShotState> = {
         score: e.score,
         cooldownA: e.cooldownA,
         cooldownB: e.cooldownB,
+        longHookTimer: e.longHookTimer,
+        speedTimer: e.speedTimer,
       })),
     };
   },

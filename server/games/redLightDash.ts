@@ -16,6 +16,7 @@ import type {
 interface InternalRunner extends RedLightPlayerState {
   sprintCd: number;
   shieldCd: number;
+  mudTimer: number;
 }
 
 interface RedLightState {
@@ -29,6 +30,9 @@ interface RedLightState {
   finishCount: number;
   banner: string | null;
   zapLines: { x: number; y: number; alpha: number }[];
+  puddles: { id: string; x: number; y: number; rx: number; ry: number }[];
+  apples: { id: string; x: number; y: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: InternalRunner[];
   finished: boolean;
 }
@@ -48,6 +52,19 @@ function resetRace(state: RedLightState): void {
   state.finishCount = 0;
   state.banner = `RACE ${state.round} — GO!`;
   state.zapLines = [];
+  state.popups = [];
+  state.puddles = Array.from({ length: 5 }, (_, i) => ({
+    id: `mud_${i}`,
+    x: START_X + 160 + i * 165 + (Math.random() - 0.5) * 55,
+    y: TRACK_TOP + 38 + Math.random() * (TRACK_BOTTOM - TRACK_TOP - 76),
+    rx: 40 + Math.random() * 14,
+    ry: 24 + Math.random() * 8,
+  }));
+  state.apples = Array.from({ length: 4 }, (_, i) => ({
+    id: `ap_${i}`,
+    x: START_X + 210 + i * 195 + (Math.random() - 0.5) * 50,
+    y: TRACK_TOP + 34 + Math.random() * (TRACK_BOTTOM - TRACK_TOP - 68),
+  }));
   const count = Math.max(1, state.players.length);
   state.players.forEach((p, idx) => {
     const frac = count === 1 ? 0.5 : (idx + 0.5) / count;
@@ -58,6 +75,7 @@ function resetRace(state: RedLightState): void {
     p.sprintTimer = 0;
     p.shieldTimer = 0;
     p.zappedTimer = 0;
+    p.mudTimer = 0;
     p.finished = false;
     p.finishOrder = 0;
     p.sprintCd = 0;
@@ -82,6 +100,7 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
       sprintTimer: 0,
       shieldTimer: 0,
       zappedTimer: 0,
+      mudTimer: 0,
       finished: false,
       finishOrder: 0,
       score: 0,
@@ -102,6 +121,9 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
       finishCount: 0,
       banner: null,
       zapLines: [],
+      puddles: [],
+      apples: [],
+      popups: [],
       players: list,
       finished: false,
     };
@@ -116,6 +138,11 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
     for (let i = state.zapLines.length - 1; i >= 0; i--) {
       state.zapLines[i].alpha -= dt * 2.5;
       if (state.zapLines[i].alpha <= 0) state.zapLines.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 34 * dt;
+      state.popups[i].alpha -= dt * 0.9;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
     if (state.roundPause > 0) {
@@ -143,10 +170,17 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
           state.lightTimer = 0.72;
           sounds.push({ type: 'countdown' });
         } else if (state.lightState === 'yellow') {
-          state.lightState = 'red';
-          state.lightTimer = 1.65 + Math.random() * 0.95;
-          state.redGrace = 0.2;
-          sounds.push({ type: 'bump', intensity: 0.9 });
+          if (Math.random() < 0.24) {
+            state.lightState = 'green';
+            state.lightTimer = 1.45;
+            state.banner = 'FAKE OUT — RUN!';
+            sounds.push({ type: 'go' });
+          } else {
+            state.lightState = 'red';
+            state.lightTimer = 1.65 + Math.random() * 0.95;
+            state.redGrace = 0.2;
+            sounds.push({ type: 'bump', intensity: 0.9 });
+          }
         } else {
           state.lightState = 'green';
           state.lightTimer = 1.85 + Math.random() * 1.65;
@@ -158,6 +192,7 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
         p.sprintTimer = Math.max(0, p.sprintTimer - dt);
         p.shieldTimer = Math.max(0, p.shieldTimer - dt);
         p.zappedTimer = Math.max(0, p.zappedTimer - dt);
+        p.mudTimer = Math.max(0, p.mudTimer - dt);
         p.sprintCd = Math.max(0, p.sprintCd - dt);
         p.shieldCd = Math.max(0, p.shieldCd - dt);
 
@@ -180,15 +215,37 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
           haptics.push({ playerId: p.id, pattern: 22, reason: 'shield' });
         }
 
+        // Check mud puddles & golden apples
+        for (const pd of state.puddles) {
+          const ex = (p.x - pd.x) / pd.rx;
+          const ey = (p.y - pd.y) / pd.ry;
+          if (ex * ex + ey * ey <= 1) {
+            p.mudTimer = 0.25;
+            break;
+          }
+        }
+        for (let ai = state.apples.length - 1; ai >= 0; ai--) {
+          const ap = state.apples[ai];
+          if (Math.hypot(p.x - ap.x, p.y - ap.y) < 30) {
+            p.score += 35;
+            p.sprintTimer = Math.max(p.sprintTimer, 0.75);
+            p.mudTimer = 0;
+            state.popups.push({ x: ap.x, y: ap.y - 16, text: '+35 SPRINT!', colorHex: '#FFB800', alpha: 1.1 });
+            state.apples.splice(ai, 1);
+            sounds.push({ type: 'pickup', playerId: p.id });
+            haptics.push({ playerId: p.id, pattern: 18, reason: 'apple' });
+          }
+        }
+
         const inputMag = Math.hypot(dx, dy);
         if (p.zappedTimer > 0) {
           p.vx *= 0.85;
           p.vy *= 0.85;
         } else if (inputMag > 0.16) {
-          const speed = p.sprintTimer > 0 ? 315 : 195;
-          // Encourage forward sprint while allowing lane dodging
+          const baseSpd = p.sprintTimer > 0 ? 315 : 195;
+          const speed = p.mudTimer > 0 ? baseSpd * 0.58 : baseSpd;
           p.vx = Math.max(-90, dx * speed);
-          p.vy = dy * 165;
+          p.vy = dy * (p.mudTimer > 0 ? 110 : 165);
         } else {
           p.vx *= Math.pow(0.001, dt);
           p.vy *= Math.pow(0.001, dt);
@@ -205,9 +262,11 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
               p.shieldTimer = 0;
               p.vx = 0;
               p.vy = 0;
+              state.popups.push({ x: p.x, y: p.y - 26, text: 'SHIELDED!', colorHex: '#00C2FF', alpha: 1.1 });
               sounds.push({ type: 'confirm', playerId: p.id });
             } else {
               state.zapLines.push({ x: p.x, y: p.y, alpha: 1 });
+              state.popups.push({ x: p.x, y: p.y - 26, text: 'ZAPPED!', colorHex: '#FF4D2E', alpha: 1.1 });
               p.x = Math.max(START_X, p.x - 145);
               p.vx = 0;
               p.vy = 0;
@@ -225,6 +284,7 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
           p.finishOrder = state.finishCount;
           const pts = Math.max(40, 180 - (state.finishCount - 1) * 35);
           p.score += pts;
+          state.popups.push({ x: p.x - 20, y: p.y - 26, text: `+${pts}!`, colorHex: '#10D98B', alpha: 1.2 });
           sounds.push({ type: state.finishCount === 1 ? 'win' : 'lap', playerId: p.id });
           haptics.push({ playerId: p.id, pattern: [25, 25, 45], reason: 'finish' });
           if (state.finishCount === 1) {
@@ -283,6 +343,9 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
       startX: START_X,
       banner: state.banner,
       zapLines: state.zapLines.map((z) => ({ ...z })),
+      puddles: state.puddles.map((pd) => ({ ...pd })),
+      apples: state.apples.map((ap) => ({ ...ap })),
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: state.players.map((p) => ({
         id: p.id,
         slotIndex: p.slotIndex,
@@ -295,6 +358,7 @@ export const redLightDashModule: ServerGameModule<RedLightState> = {
         sprintTimer: p.sprintTimer,
         shieldTimer: p.shieldTimer,
         zappedTimer: p.zappedTimer,
+        mudTimer: p.mudTimer,
         finished: p.finished,
         finishOrder: p.finishOrder,
         score: p.score,

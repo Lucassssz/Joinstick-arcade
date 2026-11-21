@@ -18,6 +18,7 @@ import type {
 interface InternalFlipper extends PinballPlayerState {
   flipCd: number;
   bumpCd: number;
+  giantTimer: number;
 }
 
 interface PinballState {
@@ -28,8 +29,10 @@ interface PinballState {
   goalBannerColor: string | null;
   pauseTimer: number;
   multiballCharge: number;
+  centerHits: number;
   bumpers: { x: number; y: number; r: number; value: number; flash: number; colorHex: string }[];
   balls: PinballBallState[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: InternalFlipper[];
   nextId: number;
   finished: boolean;
@@ -77,6 +80,7 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
         y: ARENA_HEIGHT / 2,
         flipTimer: 0,
         bumpTimer: 0,
+        giantTimer: 0,
         goals: 0,
         score: 0,
         cooldownA: 0,
@@ -94,6 +98,7 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
       goalBannerColor: null,
       pauseTimer: 0,
       multiballCharge: 0,
+      centerHits: 0,
       bumpers: [
         { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, r: 36, value: 100, flash: 0, colorHex: '#FFB800' },
         { x: ARENA_WIDTH / 2 - 140, y: TABLE_TOP + 135, r: 28, value: 60, flash: 0, colorHex: '#00C2FF' },
@@ -102,6 +107,7 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
         { x: ARENA_WIDTH / 2 + 140, y: TABLE_BOTTOM - 135, r: 28, value: 60, flash: 0, colorHex: '#10D98B' },
       ],
       balls: [spawnBall(1, Math.random() < 0.5 ? 'left' : 'right')],
+      popups: [],
       players: list,
       nextId: 2,
       finished: false,
@@ -114,6 +120,11 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
 
     for (const b of state.bumpers) {
       b.flash = Math.max(0, b.flash - dt * 3.5);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 36 * dt;
+      state.popups[i].alpha -= dt * 0.95;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
     if (state.pauseTimer > 0) {
@@ -129,14 +140,16 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
       for (const p of state.players) {
         p.flipTimer = Math.max(0, p.flipTimer - dt);
         p.bumpTimer = Math.max(0, p.bumpTimer - dt);
+        p.giantTimer = Math.max(0, p.giantTimer - dt);
         p.flipCd = Math.max(0, p.flipCd - dt);
         p.bumpCd = Math.max(0, p.bumpCd - dt);
 
         const inp = players.find((x) => x.id === p.id);
         if (!inp) continue;
         const { dy, a, b } = inp.input;
+        const padHalf = p.giantTimer > 0 ? (PADDLE_H * 1.45) / 2 : PADDLE_H / 2;
         if (Math.abs(dy) > 0.08) {
-          p.y = Math.max(TABLE_TOP + PADDLE_H / 2 + 14, Math.min(TABLE_BOTTOM - PADDLE_H / 2 - 14, p.y + dy * 470 * dt));
+          p.y = Math.max(TABLE_TOP + padHalf + 14, Math.min(TABLE_BOTTOM - padHalf - 14, p.y + dy * 470 * dt));
         }
 
         if (a && !inp.prevA && p.flipCd <= 0) {
@@ -246,7 +259,8 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
         }
 
         // Bumper collisions
-        for (const bm of state.bumpers) {
+        for (let bi = 0; bi < state.bumpers.length; bi++) {
+          const bm = state.bumpers[bi];
           const dx = ball.x - bm.x;
           const dy = ball.y - bm.y;
           const d = Math.hypot(dx, dy);
@@ -262,15 +276,26 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
             state.multiballCharge = Math.min(1, state.multiballCharge + 0.2);
             sounds.push({ type: 'pickup' });
 
-            // Award bumper points to last toucher
             const hitter = state.players.find((p) => p.colorHex === ball.lastTouchColor);
-            if (hitter) hitter.score += bm.value;
+            if (hitter) {
+              hitter.score += bm.value;
+              if (bi === 0) {
+                state.centerHits++;
+                if (state.centerHits >= 3) {
+                  state.centerHits = 0;
+                  hitter.giantTimer = 8;
+                  hitter.score += 80;
+                  state.popups.push({ x: bm.x, y: bm.y - 36, text: 'JACKPOT +80 GIANT!', colorHex: '#FFB800', alpha: 1.25 });
+                  sounds.push({ type: 'win', playerId: hitter.id });
+                }
+              }
+            }
 
-            // Trigger Golden Multiball!
-            if (state.multiballCharge >= 1 && state.balls.length < 2) {
+            // Trigger Golden Multiball up to 3 balls!
+            if (state.multiballCharge >= 1 && state.balls.length < 3) {
               state.multiballCharge = 0;
               state.balls.push(spawnBall(state.nextId++, Math.random() < 0.5 ? 'left' : 'right', true));
-              state.goalBanner = 'GOLDEN MULTIBALL!';
+              state.goalBanner = state.balls.length >= 3 ? 'TRIPLE MULTIBALL!' : 'GOLDEN MULTIBALL!';
               state.goalBannerColor = '#FFB800';
               sounds.push({ type: 'boost' });
             }
@@ -279,11 +304,12 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
 
         // Flipper collisions
         for (const p of state.players) {
+          const padH = p.giantTimer > 0 ? PADDLE_H * 1.45 : PADDLE_H;
           const hitX = Math.abs(ball.x - p.x) < ball.r + 18;
-          const hitY = Math.abs(ball.y - p.y) < PADDLE_H / 2 + ball.r;
+          const hitY = Math.abs(ball.y - p.y) < padH / 2 + ball.r;
           if (hitX && hitY) {
             const dir = p.side === 'left' ? 1 : -1;
-            const relY = (ball.y - p.y) / (PADDLE_H / 2);
+            const relY = (ball.y - p.y) / (padH / 2);
             const isSnap = p.flipTimer > 0;
             const spd = isSnap ? 690 : 480;
             ball.x = p.x + dir * (ball.r + 20);
@@ -341,6 +367,7 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
       multiballCharge: state.multiballCharge,
       bumpers: state.bumpers.map((b) => ({ ...b })),
       balls: state.balls.map((b) => ({ ...b, trail: b.trail.map((pt) => ({ ...pt })) })),
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: state.players.map((p) => ({
         id: p.id,
         slotIndex: p.slotIndex,
@@ -352,6 +379,7 @@ export const pinballClashModule: ServerGameModule<PinballState> = {
         y: p.y,
         flipTimer: p.flipTimer,
         bumpTimer: p.bumpTimer,
+        giantTimer: p.giantTimer,
         goals: p.goals,
         score: p.score,
         cooldownA: p.cooldownA,

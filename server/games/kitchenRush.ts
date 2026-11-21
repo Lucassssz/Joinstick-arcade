@@ -31,6 +31,9 @@ interface FlyingPlate {
 
 interface InternalChef extends KitchenPlayerState {
   dashCd: number;
+  bootsTimer: number;
+  combo: number;
+  comboTimer: number;
 }
 
 interface KitchenState {
@@ -39,6 +42,8 @@ interface KitchenState {
   orders: KitchenOrderState[];
   stations: KitchenStationState[];
   flyingPlates: FlyingPlate[];
+  boots: { id: string; x: number; y: number }[];
+  bootsSpawnTimer: number;
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: InternalChef[];
   nextId: number;
@@ -49,12 +54,14 @@ const DISHES: DishKind[] = ['burger', 'pizza', 'taco'];
 
 function makeOrder(nextId: number): KitchenOrderState {
   const dish = DISHES[Math.floor(Math.random() * DISHES.length)];
+  const vip = Math.random() < 0.32;
   return {
     id: `ord_${nextId}`,
     dish,
-    timeLeft: 24,
-    maxTime: 24,
-    points: 120,
+    timeLeft: vip ? 20 : 24,
+    maxTime: vip ? 20 : 24,
+    points: vip ? 220 : 120,
+    vip,
   };
 }
 
@@ -81,17 +88,24 @@ function scoreDish(
 ): void {
   const ordIdx = state.orders.findIndex((o) => o.dish === dish);
   let pts = 65;
+  let isVip = false;
   if (ordIdx !== -1) {
     const ord = state.orders[ordIdx];
+    isVip = Boolean(ord.vip);
     const speedBonus = Math.round((ord.timeLeft / ord.maxTime) * 60);
     pts = ord.points + speedBonus;
     state.orders.splice(ordIdx, 1);
     state.orders.push(makeOrder(state.nextId++));
   }
-  chef.score += pts;
+  chef.combo = chef.comboTimer > 0 ? Math.min(4, chef.combo + 1) : 1;
+  chef.comboTimer = 11;
+  const streakTip = (chef.combo - 1) * 35;
+  const totalPts = pts + streakTip;
+  chef.score += totalPts;
   chef.served++;
-  state.popups.push({ x, y: y - 16, text: `+${pts}!`, colorHex: '#10D98B', alpha: 1 });
-  sounds.push({ type: 'pickup', playerId: chef.id });
+  const tag = isVip ? `VIP +${totalPts}!` : chef.combo > 1 ? `+${totalPts} x${chef.combo}!` : `+${totalPts}!`;
+  state.popups.push({ x, y: y - 16, text: tag, colorHex: isVip ? '#FFB800' : '#10D98B', alpha: 1 });
+  sounds.push({ type: isVip ? 'win' : 'pickup', playerId: chef.id });
   haptics.push({ playerId: chef.id, pattern: [18, 20, 30], reason: 'served' });
 }
 
@@ -110,6 +124,9 @@ export const kitchenRushModule: ServerGameModule<KitchenState> = {
       angle: 0,
       holding: null,
       dashTimer: 0,
+      bootsTimer: 0,
+      combo: 0,
+      comboTimer: 0,
       served: 0,
       score: 0,
       cooldownA: 0,
@@ -123,6 +140,8 @@ export const kitchenRushModule: ServerGameModule<KitchenState> = {
       orders: [makeOrder(1), makeOrder(2), makeOrder(3), makeOrder(4)],
       stations: buildStations(),
       flyingPlates: [],
+      boots: [],
+      bootsSpawnTimer: 6.5,
       popups: [],
       players: list,
       nextId: 10,
@@ -152,10 +171,23 @@ export const kitchenRushModule: ServerGameModule<KitchenState> = {
         }
       }
 
-      // Advance grills
+      // Spawn Chef Speed Boots
+      state.bootsSpawnTimer -= dt;
+      if (state.bootsSpawnTimer <= 0 && state.boots.length < 2) {
+        state.bootsSpawnTimer = 8.5;
+        state.boots.push({
+          id: `bt_${state.nextId++}`,
+          x: 340 + (Math.random() < 0.5 ? 0 : 440) + (Math.random() - 0.5) * 70,
+          y: 200 + Math.random() * 360,
+        });
+      }
+
+      // Advance grills (speed boosted if chef has Speed Boots!)
       for (const st of state.stations) {
         if (st.kind === 'grill' && st.cookingDish && st.cookProgress < 1) {
-          st.cookProgress = Math.min(1, st.cookProgress + dt * 0.62); // ~1.6s sizzle
+          const cookOwner = state.players.find((c) => c.id === st.cookOwnerId);
+          const grillRate = cookOwner && cookOwner.bootsTimer > 0 ? 0.95 : 0.62;
+          st.cookProgress = Math.min(1, st.cookProgress + dt * grillRate);
           if (st.cookProgress >= 1) {
             sounds.push({ type: 'confirm' });
           }
@@ -187,16 +219,31 @@ export const kitchenRushModule: ServerGameModule<KitchenState> = {
       for (const p of state.players) {
         p.dashTimer = Math.max(0, p.dashTimer - dt);
         p.dashCd = Math.max(0, p.dashCd - dt);
+        p.bootsTimer = Math.max(0, p.bootsTimer - dt);
+        p.comboTimer = Math.max(0, p.comboTimer - dt);
+        if (p.comboTimer <= 0) p.combo = 0;
+
+        for (let bi = state.boots.length - 1; bi >= 0; bi--) {
+          const bt = state.boots[bi];
+          if (Math.hypot(p.x - bt.x, p.y - bt.y) < 34) {
+            p.bootsTimer = 8;
+            p.score += 30;
+            state.popups.push({ x: bt.x, y: bt.y - 16, text: 'SPEED BOOTS!', colorHex: '#00C2FF', alpha: 1.1 });
+            state.boots.splice(bi, 1);
+            sounds.push({ type: 'boost', playerId: p.id });
+            haptics.push({ playerId: p.id, pattern: 18, reason: 'boots' });
+          }
+        }
+
         const inp = players.find((x) => x.id === p.id);
         if (!inp) continue;
         const { dx, dy, a, b } = inp.input;
         const mag = Math.hypot(dx, dy);
         if (mag > 0.12) {
           p.angle = Math.atan2(dy, dx);
-          const spd = p.dashTimer > 0 ? 450 : 285;
+          const spd = p.dashTimer > 0 ? 450 : p.bootsTimer > 0 ? 370 : 285;
           const nx = Math.max(58, Math.min(ARENA_WIDTH - 58, p.x + (dx / Math.max(1, mag)) * spd * dt));
           const ny = Math.max(115, Math.min(ARENA_HEIGHT - 48, p.y + (dy / Math.max(1, mag)) * spd * dt));
-          // Keep outside solid stations smoothly
           const collides = (tx: number, ty: number) =>
             state.stations.some(
               (st) => tx > st.x - 18 && tx < st.x + st.w + 18 && ty > st.y - 18 && ty < st.y + st.h + 18
@@ -318,6 +365,7 @@ export const kitchenRushModule: ServerGameModule<KitchenState> = {
         y: fp.y,
         colorHex: fp.colorHex,
       })),
+      boots: state.boots.map((bt) => ({ ...bt })),
       popups: state.popups.map((pp) => ({ ...pp })),
       players: state.players.map((p) => ({
         id: p.id,
@@ -329,6 +377,8 @@ export const kitchenRushModule: ServerGameModule<KitchenState> = {
         angle: p.angle,
         holding: p.holding ? { ...p.holding } : null,
         dashTimer: p.dashTimer,
+        bootsTimer: p.bootsTimer,
+        combo: p.combo,
         served: p.served,
         score: p.score,
         cooldownA: p.cooldownA,

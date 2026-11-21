@@ -1042,7 +1042,115 @@ const EXACT_GAME_TEXT_ZH: Record<string, string> = {
   'RIGHT GOAL!': '右方进球！',
   'BALL LOST!': '漏球了！',
   'GOLDEN MULTIBALL!': '黄金双球时刻！',
+  'TRIPLE MULTIBALL!': '三重黄金弹珠！',
   'MULTIBALL CHARGE': '多球充能',
+
+  // Upgraded mini-game popups & badges
+  'TITAN SIZE!': '泰坦巨化！',
+  'MEGA PULSE!': '超级震波！',
+  '+75 STAR!': '+75 星星！',
+  'GRAVITY VORTEX!': '引力漩涡！',
+  'SHIELD!': '护盾！',
+  'RAPID FIRE!': '极速连射！',
+  'TRIPLE LASER!': '三向激光！',
+  'HYPER BEAM!': '穿透激光！',
+  '+1 HP!': '+1 生命！',
+  '+55 CRYSTAL!': '+55 晶体！',
+  '+100 ELIM!': '+100 击毁！',
+  '+100 SHOVE KO!': '+100 推落淘汰！',
+  '+45 GOLD!': '+45 黄金！',
+  'SPRING JUMP!': '弹簧飞跃！',
+  'TURBO BOOTS!': '疾风战靴！',
+  'PASS SHIELD!': '免疫护盾！',
+  '+2.5s CHILL!': '+2.5秒 缓爆！',
+  'BLOCKED!': '已格挡！',
+  'CLUTCH PASS! +65': '极限传弹！+65',
+  'RECHARGED!': '能量回满！',
+  'EMP CLEAR!': '电磁清障！',
+  '+75 DATA!': '+75 数据！',
+  'NEAR MISS! +15': '擦身闪避！+15',
+  'TRIPLE SHOT!': '三连炮！',
+  'TURBO TREADS!': '极速履带！',
+  'ARMOR SHIELD!': '装甲护盾！',
+  '+50 CRATE!': '+50 补给箱！',
+  'BANK HIT!': '反弹命中！',
+  'MEGA KICK!': '超级重炮踢！',
+  'TURBO SPRINT!': '极速冲刺！',
+  'GOLD BALL!': '黄金双球！',
+  '+1 GOLD BALL!': '+1 金球加成！',
+  'GOLDEN TIME  2X': '黄金时间 2倍！',
+  '+25 GOLD!': '+25 黄金格！',
+  'MEGA ROLLER!': '巨型滚刷！',
+  'TURBO PAINT!': '极速涂装！',
+  'MEGA SPLASH!': '超级泼墨！',
+  'SHARD MAGNET!': '碎片磁铁！',
+  'ENERGY SHIELD!': '能量护盾！',
+  '+80 STAR!': '+80 星星！',
+  'SHIELD SAVED!': '护盾挡下一击！',
+  'GOLD CROWN!': '黄金皇冠！',
+  'EMP READY!': '电磁充能！',
+  'GHOST CLOAK!': '幽灵隐身斗篷！',
+  'MULTI PUCK!': '多重冰球！',
+  'GIANT MALLET!': '巨型球槌！',
+  'FIREBALL!': '烈焰火球！',
+  'BLADE WAVE!': '剑气斩！',
+  'WIND STEP!': '疾风步！',
+  'RING OUT!': '跌出擂台！',
+  'DEFLECT +45': '弹反剑气 +45',
+  'WAVE KO!': '剑气击杀！',
+  'PARRY +40': '完美格挡 +40',
+  'HEAVY SHELL x2!': '重型炮弹 x2！',
+  '+80 & REPAIR!': '+80 并修复核心！',
+  'DEFLECT +25': '反弹炮弹 +25',
+  '+45 GOLD': '+45 金币',
+  'ROYAL BOOST!': '皇家加速！',
+  'SHOCK READY!': '震波充能！',
+  'CROWNED +20': '戴上皇冠 +20',
+  'STEAL +30!': '夺冠成功 +30！',
+  'STAR THAW +75!': '全员解冻 +75！',
+  '+45 STAR!': '+45 星星！',
+  'BOLT READY +45': '冰箭就绪 +45',
+  'TURBO SKATES!': '极速冰鞋！',
+  'THAW +85!': '成功解救 +85！',
+  'SUPER FLARE!': '超级照明弹！',
+  'DENIED +40': '抢夺销毁 +40',
+  'ECTO HEAL +1!': '灵质回血 +1！',
+  'ECTO +40': '灵质充能 +40',
+  '4-WAY LASER!': '四向散射！',
+  'CORE +2 HP!': '核心修复 +2！',
+  'OVERCHARGE!': '火力超载！',
+  'LONG HOOK!': '超长飞爪！',
+  'ANCHOR BOOST!': '锚点疾风！',
+  '+100 KO!': '+100 击杀！',
+  '+60 GOLD!': '+60 金币！',
+  'BOOST GATE +55!': '加速门 +55！',
+  'COIN MAGNET!': '金币磁铁！',
+  'OVERDRIVE!': '超级加速！',
+  'FREE UPGRADE!': '免费升级！',
+  'LEAF SHIELD SAVED!': '树叶护盾挡灾！',
+  'GOLDEN VINE + SHIELD!': '金藤飞跃 + 护盾！',
+  'PERFECT ROLL +2!': '完美蓄力 +2！',
+  'FLAME +1!': '火力 +1！',
+  'BOMB +1!': '炸弹 +1！',
+  'SPEED +1!': '移速 +1！',
+  'BLAST SHIELD!': '防爆护盾！',
+  'MEGA BOMB x2!': '超级炸弹 x2！',
+  '+120 KO!': '+120 炸飞击杀！',
+  'FAKE OUT — RUN!': '假动作 — 继续跑！',
+  '+35 SPRINT!': '+35 冲刺回满！',
+  'SHIELDED!': '护盾格挡！',
+  'ZAPPED!': '红灯被电！',
+  'TURBO DANCE!': '极速舞步！',
+  'SHOCK READY +45!': '推人充能 +45！',
+  'SPEED BOOTS!': '主厨加速靴！',
+  'TREASURE MAP!': '藏宝图显形！',
+  'GOLD MAGNET!': '寻宝磁铁！',
+  'FRUIT FEVER RAIN!': '水果狂热雨！',
+  'BASKET MAGNET!': '果篮磁铁！',
+  '2X GOLDEN GAVEL': '2倍黄金拍卖！',
+  'JACKPOT +80 GIANT!': '大奖 +80 巨型弹板！',
+  GIANT: '巨型',
+  VIP: '贵宾',
 };
 
 function translateOrdinalZh(ord: string): string {
@@ -1137,6 +1245,18 @@ export function translateGameText(text: string, lang: Language): string {
   }
   if ((m = trimmed.match(/^(.+)\s+Cleared the Grid!$/i))) {
     return `${m[1]} 称霸光迹网格！`;
+  }
+  if ((m = trimmed.match(/^2X BLUE GOAL!\s+(.+)$/i))) {
+    return `双倍蓝队进球！${m[1]}`;
+  }
+  if (/^2X BLUE GOAL!$/i.test(trimmed)) {
+    return '双倍蓝队进球！';
+  }
+  if ((m = trimmed.match(/^2X RED GOAL!\s+(.+)$/i))) {
+    return `双倍红队进球！${m[1]}`;
+  }
+  if (/^2X RED GOAL!$/i.test(trimmed)) {
+    return '双倍红队进球！';
   }
   if ((m = trimmed.match(/^BLUE GOAL!\s+(.+)$/i))) {
     return `蓝队进球！${m[1]}`;
@@ -1459,6 +1579,51 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^\$(\d+) cash \+ \$(\d+) loot$/i))) {
     return `$${m[1]} 现金 + $${m[2]} 宝藏`;
   }
+  if ((m = trimmed.match(/^(.+) paid \$(\d+) \(2X MONOPOLY!\) rent to (.+)!$/i))) {
+    return `${m[1]} 向 ${m[3]} 支付 $${m[2]} 租金（2倍垄断）！`;
+  }
+  if ((m = trimmed.match(/^Lucky Card: Property Boom! (.+) Lv\.(\d+)$/i))) {
+    return `幸运卡：地产爆发！${translateGameText(m[1], lang)} 升至 ${m[2]} 级`;
+  }
+  if ((m = trimmed.match(/^Lucky Card: Tax Rebate! (.+) \+\$160$/i))) {
+    return `幸运卡：退税福利！${m[1]} +$160`;
+  }
+  if ((m = trimmed.match(/^(.+) got a Leaf Shield & swung to #(\d+)!$/i))) {
+    return `${m[1]} 获得树叶护盾并飞跃至 #${m[2]}！`;
+  }
+  if ((m = trimmed.match(/^(.+) found a Leaf Shield on Mystery Tile!$/i))) {
+    return `${m[1]} 在神秘格获得了树叶护盾！`;
+  }
+  if ((m = trimmed.match(/^(.+)'s Leaf Shield blocked a Banana slip!$/i))) {
+    return `${m[1]} 的树叶护盾挡住了香蕉滑倒！`;
+  }
+  if ((m = trimmed.match(/^(.+)'s Leaf Shield chased away the Snake!$/i))) {
+    return `${m[1]} 的树叶护盾赶走了丛林巨蛇！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) · (\d+)s · SHRINK!$/i))) {
+    return `第 ${m[1]}/${m[2]} 回合 · ${m[3]}秒 · 缩圈!`;
+  }
+  if ((m = trimmed.match(/^SPEED ROUND — WAVE (\d+)!$/i))) {
+    return `极速轮 — 第 ${m[1]} 波！`;
+  }
+  if ((m = trimmed.match(/^VIP \+(\d+)!$/i))) {
+    return `贵宾单 +${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^\+(\d+) x(\d+)!$/i))) {
+    return `+${m[1]} (${m[2]}连击)！`;
+  }
+  if ((m = trimmed.match(/^2X GOLDEN GAVEL · CHEST (\d+)\/(\d+)!$/i))) {
+    return `2倍黄金拍卖 · 第 ${m[1]}/${m[2]} 宝箱！`;
+  }
+  if ((m = trimmed.match(/^(.+) PASSED EARLY \(\+\$60\)!$/i))) {
+    return `${m[1]} 抢先弃拍 (+$60)！`;
+  }
+  if ((m = trimmed.match(/^QUACK! (.+) paid \$(\d+) for a Duck \(\$(\d+)\)!$/i))) {
+    return `嘎嘎！${m[1]} 花 $${m[2]} 拍下小黄鸭 ($${m[3]})！`;
+  }
+  if ((m = trimmed.match(/^(.+) WON \$(\d+) \(([+-]\$\d+)\)!$/i))) {
+    return `${m[1]} 赢得 $${m[2]} (${m[3]})！`;
+  }
   if ((m = trimmed.match(/^NO BIDS! Chest held \$(\d+)!$/i))) {
     return `流拍！宝箱里藏着 $${m[1]}！`;
   }
@@ -1467,6 +1632,9 @@ export function translateGameText(text: string, lang: Language): string {
   }
   if ((m = trimmed.match(/^(\d+) goals · (\d+) pts$/i))) {
     return `${m[1]} 球 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^\+(\d+)!$/i))) {
+    return `+${m[1]}！`;
   }
   if ((m = trimmed.match(/^(\d+) pts$/i))) {
     return `${m[1]} 分`;

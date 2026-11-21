@@ -20,6 +20,8 @@ interface InternalGravityPlayer extends GravityPlayerState {
   flipCd: number;
   phaseCd: number;
   respawnTimer: number;
+  magnetTimer: number;
+  overdriveTimer: number;
 }
 
 interface InternalObstacle {
@@ -42,9 +44,14 @@ interface GravityFlipState {
   ceilingY: number;
   spawnTimer: number;
   coinTimer: number;
+  gateTimer: number;
+  pickupTimer: number;
   nextId: number;
   obstacles: InternalObstacle[];
-  coins: { id: string; x: number; y: number; r: number }[];
+  coins: { id: string; x: number; y: number; r: number; golden?: boolean }[];
+  gates: { id: string; x: number; y: number; h: number; triggered?: boolean }[];
+  pickups: { id: string; x: number; y: number; kind: 'magnet' | 'overdrive' }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: Map<string, InternalGravityPlayer>;
 }
 
@@ -75,6 +82,8 @@ function makePlayer(p: ServerPlayerInputState, idx: number): InternalGravityPlay
     flipCd: 0,
     phaseCd: 0,
     respawnTimer: 0,
+    magnetTimer: 0,
+    overdriveTimer: 0,
   };
 }
 
@@ -93,9 +102,14 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
       ceilingY: CEILING_Y,
       spawnTimer: 1.1,
       coinTimer: 0.7,
+      gateTimer: 4.8,
+      pickupTimer: 6.8,
       nextId: 1,
       obstacles: [],
       coins: [],
+      gates: [],
+      pickups: [],
+      popups: [],
       players: new Map(),
     };
     players.forEach((p, idx) => state.players.set(p.id, makePlayer(p, idx)));
@@ -161,23 +175,51 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
       state.spawnTimer = Math.max(0.78, 1.38 - state.elapsed * 0.008);
     }
 
-    // Spawn coin trails
+    // Spawn coin trails & golden star coins
     state.coinTimer -= dt;
     if (state.coinTimer <= 0) {
       const lane = Math.floor(Math.random() * 3);
       const y = lane === 0 ? FLOOR_Y - 46 : lane === 1 ? CEILING_Y + 46 : (FLOOR_Y + CEILING_Y) / 2;
+      const hasGold = Math.random() < 0.35;
       for (let i = 0; i < 3; i++) {
         state.coins.push({
           id: `c_${state.nextId++}`,
           x: ARENA_WIDTH + 60 + i * 48,
           y,
-          r: 13,
+          r: i === 1 && hasGold ? 16 : 13,
+          golden: i === 1 && hasGold,
         });
       }
-      state.coinTimer = 1.6;
+      state.coinTimer = 1.5;
     }
 
-    // Scroll obstacles & coins
+    // Spawn Boost Gates
+    state.gateTimer -= dt;
+    if (state.gateTimer <= 0) {
+      state.gateTimer = 6.2;
+      const gy = (FLOOR_Y + CEILING_Y) / 2 + (Math.random() < 0.5 ? -85 : 85);
+      state.gates.push({
+        id: `gt_${state.nextId++}`,
+        x: ARENA_WIDTH + 80,
+        y: gy - 55,
+        h: 110,
+      });
+    }
+
+    // Spawn Magnet / Overdrive pickups
+    state.pickupTimer -= dt;
+    if (state.pickupTimer <= 0) {
+      state.pickupTimer = 8.4;
+      const laneY = Math.random() < 0.5 ? FLOOR_Y - 52 : CEILING_Y + 52;
+      state.pickups.push({
+        id: `gp_${state.nextId++}`,
+        x: ARENA_WIDTH + 90,
+        y: laneY,
+        kind: Math.random() < 0.55 ? 'magnet' : 'overdrive',
+      });
+    }
+
+    // Scroll obstacles, coins, gates, pickups & popups
     for (let i = state.obstacles.length - 1; i >= 0; i--) {
       state.obstacles[i].x -= state.speed * dt;
       if (state.obstacles[i].x + state.obstacles[i].w < -80) state.obstacles.splice(i, 1);
@@ -185,6 +227,19 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
     for (let i = state.coins.length - 1; i >= 0; i--) {
       state.coins[i].x -= state.speed * dt;
       if (state.coins[i].x < -40) state.coins.splice(i, 1);
+    }
+    for (let i = state.gates.length - 1; i >= 0; i--) {
+      state.gates[i].x -= state.speed * dt;
+      if (state.gates[i].x < -60) state.gates.splice(i, 1);
+    }
+    for (let i = state.pickups.length - 1; i >= 0; i--) {
+      state.pickups[i].x -= state.speed * dt;
+      if (state.pickups[i].x < -50) state.pickups.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 34 * dt;
+      state.popups[i].alpha -= dt * 0.95;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
     // Update players
@@ -209,6 +264,8 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
       e.flipCd = Math.max(0, e.flipCd - dt);
       e.phaseCd = Math.max(0, e.phaseCd - dt);
       e.phaseTimer = Math.max(0, e.phaseTimer - dt);
+      e.magnetTimer = Math.max(0, e.magnetTimer - dt);
+      e.overdriveTimer = Math.max(0, e.overdriveTimer - dt);
 
       // Button A (or strong joystick up/down flick): Flip Gravity!
       const pressFlip = (p.input.a && !p.prevA) || (Math.abs(p.input.dy) > 0.78 && Math.sign(p.input.dy) !== e.gravityDir && e.grounded);
@@ -251,22 +308,68 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
 
       // Distance & score accumulation
       e.distance += (state.speed * dt) / 25;
-      e.score += dt * 10;
+      e.score += dt * (e.overdriveTimer > 0 ? 22 : 10);
+
+      // Magnet pulls nearby coins
+      if (e.magnetTimer > 0) {
+        for (const c of state.coins) {
+          const dx = e.x - c.x;
+          const dy = e.y - c.y;
+          const d = Math.hypot(dx, dy);
+          if (d < 220 && d > 1) {
+            c.x += (dx / d) * 380 * dt;
+            c.y += (dy / d) * 380 * dt;
+          }
+        }
+      }
 
       // Coin pickups
       for (let i = state.coins.length - 1; i >= 0; i--) {
         const c = state.coins[i];
         if (Math.hypot(e.x - c.x, e.y - c.y) < PLAYER_R + c.r + 6) {
-          e.coins += 1;
-          e.score += 25;
+          const pts = c.golden ? 60 : 25;
+          e.coins += c.golden ? 2 : 1;
+          e.score += pts;
+          if (c.golden) {
+            state.popups.push({ x: e.x, y: e.y - 26, text: '+60 GOLD!', colorHex: '#FFB800', alpha: 1.1 });
+          }
           state.coins.splice(i, 1);
           sounds.push({ type: 'pickup', playerId: p.id });
           haptics.push({ playerId: p.id, pattern: 15, reason: 'coin' });
         }
       }
 
-      // Obstacle collisions (skipped while phasing)
-      if (e.phaseTimer <= 0) {
+      // Boost gates
+      for (const gt of state.gates) {
+        if (!gt.triggered && Math.abs(e.x - gt.x) < 28 && e.y >= gt.y && e.y <= gt.y + gt.h) {
+          gt.triggered = true;
+          e.score += 55;
+          e.overdriveTimer = Math.max(e.overdriveTimer, 3.5);
+          state.popups.push({ x: e.x, y: e.y - 30, text: 'BOOST GATE +55!', colorHex: '#10D98B', alpha: 1.2 });
+          sounds.push({ type: 'boost', playerId: p.id });
+          haptics.push({ playerId: p.id, pattern: [18, 16, 28], reason: 'gate' });
+        }
+      }
+
+      // Magnet / Overdrive pickups
+      for (let i = state.pickups.length - 1; i >= 0; i--) {
+        const pk = state.pickups[i];
+        if (Math.hypot(e.x - pk.x, e.y - pk.y) < PLAYER_R + 20) {
+          if (pk.kind === 'magnet') {
+            e.magnetTimer = 7.5;
+            state.popups.push({ x: pk.x, y: pk.y - 18, text: 'COIN MAGNET!', colorHex: '#00C2FF', alpha: 1.2 });
+          } else {
+            e.overdriveTimer = 4.5;
+            state.popups.push({ x: pk.x, y: pk.y - 18, text: 'OVERDRIVE!', colorHex: '#FF3B9A', alpha: 1.2 });
+          }
+          state.pickups.splice(i, 1);
+          sounds.push({ type: 'boost', playerId: p.id });
+          haptics.push({ playerId: p.id, pattern: 22, reason: 'pickup' });
+        }
+      }
+
+      // Obstacle collisions (skipped while phasing or overdrive)
+      if (e.phaseTimer <= 0 && e.overdriveTimer <= 0) {
         let hit = false;
         for (const ob of state.obstacles) {
           if (ob.kind === 'saw') {
@@ -328,6 +431,9 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
       ceilingY: state.ceilingY,
       obstacles: state.obstacles.map((o) => ({ ...o })),
       coins: state.coins.map((c) => ({ ...c })),
+      gates: state.gates.map((g) => ({ ...g })),
+      pickups: state.pickups.map((pk) => ({ ...pk })),
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: [...state.players.values()].map((e) => ({
         id: e.id,
         slotIndex: e.slotIndex,
@@ -343,6 +449,8 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
         score: Math.round(e.score),
         cooldownA: e.cooldownA,
         cooldownB: e.cooldownB,
+        magnetTimer: e.magnetTimer,
+        overdriveTimer: e.overdriveTimer,
       })),
     };
   },

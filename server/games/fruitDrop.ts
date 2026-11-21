@@ -19,12 +19,15 @@ interface InternalCatcher extends FruitPlayerState {
   vx: number;
   dashCd: number;
   bounceCd: number;
+  magnetTimer: number;
 }
 
 interface FruitDropState {
   timeLeft: number;
   totalTime: number;
   spawnTimer: number;
+  feverTimer: number;
+  feverCooldown: number;
   items: FallingItemState[];
   bounceWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
@@ -35,23 +38,31 @@ interface FruitDropState {
 
 const STAGE_Y = ARENA_HEIGHT - 96;
 
-function spawnItem(nextId: number, progress: number): FallingItemState {
+function spawnItem(nextId: number, progress: number, fever = false): FallingItemState {
   const roll = Math.random();
   let kind: FallingItemState['kind'] = 'pineapple';
-  if (roll < 0.27) kind = 'pineapple';
-  else if (roll < 0.52) kind = 'watermelon';
-  else if (roll < 0.72) kind = 'berry';
-  else if (roll < 0.84) kind = 'star';
-  else kind = 'bomb';
+  if (fever) {
+    if (roll < 0.35) kind = 'pineapple';
+    else if (roll < 0.65) kind = 'watermelon';
+    else if (roll < 0.85) kind = 'berry';
+    else kind = 'star';
+  } else {
+    if (roll < 0.25) kind = 'pineapple';
+    else if (roll < 0.48) kind = 'watermelon';
+    else if (roll < 0.68) kind = 'berry';
+    else if (roll < 0.80) kind = 'star';
+    else if (roll < 0.85) kind = 'magnet';
+    else kind = 'bomb';
+  }
 
-  const speedScale = 1 + progress * 0.45;
+  const speedScale = 1 + progress * 0.45 + (fever ? 0.12 : 0);
   return {
     id: `fr_${nextId}`,
     kind,
     x: 90 + Math.random() * (ARENA_WIDTH - 180),
     y: -24,
     vx: (Math.random() - 0.5) * 48,
-    vy: (kind === 'star' ? 245 : kind === 'bomb' ? 225 : 190 + Math.random() * 55) * speedScale,
+    vy: (kind === 'star' || kind === 'magnet' ? 245 : kind === 'bomb' ? 225 : 190 + Math.random() * 55) * speedScale,
     r: kind === 'watermelon' ? 24 : kind === 'bomb' ? 22 : 20,
     rot: Math.random() * Math.PI * 2,
   };
@@ -74,6 +85,7 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
       dashTimer: 0,
       bounceTimer: 0,
       stunTimer: 0,
+      magnetTimer: 0,
       combo: 0,
       caught: 0,
       score: 0,
@@ -87,6 +99,8 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
       timeLeft: totalTime,
       totalTime,
       spawnTimer: 0.35,
+      feverTimer: 0,
+      feverCooldown: 18,
       items: [],
       bounceWaves: [],
       popups: [],
@@ -116,14 +130,27 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
       state.timeLeft = Math.max(0, state.timeLeft - dt);
       if (state.timeLeft <= 0) state.finished = true;
 
+      if (state.feverTimer > 0) {
+        state.feverTimer = Math.max(0, state.feverTimer - dt);
+      } else {
+        state.feverCooldown -= dt;
+        if (state.feverCooldown <= 0 || (state.timeLeft < 13 && state.timeLeft > 12.8)) {
+          state.feverTimer = 6.0;
+          state.feverCooldown = 22;
+          state.popups.push({ x: ARENA_WIDTH / 2, y: 150, text: 'FRUIT FEVER RAIN!', colorHex: '#FFB800', alpha: 1.5 });
+          sounds.push({ type: 'go' });
+        }
+      }
+
       const progress = 1 - state.timeLeft / state.totalTime;
+      const fever = state.feverTimer > 0;
       state.spawnTimer -= dt;
       if (state.spawnTimer <= 0) {
-        const count = Math.min(3, 1 + Math.floor(state.players.length / 3));
+        const count = Math.min(4, (fever ? 2 : 1) + Math.floor(state.players.length / 3));
         for (let i = 0; i < count; i++) {
-          state.items.push(spawnItem(state.nextId++, progress));
+          state.items.push(spawnItem(state.nextId++, progress, fever));
         }
-        state.spawnTimer = Math.max(0.32, 0.72 - progress * 0.28);
+        state.spawnTimer = fever ? 0.24 : Math.max(0.32, 0.72 - progress * 0.28);
       }
 
       // Move players
@@ -131,6 +158,7 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
         p.dashTimer = Math.max(0, p.dashTimer - dt);
         p.bounceTimer = Math.max(0, p.bounceTimer - dt);
         p.stunTimer = Math.max(0, p.stunTimer - dt);
+        p.magnetTimer = Math.max(0, p.magnetTimer - dt);
         p.dashCd = Math.max(0, p.dashCd - dt);
         p.bounceCd = Math.max(0, p.bounceCd - dt);
 
@@ -187,6 +215,17 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
       // Move falling items & check basket catches
       for (let i = state.items.length - 1; i >= 0; i--) {
         const it = state.items[i];
+        // Magnet baskets pull nearby fruits gently inward
+        if (it.kind !== 'bomb') {
+          for (const p of state.players) {
+            if (p.magnetTimer > 0 && p.stunTimer <= 0) {
+              const d = Math.hypot(p.x - it.x, p.y - 16 - it.y);
+              if (d < 220 && d > 1) {
+                it.x += ((p.x - it.x) / d) * 320 * dt;
+              }
+            }
+          }
+        }
         it.x += it.vx * dt;
         it.y += it.vy * dt;
         it.vy += 65 * dt;
@@ -207,6 +246,12 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
               state.popups.push({ x: p.x, y: p.y - 44, text: 'BOOM -50!', colorHex: '#FF4D2E', alpha: 1 });
               sounds.push({ type: 'hit', playerId: p.id });
               haptics.push({ playerId: p.id, pattern: [40, 30, 50], reason: 'bomb-hit' });
+            } else if (it.kind === 'magnet') {
+              p.magnetTimer = 6.5;
+              p.score += 40;
+              state.popups.push({ x: p.x, y: p.y - 44, text: 'BASKET MAGNET!', colorHex: '#00C2FF', alpha: 1.2 });
+              sounds.push({ type: 'boost', playerId: p.id });
+              haptics.push({ playerId: p.id, pattern: [18, 16, 28], reason: 'magnet' });
             } else {
               p.combo = Math.min(5, p.combo + 1);
               p.caught++;
@@ -261,6 +306,7 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
       gameId: 'fruit-drop',
       timeLeft: state.timeLeft,
       totalTime: state.totalTime,
+      feverActive: state.feverTimer > 0,
       items: state.items.map((it) => ({ ...it })),
       bounceWaves: state.bounceWaves.map((w) => ({ ...w })),
       popups: state.popups.map((pp) => ({ ...pp })),
@@ -274,6 +320,7 @@ export const fruitDropModule: ServerGameModule<FruitDropState> = {
         dashTimer: p.dashTimer,
         bounceTimer: p.bounceTimer,
         stunTimer: p.stunTimer,
+        magnetTimer: p.magnetTimer,
         combo: p.combo,
         caught: p.caught,
         score: p.score,

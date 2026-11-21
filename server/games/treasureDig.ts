@@ -26,6 +26,7 @@ interface InternalHunter extends TreasurePlayerState {
   digCd: number;
   radarCd: number;
   pulseCd: number;
+  magnetTimer: number;
 }
 
 interface TreasureState {
@@ -33,6 +34,8 @@ interface TreasureState {
   totalTime: number;
   spots: TreasureSpotState[];
   crabs: InternalCrab[];
+  pickups: { id: string; x: number; y: number; kind: 'map' | 'magnet' }[];
+  pickupTimer: number;
   dugHoles: { x: number; y: number; success: boolean; alpha: number; colorHex: string }[];
   radars: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
@@ -104,6 +107,7 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
         digCd: 0,
         radarCd: 0,
         pulseCd: 0,
+        magnetTimer: 0,
       };
     });
 
@@ -112,6 +116,8 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
       totalTime,
       spots,
       crabs,
+      pickups: [],
+      pickupTimer: 6.5,
       dugHoles: [],
       radars: [],
       popups: [],
@@ -149,6 +155,17 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
         s.revealedTimer = Math.max(0, s.revealedTimer - dt);
       }
 
+      state.pickupTimer -= dt;
+      if (state.pickupTimer <= 0 && state.pickups.length < 2) {
+        state.pickupTimer = 8.5;
+        state.pickups.push({
+          id: `tp_${state.nextId++}`,
+          x: BEACH_LEFT + 80 + Math.random() * (BEACH_RIGHT - BEACH_LEFT - 160),
+          y: BEACH_TOP + 60 + Math.random() * (BEACH_BOTTOM - BEACH_TOP - 120),
+          kind: Math.random() < 0.5 ? 'map' : 'magnet',
+        });
+      }
+
       // Update crabs
       for (const c of state.crabs) {
         c.stunTimer = Math.max(0, c.stunTimer - dt);
@@ -179,6 +196,25 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
         p.digCd = Math.max(0, p.digCd - dt);
         p.radarCd = Math.max(0, p.radarCd - dt);
         p.pulseCd = Math.max(0, p.pulseCd - dt);
+        p.magnetTimer = Math.max(0, p.magnetTimer - dt);
+
+        // Pick up Map / Golden Magnet
+        for (let pi = state.pickups.length - 1; pi >= 0; pi--) {
+          const pk = state.pickups[pi];
+          if (Math.hypot(p.x - pk.x, p.y - pk.y) < 34) {
+            if (pk.kind === 'map') {
+              for (const s of state.spots) s.revealedTimer = Math.max(s.revealedTimer, 4.5);
+              state.popups.push({ x: pk.x, y: pk.y - 18, text: 'TREASURE MAP!', colorHex: '#FFB800', alpha: 1.2 });
+            } else {
+              p.magnetTimer = 8;
+              state.popups.push({ x: pk.x, y: pk.y - 18, text: 'GOLD MAGNET!', colorHex: '#00C2FF', alpha: 1.2 });
+            }
+            p.score += 35;
+            state.pickups.splice(pi, 1);
+            sounds.push({ type: 'boost', playerId: p.id });
+            haptics.push({ playerId: p.id, pattern: 22, reason: 'treasure-pickup' });
+          }
+        }
 
         const inp = players.find((x) => x.id === p.id);
         if (inp && p.stunTimer <= 0) {
@@ -186,7 +222,7 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
           const mag = Math.hypot(dx, dy);
           if (mag > 0.12 && p.digTimer <= 0) {
             p.angle = Math.atan2(dy, dx);
-            const spd = 255;
+            const spd = p.magnetTimer > 0 ? 320 : 255;
             p.x = Math.max(BEACH_LEFT, Math.min(BEACH_RIGHT, p.x + (dx / Math.max(1, mag)) * spd * dt));
             p.y = Math.max(BEACH_TOP, Math.min(BEACH_BOTTOM, p.y + (dy / Math.max(1, mag)) * spd * dt));
           }
@@ -194,9 +230,9 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
           // Action A: Dig
           if (a && !inp.prevA && p.digCd <= 0) {
             p.digTimer = 0.28;
-            p.digCd = 0.65;
+            p.digCd = p.magnetTimer > 0 ? 0.38 : 0.65;
             let hitIdx = -1;
-            let hitDist = 66;
+            let hitDist = p.magnetTimer > 0 ? 92 : 66;
             state.spots.forEach((s, idx) => {
               const d = Math.hypot(s.x - p.x, s.y - p.y);
               if (d < hitDist) {
@@ -316,6 +352,7 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
         stunTimer: c.stunTimer,
       })),
       dugHoles: state.dugHoles.map((h) => ({ ...h })),
+      pickups: state.pickups.map((pk) => ({ ...pk })),
       radars: state.radars.map((r) => ({ ...r })),
       popups: state.popups.map((pp) => ({ ...pp })),
       players: state.players.map((p) => ({
@@ -329,6 +366,7 @@ export const treasureDigModule: ServerGameModule<TreasureState> = {
         heat: p.heat,
         digTimer: p.digTimer,
         stunTimer: p.stunTimer,
+        magnetTimer: p.magnetTimer,
         chestsFound: p.chestsFound,
         score: p.score,
         cooldownA: p.cooldownA,

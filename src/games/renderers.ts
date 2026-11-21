@@ -104,6 +104,27 @@ export function drawNameplate(
   ctx.restore();
 }
 
+export function drawPopupTexts(
+  ctx: CanvasRenderingContext2D,
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[]
+): void {
+  if (!popups || popups.length === 0) return;
+  ctx.save();
+  ctx.font = '800 16px "Bricolage Grotesque", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const pop of popups) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, pop.alpha));
+    const txt = tCanvas(pop.text);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(10, 12, 18, 0.92)';
+    ctx.strokeText(txt, pop.x, pop.y);
+    ctx.fillStyle = pop.colorHex;
+    ctx.fillText(txt, pop.x, pop.y);
+  }
+  ctx.restore();
+}
+
 // ============================================================
 // 1. BUMPER BRAWL RENDERER (2.5D Extruded Steel Arena)
 // ============================================================
@@ -170,6 +191,22 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
     ctx.restore();
   }
 
+  // Power orbs on arena floor
+  const pNow = Date.now() * 0.0045;
+  for (const orb of snap.powerups ?? []) {
+    const col = orb.kind === 'giant' ? '#FFB800' : orb.kind === 'shock' ? '#00C2FF' : '#10D98B';
+    const glyph = orb.kind === 'giant' ? 'BIG' : orb.kind === 'shock' ? 'ZAP' : '★';
+    const bob = Math.sin(pNow + orb.x * 0.03) * 4;
+    drawSphere3D(ctx, orb.x, orb.y, 15, col, '#FFFFFF', 5 + bob, true);
+    ctx.save();
+    ctx.fillStyle = '#0B0E14';
+    ctx.font = '800 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(glyph, orb.x, orb.y - (5 + bob) + 0.5);
+    ctx.restore();
+  }
+
   // Y-sort pylons and players for authentic 2.5D overlap
   type Item =
     | { kind: 'pylon'; y: number; pylon: (typeof snap.pylons)[number] }
@@ -197,6 +234,22 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
     } else {
       const p = item.player;
       ctx.save();
+      if ((p.giantTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#FFB800';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 4, p.radius + 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((p.shockTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#00C2FF';
+        ctx.lineWidth = 3.5;
+        ctx.setLineDash([7, 5]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 4, p.radius + 15, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       // Dash trail glow
       if (p.dashTimer > 0) {
         ctx.save();
@@ -228,7 +281,7 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
       // Colored 3D bumper chassis sitting above rubber ring
       drawCharacterPod3D(ctx, p.x, p.y - 4, p.radius - 2, p.angle, p.colorHex, {
         height: 8,
-        rimColor: '#F8FAFC',
+        rimColor: (p.giantTimer ?? 0) > 0 ? '#FFB800' : '#F8FAFC',
         visorColor: '#FFFFFF',
       });
 
@@ -242,9 +295,12 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
       ctx.fill();
       ctx.restore();
 
-      drawNameplate(ctx, p.x, p.y - p.radius - 26, p.slotIndex, p.name, p.colorHex);
+      const streakTag = (p.streak ?? 0) >= 2 ? `${p.streak}x` : undefined;
+      drawNameplate(ctx, p.x, p.y - p.radius - 26, p.slotIndex, p.name, p.colorHex, streakTag);
     }
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   // Top-left round counter
   ctx.save();
@@ -379,21 +435,99 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
   ctx.lineWidth = 2;
   ctx.strokeRect(10, 10, ARENA_WIDTH - 20, ARENA_HEIGHT - 20);
 
+  // Gravity Vortex Event
+  if (snap.vortex && snap.vortex.active) {
+    const vx = snap.vortex.x;
+    const vy = snap.vortex.y;
+    const vr = snap.vortex.r;
+    ctx.save();
+    for (let ring = 0; ring < 3; ring++) {
+      const rr = ((now * 45 + ring * (vr / 3)) % vr);
+      ctx.strokeStyle = `rgba(168, 85, 247, ${0.45 * (1 - rr / vr)})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(vx, vy, Math.max(12, vr - rr), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const coreGrad = ctx.createRadialGradient(vx, vy, 4, vx, vy, 42);
+    coreGrad.addColorStop(0, '#05070D');
+    coreGrad.addColorStop(0.55, 'rgba(168, 85, 247, 0.6)');
+    coreGrad.addColorStop(1, 'rgba(0, 194, 255, 0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(vx, vy, 42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Pickups (3D hovering orbs)
   const tNow = Date.now() * 0.004;
   for (const pk of snap.pickups) {
     const color =
-      pk.kind === 'shield' ? '#00C2FF' : pk.kind === 'rapid' ? '#FFB800' : '#10D98B';
-    const label = pk.kind === 'shield' ? 'S' : pk.kind === 'rapid' ? 'R' : '+';
+      pk.kind === 'shield'
+        ? '#00C2FF'
+        : pk.kind === 'rapid'
+          ? '#FFB800'
+          : pk.kind === 'triple'
+            ? '#FF3B9A'
+            : pk.kind === 'pierce'
+              ? '#C084FC'
+              : '#10D98B';
+    const label =
+      pk.kind === 'shield'
+        ? 'S'
+        : pk.kind === 'rapid'
+          ? 'R'
+          : pk.kind === 'triple'
+            ? '3X'
+            : pk.kind === 'pierce'
+              ? 'P'
+              : '+';
     const bob = Math.sin(tNow + pk.x) * 4;
     drawSphere3D(ctx, pk.x, pk.y, 16, color, '#FFFFFF', 5 + bob, true);
     ctx.save();
     ctx.fillStyle = '#0B0E14';
-    ctx.font = '800 13px "JetBrains Mono", monospace';
+    ctx.font = '800 12px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, pk.x, pk.y - (5 + bob) + 0.5);
     ctx.restore();
+  }
+
+  // Destructible Gold Crystal Meteors
+  for (const cr of snap.crystals ?? []) {
+    ctx.save();
+    ctx.translate(cr.x, cr.y);
+    ctx.fillStyle = 'rgba(255, 184, 0, 0.16)';
+    ctx.beginPath();
+    ctx.arc(0, 0, cr.r + 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(now * 0.6 + cr.x * 0.01);
+    ctx.fillStyle = '#F59E0B';
+    ctx.strokeStyle = '#FEF08A';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const rad = i % 2 === 0 ? cr.r : cr.r * 0.72;
+      const px = Math.cos(a) * rad;
+      const py = Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    if (cr.hp < cr.maxHp) {
+      ctx.save();
+      ctx.strokeStyle = '#FEF08A';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cr.x, cr.y, cr.r + 6, -Math.PI / 2, -Math.PI / 2 + (cr.hp / cr.maxHp) * Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // 3D Asteroids
@@ -407,11 +541,17 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
     const angle = Math.atan2(b.vy, b.vx);
     ctx.translate(b.x, b.y);
     ctx.rotate(angle);
+    if (b.pierce) {
+      ctx.fillStyle = 'rgba(192, 132, 252, 0.45)';
+      ctx.beginPath();
+      ctx.roundRect(-16, -6, 30, 12, 6);
+      ctx.fill();
+    }
     ctx.fillStyle = shadeHex(b.colorHex, -0.35);
     ctx.beginPath();
     ctx.roundRect(-11, -3.5, 20, 8, 4);
     ctx.fill();
-    ctx.fillStyle = b.colorHex;
+    ctx.fillStyle = b.pierce ? '#E879F9' : b.colorHex;
     ctx.beginPath();
     ctx.roundRect(-10, -4, 18, 6, 3);
     ctx.fill();
@@ -529,6 +669,8 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
     ctx.stroke();
     ctx.restore();
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   // Timer readout
   ctx.save();
@@ -679,6 +821,41 @@ function renderTurboDrift(
     ctx.restore();
   }
 
+  // Oil slick puddles on track
+  for (const oil of snap.oils ?? []) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(10, 12, 18, 0.88)';
+    ctx.beginPath();
+    ctx.ellipse(oil.x, oil.y, oil.r, oil.r * 0.72, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0, 194, 255, 0.22)';
+    ctx.beginPath();
+    ctx.ellipse(oil.x - 4, oil.y - 3, oil.r * 0.45, oil.r * 0.25, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Track Coins & Mystery Boxes
+  const driftNow = Date.now() * 0.005;
+  for (const c of snap.coins ?? []) {
+    const bob = Math.sin(driftNow + c.x * 0.03) * 3.5;
+    if (c.kind === 'mystery') {
+      drawSphere3D(ctx, c.x, c.y, 13, '#A855F7', '#FDE047', 4 + bob, true);
+      ctx.save();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', c.x, c.y - (4 + bob));
+      ctx.restore();
+    } else {
+      drawSphere3D(ctx, c.x, c.y, 10, '#FFB800', '#FEF9C3', 3 + bob, true);
+    }
+  }
+
   // Emit & render drift skid marks
   for (const car of snap.players) {
     if (car.drifting) {
@@ -793,6 +970,30 @@ function renderTurboDrift(
     ctx.fillStyle = 'rgba(186, 230, 253, 0.45)';
     ctx.fillRect(4, -5, 4, 10);
 
+    // Slipstream draft streaks or oil-spin ring
+    if (!car.falling && car.drafting) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 194, 255, 0.72)';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(-22, -12);
+      ctx.lineTo(14, -14);
+      ctx.moveTo(-22, 12);
+      ctx.lineTo(14, 14);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (!car.falling && car.slipping) {
+      ctx.save();
+      ctx.strokeStyle = '#A855F7';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.restore();
 
     const posStr = car.falling
@@ -804,6 +1005,7 @@ function renderTurboDrift(
       : car.position === 3
       ? '3rd'
       : `${car.position}th`;
+    const coinTag = !car.falling && (car.coins ?? 0) > 0 ? `${posStr} · $${car.coins}` : posStr;
     drawNameplate(
       ctx,
       car.x,
@@ -811,7 +1013,7 @@ function renderTurboDrift(
       car.slotIndex,
       car.name,
       car.falling ? '#FF4D2E' : car.colorHex,
-      posStr
+      coinTag
     );
   }
 

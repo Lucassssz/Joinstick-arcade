@@ -19,6 +19,8 @@ interface InternalVaultPlayer extends VaultPlayerState {
   vy: number;
   dashCd: number;
   hackCd: number;
+  overchargeTimer: number;
+  bagBonus: number;
 }
 
 interface InternalSpike {
@@ -66,7 +68,10 @@ interface VaultHeistState {
   spikes: InternalSpike[];
   lasers: InternalLaser[];
   drones: InternalDrone[];
-  relics: { id: string; x: number; y: number; value: number }[];
+  relics: { id: string; x: number; y: number; value: number; kind: 'gem' | 'crown' }[];
+  pickups: { id: string; kind: 'emp-cell' | 'cloak'; x: number; y: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  pickupTimer: number;
   portal: { x: number; y: number; r: number };
   hackWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   players: Map<string, InternalVaultPlayer>;
@@ -122,11 +127,13 @@ function spawnRelic(state: VaultHeistState) {
     ? available[Math.floor(Math.random() * available.length)]
     : RELIC_SPOTS[Math.floor(Math.random() * RELIC_SPOTS.length)];
   const edgeBonus = Math.hypot(pick.x - PORTAL_X, pick.y - PORTAL_Y) > 420;
+  const isCrown = edgeBonus && Math.random() < 0.35;
   state.relics.push({
     id: `rel_${state.nextId++}`,
     x: pick.x,
     y: pick.y,
-    value: edgeBonus ? 60 : 40,
+    value: isCrown ? 140 : edgeBonus ? 60 : 40,
+    kind: isCrown ? 'crown' : 'gem',
   });
 }
 
@@ -144,6 +151,8 @@ function makePlayer(p: ServerPlayerInputState, idx: number, total: number): Inte
     angle,
     dashTimer: 0,
     invulnTimer: 1.5,
+    overchargeTimer: 0,
+    bagBonus: 0,
     carrying: 0,
     banked: 0,
     score: 0,
@@ -192,6 +201,9 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
         { x: 600, y: 615, r: 16, ax: 330, ay: 615, bx: 870, by: 615, t: 0.5, dir: -1, speed: 0.28, angle: 0, disabledTimer: 0 },
       ],
       relics: [],
+      pickups: [],
+      popups: [],
+      pickupTimer: 6,
       portal: { x: PORTAL_X, y: PORTAL_Y, r: PORTAL_R },
       hackWaves: [],
       players: new Map(),
@@ -270,6 +282,27 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
       if (w.radius >= w.maxRadius) state.hackWaves.splice(i, 1);
     }
 
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pp = state.popups[i];
+      pp.y -= 32 * dt;
+      pp.alpha -= 0.9 * dt;
+      if (pp.alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    state.pickupTimer -= dt;
+    if (state.pickupTimer <= 0 && state.pickups.length < 2) {
+      const spot = RELIC_SPOTS[Math.floor(Math.random() * RELIC_SPOTS.length)];
+      state.pickups.push({
+        id: `vp_${state.nextId++}`,
+        kind: Math.random() < 0.5 ? 'emp-cell' : 'cloak',
+        x: spot.x,
+        y: spot.y,
+      });
+      state.pickupTimer = 9;
+    }
+
+    const lockdown = state.timeLeft <= 18;
+
     // Update players
     for (const p of players) {
       const e = state.players.get(p.id);
@@ -279,6 +312,7 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
       e.hackCd = Math.max(0, e.hackCd - dt);
       e.dashTimer = Math.max(0, e.dashTimer - dt);
       e.invulnTimer = Math.max(0, e.invulnTimer - dt);
+      e.overchargeTimer = Math.max(0, e.overchargeTimer - dt);
 
       const mag = Math.hypot(p.input.dx, p.input.dy);
       const nx = mag > 0.12 ? p.input.dx / mag : 0;
@@ -324,7 +358,7 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
       }
 
       const carryPenalty = Math.max(0.84, 1 - e.carrying * 0.04);
-      const speed = (e.dashTimer > 0 ? 660 : 315) * carryPenalty;
+      const speed = (e.dashTimer > 0 ? 660 : e.overchargeTimer > 0 ? 405 : 315) * carryPenalty;
       const targetVx = e.dashTimer > 0 ? e.vx : nx * speed;
       const targetVy = e.dashTimer > 0 ? e.vy : ny * speed;
       const accel = e.dashTimer > 0 ? 4 : 15;
@@ -336,12 +370,16 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
 
       for (const w of state.walls) resolveWall(e, PLAYER_R, w);
 
-      // Grab relics
+      // Grab relics (gems or Gold Crowns)
       for (let i = state.relics.length - 1; i >= 0; i--) {
         const r = state.relics[i];
         if (Math.hypot(e.x - r.x, e.y - r.y) < PLAYER_R + 18) {
           e.carrying += 1;
           e.score += 15;
+          if (r.kind === 'crown') {
+            e.bagBonus += 85;
+            state.popups.push({ x: r.x, y: r.y - 12, text: 'GOLD CROWN!', colorHex: '#FFB800', alpha: 1 });
+          }
           state.relics.splice(i, 1);
           spawnRelic(state);
           sounds.push({ type: 'pickup', playerId: p.id });
@@ -349,12 +387,41 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
         }
       }
 
+      // Grab pickups
+      for (let i = state.pickups.length - 1; i >= 0; i--) {
+        const pk = state.pickups[i];
+        if (Math.hypot(e.x - pk.x, e.y - pk.y) < PLAYER_R + 18) {
+          if (pk.kind === 'emp-cell') {
+            e.hackCd = 0;
+            e.overchargeTimer = 5.5;
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'EMP READY!', colorHex: '#00C2FF', alpha: 1 });
+          } else {
+            e.invulnTimer = 3.8;
+            e.overchargeTimer = 3.8;
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'GHOST CLOAK!', colorHex: '#A855F7', alpha: 1 });
+          }
+          state.pickups.splice(i, 1);
+          sounds.push({ type: 'pickup', playerId: p.id });
+          haptics.push({ playerId: p.id, pattern: 24, reason: 'pickup' });
+        }
+      }
+
       // Bank carried relics at extraction portal
       if (e.carrying > 0 && Math.hypot(e.x - PORTAL_X, e.y - PORTAL_Y) < PORTAL_R + PLAYER_R) {
         const comboBonus = e.carrying > 1 ? (e.carrying - 1) * 30 : 0;
-        e.score += e.carrying * 55 + comboBonus;
+        const mult = lockdown ? 2 : 1;
+        const payout = (e.carrying * 55 + comboBonus + e.bagBonus) * mult;
+        e.score += payout;
         e.banked += e.carrying;
+        state.popups.push({
+          x: PORTAL_X,
+          y: PORTAL_Y - 24,
+          text: lockdown ? `+${payout} 2X RUSH!` : `+${payout} BANKED!`,
+          colorHex: lockdown ? '#FFB800' : '#10D98B',
+          alpha: 1,
+        });
         e.carrying = 0;
+        e.bagBonus = 0;
         sounds.push({ type: 'lap', playerId: p.id });
         haptics.push({ playerId: p.id, pattern: [28, 25, 45], reason: 'bank' });
       }
@@ -432,6 +499,7 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
       gameId: 'vault-heist',
       timeLeft: state.timeLeft,
       totalTime: state.totalTime,
+      lockdown: state.timeLeft <= 18,
       walls: state.walls,
       spikes: state.spikes.map((s) => ({
         x: s.x,
@@ -457,6 +525,8 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
         disabledTimer: d.disabledTimer,
       })),
       relics: state.relics.map((r) => ({ ...r })),
+      pickups: state.pickups.map((pk) => ({ ...pk })),
+      popups: state.popups.map((pp) => ({ ...pp })),
       portal: state.portal,
       hackWaves: state.hackWaves.map((w) => ({ ...w })),
       players: [...state.players.values()].map((e) => ({
@@ -469,6 +539,7 @@ export const vaultHeistModule: ServerGameModule<VaultHeistState> = {
         angle: e.angle,
         dashTimer: e.dashTimer,
         invulnTimer: e.invulnTimer,
+        overchargeTimer: e.overchargeTimer,
         carrying: e.carrying,
         banked: e.banked,
         score: Math.round(e.score),

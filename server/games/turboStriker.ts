@@ -18,6 +18,8 @@ import type {
 interface InternalStrikerPlayer extends StrikerPlayerState {
   kickCd: number;
   tackleCd: number;
+  megaKickTimer: number;
+  speedTimer: number;
 }
 
 interface TurboStrikerInternalState {
@@ -29,6 +31,11 @@ interface TurboStrikerInternalState {
   goalBanner: string | null;
   goalBannerColor: string | null;
   ball: StrikerBallState;
+  bonusBalls: StrikerBallState[];
+  powerups: { id: string; kind: 'mega-kick' | 'speed' | 'twin-ball'; x: number; y: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  pickupTimer: number;
+  nextId: number;
   lastTouchPlayerId: string | null;
   players: InternalStrikerPlayer[];
   finished: boolean;
@@ -89,15 +96,20 @@ function resetBall(): StrikerBallState {
 }
 
 function toSnapshot(state: TurboStrikerInternalState): TurboStrikerSnapshot {
+  const goldenTime = state.timeLeft > 0 && state.timeLeft <= 15;
   return {
     gameId: 'turbo-striker',
     timeLeft: Math.max(0, state.timeLeft),
     totalTime: state.totalTime,
     scoreRed: state.scoreRed,
     scoreBlue: state.scoreBlue,
+    goldenTime,
     goalBanner: state.goalBanner,
     goalBannerColor: state.goalBannerColor,
     ball: { ...state.ball },
+    bonusBalls: state.bonusBalls.map((b) => ({ ...b })),
+    powerups: state.powerups.map((pk) => ({ ...pk })),
+    popups: state.popups.map((pp) => ({ ...pp })),
     players: state.players.map((p) => ({
       id: p.id,
       slotIndex: p.slotIndex,
@@ -111,6 +123,8 @@ function toSnapshot(state: TurboStrikerInternalState): TurboStrikerSnapshot {
       angle: p.angle,
       tackleTimer: p.tackleTimer,
       kickRingTimer: p.kickRingTimer,
+      megaKickTimer: p.megaKickTimer,
+      speedTimer: p.speedTimer,
       cooldownA: Math.min(1, Math.max(0, p.kickCd / KICK_COOLDOWN)),
       cooldownB: Math.min(1, Math.max(0, p.tackleCd / TACKLE_COOLDOWN)),
       goals: p.goals,
@@ -174,6 +188,8 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
       angle: 0,
       tackleTimer: 0,
       kickRingTimer: 0,
+      megaKickTimer: 0,
+      speedTimer: 0,
       kickCd: 0,
       tackleCd: 0,
       cooldownA: 0,
@@ -192,6 +208,11 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
       goalBanner: null,
       goalBannerColor: null,
       ball: resetBall(),
+      bonusBalls: [],
+      powerups: [],
+      popups: [],
+      pickupTimer: 5.5,
+      nextId: 1,
       lastTouchPlayerId: null,
       players: list,
       finished: false,
@@ -214,6 +235,8 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
       angle: team === 'red' ? 0 : Math.PI,
       tackleTimer: 0,
       kickRingTimer: 0,
+      megaKickTimer: 0,
+      speedTimer: 0,
       kickCd: 0,
       tackleCd: 0,
       cooldownA: 0,
@@ -227,6 +250,13 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
     const sounds: SoundEvent[] = [];
     const haptics: HapticTrigger[] = [];
     const inputMap = new Map(inputPlayers.map((p) => [p.id, p]));
+
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pp = state.popups[i];
+      pp.y -= 32 * dt;
+      pp.alpha -= 0.9 * dt;
+      if (pp.alpha <= 0) state.popups.splice(i, 1);
+    }
 
     if (state.goalPauseTimer > 0) {
       state.goalPauseTimer -= dt;
@@ -245,7 +275,20 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
         sounds.push({ type: 'win' });
       }
 
+      // Spawn pitch powerups
+      state.pickupTimer -= dt;
+      if (state.pickupTimer <= 0 && state.powerups.length < 2) {
+        const kinds: ('mega-kick' | 'speed' | 'twin-ball')[] = ['mega-kick', 'speed', 'twin-ball'];
+        const kind = kinds[Math.floor(Math.random() * kinds.length)];
+        const px = ARENA_WIDTH / 2 + (Math.random() - 0.5) * 440;
+        const py = ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 320;
+        state.powerups.push({ id: `sp_${state.nextId++}`, kind, x: px, y: py });
+        state.pickupTimer = 8.5;
+      }
+
       const ball = state.ball;
+      const goldenTime = state.timeLeft <= 15;
+      const goalValue = goldenTime ? 2 : 1;
 
       // Update strikers
       for (const p of state.players) {
@@ -254,6 +297,8 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
         p.tackleCd = Math.max(0, p.tackleCd - dt);
         p.tackleTimer = Math.max(0, p.tackleTimer - dt);
         p.kickRingTimer = Math.max(0, p.kickRingTimer - dt);
+        p.megaKickTimer = Math.max(0, p.megaKickTimer - dt);
+        p.speedTimer = Math.max(0, p.speedTimer - dt);
 
         if (src) {
           const { dx, dy, a, b } = src.input;
@@ -261,7 +306,7 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
           if (mag > 0.08) {
             const nx = dx / Math.max(1, mag);
             const ny = dy / Math.max(1, mag);
-            const accel = p.tackleTimer > 0 ? 1550 : 1420;
+            const accel = (p.tackleTimer > 0 ? 1550 : 1420) * (p.speedTimer > 0 ? 1.25 : 1);
             p.vx += nx * accel * dt;
             p.vy += ny * accel * dt;
             p.angle = Math.atan2(ny, nx);
@@ -271,18 +316,25 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
           if (a && !src.prevA && p.kickCd <= 0) {
             p.kickCd = KICK_COOLDOWN;
             p.kickRingTimer = 0.24;
-            const bx = ball.x - p.x;
-            const by = ball.y - p.y;
-            const dist = Math.hypot(bx, by);
-            if (dist < KICK_RANGE) {
-              const dirX = dist > 0.01 ? bx / dist : Math.cos(p.angle);
-              const dirY = dist > 0.01 ? by / dist : Math.sin(p.angle);
-              ball.vx = dirX * 780 + p.vx * 0.25;
-              ball.vy = dirY * 780 + p.vy * 0.25;
-              ball.spin = (Math.random() - 0.5) * 14;
-              ball.lastTouchColor = p.team === 'red' ? '#FF4D2E' : '#00C2FF';
-              state.lastTouchPlayerId = p.id;
-              p.score += 10;
+            const kickPower = p.megaKickTimer > 0 ? 1080 : 780;
+            let kicked = false;
+            for (const targetBall of [ball, ...state.bonusBalls]) {
+              const bx = targetBall.x - p.x;
+              const by = targetBall.y - p.y;
+              const dist = Math.hypot(bx, by);
+              if (dist < KICK_RANGE) {
+                const dirX = dist > 0.01 ? bx / dist : Math.cos(p.angle);
+                const dirY = dist > 0.01 ? by / dist : Math.sin(p.angle);
+                targetBall.vx = dirX * kickPower + p.vx * 0.25;
+                targetBall.vy = dirY * kickPower + p.vy * 0.25;
+                targetBall.spin = (Math.random() - 0.5) * 14;
+                targetBall.lastTouchColor = p.team === 'red' ? '#FF4D2E' : '#00C2FF';
+                state.lastTouchPlayerId = p.id;
+                p.score += 10;
+                kicked = true;
+              }
+            }
+            if (kicked) {
               sounds.push({ type: 'pulse', playerId: p.id });
               haptics.push({ playerId: p.id, pattern: [38, 22, 55], reason: 'kick' });
             } else {
@@ -308,7 +360,8 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
         p.vx *= damping;
         p.vy *= damping;
 
-        const maxSpd = p.tackleTimer > 0 ? 660 : 370;
+        const baseMax = p.speedTimer > 0 ? 485 : 370;
+        const maxSpd = p.tackleTimer > 0 ? 680 : baseMax;
         const spd = Math.hypot(p.vx, p.vy);
         if (spd > maxSpd) {
           p.vx = (p.vx / spd) * maxSpd;
@@ -321,6 +374,37 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
         // Clamp players inside pitch
         p.x = Math.max(PITCH_LEFT + PLAYER_RADIUS, Math.min(PITCH_RIGHT - PLAYER_RADIUS, p.x));
         p.y = Math.max(PITCH_TOP + PLAYER_RADIUS, Math.min(PITCH_BOTTOM - PLAYER_RADIUS, p.y));
+
+        // Collect pitch powerups
+        for (let i = state.powerups.length - 1; i >= 0; i--) {
+          const pk = state.powerups[i];
+          if (Math.hypot(p.x - pk.x, p.y - pk.y) < PLAYER_RADIUS + 18) {
+            if (pk.kind === 'mega-kick') {
+              p.megaKickTimer = 8;
+              state.popups.push({ x: pk.x, y: pk.y - 12, text: 'MEGA KICK!', colorHex: '#FF4D2E', alpha: 1 });
+            } else if (pk.kind === 'speed') {
+              p.speedTimer = 8;
+              state.popups.push({ x: pk.x, y: pk.y - 12, text: 'TURBO SPRINT!', colorHex: '#10D98B', alpha: 1 });
+            } else {
+              if (state.bonusBalls.length < 2) {
+                state.bonusBalls.push({
+                  x: ARENA_WIDTH / 2,
+                  y: ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 120,
+                  vx: (Math.random() - 0.5) * 320,
+                  vy: (Math.random() - 0.5) * 320,
+                  radius: 14,
+                  spin: 0,
+                  lastTouchColor: '#FFB800',
+                });
+              }
+              state.popups.push({ x: pk.x, y: pk.y - 12, text: 'GOLD BALL!', colorHex: '#FFB800', alpha: 1 });
+            }
+            p.score += 15;
+            state.powerups.splice(i, 1);
+            sounds.push({ type: 'pickup', playerId: p.id });
+            haptics.push({ playerId: p.id, pattern: 26, reason: 'pickup' });
+          }
+        }
       }
 
       // Player-to-player bump
@@ -419,14 +503,14 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
         // Check GOAL scored!
         if (ball.x < PITCH_LEFT - ball.radius * 0.6) {
           // Ball entered Left (Red's net) -> Blue scores!
-          state.scoreBlue += 1;
+          state.scoreBlue += goalValue;
           const scorer = state.players.find((p) => p.id === state.lastTouchPlayerId);
           if (scorer && scorer.team === 'blue') {
             scorer.goals += 1;
-            scorer.score += 120;
-            state.goalBanner = `BLUE GOAL! ${scorer.name}`;
+            scorer.score += 120 * goalValue;
+            state.goalBanner = goldenTime ? `2X BLUE GOAL! ${scorer.name}` : `BLUE GOAL! ${scorer.name}`;
           } else {
-            state.goalBanner = 'BLUE TEAM SCORES!';
+            state.goalBanner = goldenTime ? '2X BLUE GOAL!' : 'BLUE TEAM SCORES!';
           }
           state.goalBannerColor = '#00C2FF';
           state.goalPauseTimer = 1.8;
@@ -436,14 +520,14 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
           }
         } else if (ball.x > PITCH_RIGHT + ball.radius * 0.6) {
           // Ball entered Right (Blue's net) -> Red scores!
-          state.scoreRed += 1;
+          state.scoreRed += goalValue;
           const scorer = state.players.find((p) => p.id === state.lastTouchPlayerId);
           if (scorer && scorer.team === 'red') {
             scorer.goals += 1;
-            scorer.score += 120;
-            state.goalBanner = `RED GOAL! ${scorer.name}`;
+            scorer.score += 120 * goalValue;
+            state.goalBanner = goldenTime ? `2X RED GOAL! ${scorer.name}` : `RED GOAL! ${scorer.name}`;
           } else {
-            state.goalBanner = 'RED TEAM SCORES!';
+            state.goalBanner = goldenTime ? '2X RED GOAL!' : 'RED TEAM SCORES!';
           }
           state.goalBannerColor = '#FF4D2E';
           state.goalPauseTimer = 1.8;
@@ -451,6 +535,58 @@ export const turboStrikerModule: ServerGameModule<TurboStrikerInternalState> = {
           for (const pl of state.players) {
             haptics.push({ playerId: pl.id, pattern: [50, 30, 80], reason: 'goal' });
           }
+        }
+      }
+
+      // Bonus Gold Balls physics & goal scoring (instant +1 without resetting main kickoff)
+      for (let bi = state.bonusBalls.length - 1; bi >= 0; bi--) {
+        const bb = state.bonusBalls[bi];
+        bb.x += bb.vx * dt;
+        bb.y += bb.vy * dt;
+        bb.vx *= Math.pow(0.45, dt);
+        bb.vy *= Math.pow(0.45, dt);
+        for (const p of state.players) {
+          const dx = bb.x - p.x;
+          const dy = bb.y - p.y;
+          const dist = Math.hypot(dx, dy);
+          const minD = PLAYER_RADIUS + bb.radius;
+          if (dist > 0.001 && dist < minD) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            bb.x = p.x + nx * minD;
+            bb.y = p.y + ny * minD;
+            bb.vx = nx * 360 + p.vx * 0.7;
+            bb.vy = ny * 360 + p.vy * 0.7;
+            bb.lastTouchColor = p.team === 'red' ? '#FF4D2E' : '#00C2FF';
+            state.lastTouchPlayerId = p.id;
+          }
+        }
+        if (bb.y < PITCH_TOP + bb.radius) {
+          bb.y = PITCH_TOP + bb.radius;
+          bb.vy = Math.abs(bb.vy) * 0.85;
+        } else if (bb.y > PITCH_BOTTOM - bb.radius) {
+          bb.y = PITCH_BOTTOM - bb.radius;
+          bb.vy = -Math.abs(bb.vy) * 0.85;
+        }
+        const inMouth = bb.y > goalTop + bb.radius * 0.5 && bb.y < goalBottom - bb.radius * 0.5;
+        if (!inMouth) {
+          if (bb.x < PITCH_LEFT + bb.radius) {
+            bb.x = PITCH_LEFT + bb.radius;
+            bb.vx = Math.abs(bb.vx) * 0.85;
+          } else if (bb.x > PITCH_RIGHT - bb.radius) {
+            bb.x = PITCH_RIGHT - bb.radius;
+            bb.vx = -Math.abs(bb.vx) * 0.85;
+          }
+        } else if (bb.x < PITCH_LEFT - bb.radius * 0.4) {
+          state.scoreBlue += 1;
+          state.popups.push({ x: PITCH_LEFT + 60, y: bb.y, text: '+1 GOLD BALL!', colorHex: '#00C2FF', alpha: 1 });
+          state.bonusBalls.splice(bi, 1);
+          sounds.push({ type: 'lap' });
+        } else if (bb.x > PITCH_RIGHT + bb.radius * 0.4) {
+          state.scoreRed += 1;
+          state.popups.push({ x: PITCH_RIGHT - 60, y: bb.y, text: '+1 GOLD BALL!', colorHex: '#FF4D2E', alpha: 1 });
+          state.bonusBalls.splice(bi, 1);
+          sounds.push({ type: 'lap' });
         }
       }
     }

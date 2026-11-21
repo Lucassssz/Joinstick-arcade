@@ -20,6 +20,8 @@ interface InternalMeteorPlayer extends MeteorPlayerState {
   fireCd: number;
   novaCd: number;
   invulnTimer: number;
+  spreadTimer: number;
+  rapidTimer: number;
 }
 
 interface InternalMeteor {
@@ -60,7 +62,9 @@ interface MeteorSwarmState {
   nextId: number;
   meteors: InternalMeteor[];
   bullets: InternalBullet[];
+  pickups: { id: string; kind: 'spread-shot' | 'core-repair' | 'overcharge'; x: number; y: number }[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: Map<string, InternalMeteorPlayer>;
 }
 
@@ -136,6 +140,8 @@ function makePlayer(p: ServerPlayerInputState, idx: number, total: number): Inte
     fireCd: 0,
     novaCd: 0,
     invulnTimer: 1.5,
+    spreadTimer: 0,
+    rapidTimer: 0,
   };
 }
 
@@ -156,7 +162,9 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
       nextId: 1,
       meteors: [],
       bullets: [],
+      pickups: [],
       explosions: [],
+      popups: [],
       players: new Map(),
     };
     players.forEach((p, idx) => state.players.set(p.id, makePlayer(p, idx, players.length)));
@@ -183,6 +191,11 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
       state.explosions[i].alpha -= dt * 3.2;
       if (state.explosions[i].alpha <= 0) state.explosions.splice(i, 1);
     }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 28 * dt;
+      state.popups[i].alpha -= dt * 1.1;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
+    }
 
     // Spawn meteors scaled fairly to player count & wave (intermediate pace)
     state.spawnTimer -= dt;
@@ -201,6 +214,8 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
       e.novaCd = Math.max(0, e.novaCd - dt);
       e.novaTimer = Math.max(0, e.novaTimer - dt);
       e.invulnTimer = Math.max(0, e.invulnTimer - dt);
+      e.spreadTimer = Math.max(0, e.spreadTimer - dt);
+      e.rapidTimer = Math.max(0, e.rapidTimer - dt);
 
       if (e.downed) {
         // Solo auto-revive after 3s, or co-op ally hover revives quickly!
@@ -228,9 +243,9 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
       const ny = mag > 0.12 ? p.input.dy / mag : 0;
       if (mag > 0.12) e.angle = Math.atan2(ny, nx);
 
-      // Button A: Twin Plasma Blasters (hold or tap)
+      // Button A: Twin Plasma Blasters (or 4-way Spread Blaster!)
       if (p.input.a && e.fireCd <= 0) {
-        e.fireCd = FIRE_CD;
+        e.fireCd = e.rapidTimer > 0 ? FIRE_CD * 0.58 : FIRE_CD;
         const perpX = -Math.sin(e.angle) * 7;
         const perpY = Math.cos(e.angle) * 7;
         const spd = 720;
@@ -245,6 +260,21 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
             vy: Math.sin(e.angle) * spd,
             ttl: 1.15,
           });
+        }
+        if (e.spreadTimer > 0) {
+          for (const off of [-0.26, 0.26]) {
+            const ang = e.angle + off;
+            state.bullets.push({
+              id: `b_${state.nextId++}`,
+              ownerId: e.id,
+              colorHex: '#FFB800',
+              x: e.x + Math.cos(ang) * 18,
+              y: e.y + Math.sin(ang) * 18,
+              vx: Math.cos(ang) * spd,
+              vy: Math.sin(ang) * spd,
+              ttl: 1.15,
+            });
+          }
         }
         sounds.push({ type: 'shoot', playerId: p.id });
         haptics.push({ playerId: p.id, pattern: 12, reason: 'blaster' });
@@ -286,6 +316,30 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
       if (cdist < CORE_R + PLAYER_R + 6) {
         e.x = CX + (cdx / cdist) * (CORE_R + PLAYER_R + 6);
         e.y = CY + (cdy / cdist) * (CORE_R + PLAYER_R + 6);
+      }
+
+      // Collect Space Care Packages
+      for (let pi = state.pickups.length - 1; pi >= 0; pi--) {
+        const pk = state.pickups[pi];
+        if (Math.hypot(e.x - pk.x, e.y - pk.y) < PLAYER_R + 20) {
+          if (pk.kind === 'spread-shot') {
+            e.spreadTimer = 9.0;
+            state.popups.push({ x: e.x, y: e.y - 26, text: '4-WAY LASER!', colorHex: '#FFB800', alpha: 1 });
+          } else if (pk.kind === 'core-repair') {
+            state.coreHp = Math.min(state.maxCoreHp, state.coreHp + 2);
+            e.hp = Math.min(e.maxHp, e.hp + 1);
+            e.score += 60;
+            state.popups.push({ x: e.x, y: e.y - 26, text: 'CORE +2 HP!', colorHex: '#10D98B', alpha: 1 });
+          } else {
+            e.rapidTimer = 7.0;
+            e.novaCd = 0;
+            e.score += 40;
+            state.popups.push({ x: e.x, y: e.y - 26, text: 'OVERCHARGE!', colorHex: '#00C2FF', alpha: 1 });
+          }
+          state.pickups.splice(pi, 1);
+          sounds.push({ type: 'pickup', playerId: p.id });
+          haptics.push({ playerId: p.id, pattern: 20, reason: 'care-package' });
+        }
       }
 
       e.cooldownA = e.fireCd / FIRE_CD;
@@ -358,6 +412,13 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
                     shootCd: 9,
                   });
                 }
+              }
+              // UFOs always drop care packages; large rocks drop 40%
+              if ((m.kind === 'ufo' || (m.maxHp >= 3 && Math.random() < 0.42)) && state.pickups.length < 4) {
+                const roll = Math.random();
+                const kind: 'spread-shot' | 'core-repair' | 'overcharge' =
+                  roll < 0.36 ? 'spread-shot' : roll < 0.7 ? 'core-repair' : 'overcharge';
+                state.pickups.push({ id: `mpk_${state.nextId++}`, kind, x: m.x, y: m.y });
               }
               state.meteors.splice(mi, 1);
               sounds.push({ type: 'hit' });
@@ -477,7 +538,9 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
         colorHex: b.colorHex,
         enemy: b.enemy,
       })),
+      pickups: state.pickups.map((p) => ({ ...p })),
       explosions: state.explosions.map((e) => ({ ...e })),
+      popups: state.popups.map((p) => ({ ...p })),
       players: [...state.players.values()].map((e) => ({
         id: e.id,
         slotIndex: e.slotIndex,
@@ -491,6 +554,8 @@ export const meteorSwarmModule: ServerGameModule<MeteorSwarmState> = {
         downed: e.downed,
         reviveProgress: e.reviveProgress,
         novaTimer: e.novaTimer,
+        spreadTimer: e.spreadTimer,
+        rapidTimer: e.rapidTimer,
         kills: e.kills,
         score: e.score,
         cooldownA: e.cooldownA,

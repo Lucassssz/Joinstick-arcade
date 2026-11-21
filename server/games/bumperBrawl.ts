@@ -3,6 +3,7 @@ import {
   ARENA_WIDTH,
   type BumperBrawlSnapshot,
   type BumperPlayerState,
+  type BumperPowerupState,
   type RankingEntry,
   type SoundEvent,
 } from '../../src/shared/types.ts';
@@ -19,6 +20,9 @@ interface InternalBumperPlayer extends BumperPlayerState {
   pulseCd: number;
   lastHitBy: string | null;
   lastHitTime: number;
+  giantTimer: number;
+  shockTimer: number;
+  streak: number;
 }
 
 interface InternalShockwave {
@@ -26,6 +30,14 @@ interface InternalShockwave {
   y: number;
   radius: number;
   maxRadius: number;
+  colorHex: string;
+  alpha: number;
+}
+
+interface InternalPopup {
+  x: number;
+  y: number;
+  text: string;
   colorHex: string;
   alpha: number;
 }
@@ -40,8 +52,13 @@ interface BumperInternalState {
   minRingRadius: number;
   ringCenterX: number;
   ringCenterY: number;
+  pylonAngle: number;
   roundBanner: string | null;
   pylons: { x: number; y: number; r: number }[];
+  powerups: BumperPowerupState[];
+  powerupTimer: number;
+  powerupSeq: number;
+  popups: InternalPopup[];
   shockwaves: InternalShockwave[];
   players: InternalBumperPlayer[];
   soloMode: boolean;
@@ -52,12 +69,13 @@ const DASH_COOLDOWN = 1.7;
 const DASH_DURATION = 0.24;
 const PULSE_COOLDOWN = 3.0;
 const PULSE_RADIUS = 155;
-const PLAYER_RADIUS = 23;
+const BASE_RADIUS = 23;
+const GIANT_RADIUS = 31;
 const ROUND_TIME_LIMIT = 50;
 
 function spawnPlayersForRound(
   players: ServerPlayerInputState[],
-  prevMap?: Map<string, { score: number; kos: number }>
+  prevMap?: Map<string, { score: number; kos: number; streak: number }>
 ): InternalBumperPlayer[] {
   const cx = ARENA_WIDTH / 2;
   const cy = ARENA_HEIGHT / 2;
@@ -76,10 +94,13 @@ function spawnPlayersForRound(
       vx: 0,
       vy: 0,
       angle: angle + Math.PI,
-      radius: PLAYER_RADIUS,
+      radius: BASE_RADIUS,
       alive: true,
       dashTimer: 0,
       pulseTimer: 0,
+      giantTimer: 0,
+      shockTimer: 0,
+      streak: prev?.streak ?? 0,
       dashCd: 0,
       pulseCd: 0,
       cooldownA: 0,
@@ -92,12 +113,12 @@ function spawnPlayersForRound(
   });
 }
 
-function buildPylons(ringRadius: number): { x: number; y: number; r: number }[] {
+function buildPylons(ringRadius: number, phaseAngle = 0): { x: number; y: number; r: number }[] {
   const cx = ARENA_WIDTH / 2;
   const cy = ARENA_HEIGHT / 2;
   const dist = Math.min(110, ringRadius * 0.42);
   return [0, 1, 2].map((i) => {
-    const a = (i * Math.PI * 2) / 3 - Math.PI / 2;
+    const a = (i * Math.PI * 2) / 3 - Math.PI / 2 + phaseAngle;
     return {
       x: cx + Math.cos(a) * dist,
       y: cy + Math.sin(a) * dist,
@@ -118,6 +139,8 @@ function toSnapshot(state: BumperInternalState): BumperBrawlSnapshot {
     ringCenterY: state.ringCenterY,
     roundBanner: state.roundBanner,
     pylons: state.pylons,
+    powerups: state.powerups.map((p) => ({ ...p })),
+    popups: state.popups.map((p) => ({ ...p })),
     shockwaves: state.shockwaves.map((s) => ({ ...s })),
     players: state.players.map((p) => ({
       id: p.id,
@@ -133,6 +156,9 @@ function toSnapshot(state: BumperInternalState): BumperBrawlSnapshot {
       alive: p.alive,
       dashTimer: p.dashTimer,
       pulseTimer: p.pulseTimer,
+      giantTimer: p.giantTimer,
+      shockTimer: p.shockTimer,
+      streak: p.streak,
       cooldownA: Math.min(1, Math.max(0, p.dashCd / DASH_COOLDOWN)),
       cooldownB: Math.min(1, Math.max(0, p.pulseCd / PULSE_COOLDOWN)),
       kos: p.kos,
@@ -184,8 +210,13 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
       minRingRadius: 118,
       ringCenterX: ARENA_WIDTH / 2,
       ringCenterY: ARENA_HEIGHT / 2,
+      pylonAngle: 0,
       roundBanner: null,
-      pylons: buildPylons(maxRingRadius),
+      pylons: buildPylons(maxRingRadius, 0),
+      powerups: [],
+      powerupTimer: 3.5,
+      powerupSeq: 0,
+      popups: [],
       shockwaves: [],
       players: spawnPlayersForRound(players),
       soloMode: players.length <= 1,
@@ -207,10 +238,13 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
       vx: 0,
       vy: 0,
       angle: angle + Math.PI,
-      radius: PLAYER_RADIUS,
+      radius: BASE_RADIUS,
       alive: true,
       dashTimer: 0,
       pulseTimer: 0,
+      giantTimer: 0,
+      shockTimer: 0,
+      streak: 0,
       dashCd: 0,
       pulseCd: 0,
       cooldownA: 0,
@@ -230,7 +264,6 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
     const haptics: HapticTrigger[] = [];
     const inputMap = new Map(inputPlayers.map((p) => [p.id, p]));
 
-    // Decay shockwaves
     for (let i = state.shockwaves.length - 1; i >= 0; i--) {
       const sw = state.shockwaves[i];
       sw.radius += 520 * dt;
@@ -240,7 +273,13 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
       }
     }
 
-    // Handle inter-round pause banner
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pop = state.popups[i];
+      pop.y -= 36 * dt;
+      pop.alpha -= 0.9 * dt;
+      if (pop.alpha <= 0) state.popups.splice(i, 1);
+    }
+
     if (state.betweenRoundTimer > 0) {
       state.betweenRoundTimer -= dt;
       if (state.betweenRoundTimer <= 0) {
@@ -251,22 +290,50 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
           state.round += 1;
           state.roundTimer = ROUND_TIME_LIMIT;
           state.ringRadius = state.maxRingRadius;
+          state.pylonAngle = 0;
           state.roundBanner = null;
-          state.pylons = buildPylons(state.ringRadius);
+          state.powerups = [];
+          state.powerupTimer = 3.2;
+          state.pylons = buildPylons(state.ringRadius, 0);
           const prevMap = new Map(
-            state.players.map((p) => [p.id, { score: p.score, kos: p.kos }])
+            state.players.map((p) => [p.id, { score: p.score, kos: p.kos, streak: p.streak }])
           );
           state.players = spawnPlayersForRound(inputPlayers, prevMap);
           sounds.push({ type: 'go' });
         }
       }
     } else {
-      // Active round simulation
       state.roundTimer = Math.max(0, state.roundTimer - dt);
       const shrinkProgress = 1 - state.roundTimer / ROUND_TIME_LIMIT;
       state.ringRadius =
         state.maxRingRadius - (state.maxRingRadius - state.minRingRadius) * shrinkProgress;
-      state.pylons = buildPylons(state.ringRadius);
+
+      // Orbiting bumper pylons speed up in later rounds or late in the round
+      const spinSpeed = state.round >= 2 || shrinkProgress > 0.3 ? 0.42 + state.round * 0.12 : 0;
+      state.pylonAngle += spinSpeed * dt;
+      state.pylons = buildPylons(state.ringRadius, state.pylonAngle);
+
+      // Spawn ring power orbs
+      state.powerupTimer -= dt;
+      if (state.powerupTimer <= 0 && state.powerups.length < 2 && state.ringRadius > 145) {
+        state.powerupTimer = 5.5;
+        state.powerupSeq += 1;
+        const kinds: BumperPowerupState['kind'][] = ['giant', 'shock', 'star'];
+        const kind = kinds[state.powerupSeq % kinds.length];
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.min(state.ringRadius * 0.62, 55 + Math.random() * 110);
+        state.powerups.push({
+          id: `bpw_${state.powerupSeq}`,
+          kind,
+          x: state.ringCenterX + Math.cos(a) * r,
+          y: state.ringCenterY + Math.sin(a) * r,
+        });
+      }
+
+      // Remove powerups outside shrinking ring
+      state.powerups = state.powerups.filter(
+        (pw) => Math.hypot(pw.x - state.ringCenterX, pw.y - state.ringCenterY) < state.ringRadius - 24
+      );
 
       const now = Date.now();
 
@@ -277,6 +344,9 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
         bp.pulseCd = Math.max(0, bp.pulseCd - dt);
         bp.dashTimer = Math.max(0, bp.dashTimer - dt);
         bp.pulseTimer = Math.max(0, bp.pulseTimer - dt);
+        bp.giantTimer = Math.max(0, bp.giantTimer - dt);
+        bp.shockTimer = Math.max(0, bp.shockTimer - dt);
+        bp.radius = bp.giantTimer > 0 ? GIANT_RADIUS : BASE_RADIUS;
 
         if (src) {
           const { dx, dy, a, b } = src.input;
@@ -302,30 +372,31 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
             haptics.push({ playerId: bp.id, pattern: 40, reason: 'dash' });
           }
 
-          // Action B: Radial Pulse
+          // Action B: Radial Pulse (boosted when Shock powerup is active!)
           if (b && !src.prevB && bp.pulseCd <= 0) {
             bp.pulseCd = PULSE_COOLDOWN;
-            bp.pulseTimer = 0.25;
+            bp.pulseTimer = 0.28;
+            const effRadius = bp.shockTimer > 0 ? PULSE_RADIUS * 1.45 : PULSE_RADIUS;
+            const effForce = bp.shockTimer > 0 ? 1.42 : 1.0;
             state.shockwaves.push({
               x: bp.x,
               y: bp.y,
               radius: bp.radius,
-              maxRadius: PULSE_RADIUS,
-              colorHex: bp.colorHex,
+              maxRadius: effRadius,
+              colorHex: bp.shockTimer > 0 ? '#FFB800' : bp.colorHex,
               alpha: 1,
             });
             sounds.push({ type: 'pulse', playerId: bp.id });
             haptics.push({ playerId: bp.id, pattern: [35, 25, 55], reason: 'pulse' });
 
-            // Push nearby rivals
             for (const other of state.players) {
               if (!other.alive || other.id === bp.id) continue;
               const ox = other.x - bp.x;
               const oy = other.y - bp.y;
               const dist = Math.hypot(ox, oy);
-              if (dist > 0.01 && dist < PULSE_RADIUS) {
-                const falloff = 1 - dist / PULSE_RADIUS;
-                const push = 380 + falloff * 320;
+              if (dist > 0.01 && dist < effRadius) {
+                const falloff = 1 - dist / effRadius;
+                const push = (380 + falloff * 320) * effForce;
                 other.vx += (ox / dist) * push;
                 other.vy += (oy / dist) * push;
                 other.lastHitBy = bp.id;
@@ -336,7 +407,6 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
           }
         }
 
-        // Friction & speed clamp
         const damping = bp.dashTimer > 0 ? Math.pow(0.28, dt) : Math.pow(0.11, dt);
         bp.vx *= damping;
         bp.vy *= damping;
@@ -350,6 +420,31 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
 
         bp.x += bp.vx * dt;
         bp.y += bp.vy * dt;
+
+        // Pickup power orbs
+        for (let i = state.powerups.length - 1; i >= 0; i--) {
+          const pw = state.powerups[i];
+          if (Math.hypot(bp.x - pw.x, bp.y - pw.y) < bp.radius + 17) {
+            state.powerups.splice(i, 1);
+            sounds.push({ type: 'pickup', playerId: bp.id });
+            haptics.push({ playerId: bp.id, pattern: [20, 15, 35], reason: 'pickup' });
+            if (pw.kind === 'giant') {
+              bp.giantTimer = 6.5;
+              bp.score += 35;
+              state.popups.push({ x: bp.x, y: bp.y - 28, text: 'TITAN SIZE!', colorHex: '#FFB800', alpha: 1 });
+            } else if (pw.kind === 'shock') {
+              bp.shockTimer = 7.0;
+              bp.pulseCd = 0;
+              bp.score += 35;
+              state.popups.push({ x: bp.x, y: bp.y - 28, text: 'MEGA PULSE!', colorHex: '#00C2FF', alpha: 1 });
+            } else {
+              bp.score += 75;
+              bp.dashCd = 0;
+              bp.pulseCd = 0;
+              state.popups.push({ x: bp.x, y: bp.y - 28, text: '+75 STAR!', colorHex: '#10D98B', alpha: 1 });
+            }
+          }
+        }
 
         // Pylon bounce
         for (const pylon of state.pylons) {
@@ -402,8 +497,8 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
             const velAlongNormal = rvx * nx + rvy * ny;
 
             if (velAlongNormal < 0) {
-              const aBoost = a.dashTimer > 0 ? 1.65 : 1.0;
-              const bBoost = b.dashTimer > 0 ? 1.65 : 1.0;
+              const aBoost = (a.dashTimer > 0 ? 1.65 : 1.0) * (a.giantTimer > 0 ? 1.4 : 1.0);
+              const bBoost = (b.dashTimer > 0 ? 1.65 : 1.0) * (b.giantTimer > 0 ? 1.4 : 1.0);
               const impulse = -1.35 * velAlongNormal;
 
               a.vx -= nx * impulse * 0.65 * bBoost + nx * (b.dashTimer > 0 ? 160 : 50);
@@ -431,6 +526,7 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
         const distFromCenter = Math.hypot(bp.x - state.ringCenterX, bp.y - state.ringCenterY);
         if (distFromCenter > state.ringRadius + bp.radius * 0.35) {
           bp.alive = false;
+          bp.streak = 0;
           sounds.push({ type: 'ko', playerId: bp.id });
           haptics.push({ playerId: bp.id, pattern: [75, 40, 100], reason: 'ko' });
 
@@ -438,7 +534,16 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
             const attacker = state.players.find((x) => x.id === bp.lastHitBy);
             if (attacker) {
               attacker.kos += 1;
-              attacker.score += 100;
+              attacker.streak += 1;
+              const bonus = attacker.streak >= 2 ? 50 : 0;
+              attacker.score += 100 + bonus;
+              state.popups.push({
+                x: attacker.x,
+                y: attacker.y - 34,
+                text: attacker.streak >= 2 ? `${attacker.streak}x KO! +${100 + bonus}` : 'RING OUT! +100',
+                colorHex: attacker.colorHex,
+                alpha: 1,
+              });
               haptics.push({ playerId: attacker.id, pattern: [35, 25, 60], reason: 'score' });
             }
           }

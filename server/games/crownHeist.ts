@@ -19,16 +19,21 @@ interface InternalCrownPlayer extends CrownPlayerState {
   vy: number;
   tackleCd: number;
   pushCd: number;
+  boostTimer: number;
 }
 
 interface CrownHeistState {
   timeLeft: number;
   totalTime: number;
+  nextId: number;
+  pickupTimer: number;
   crownX: number;
   crownY: number;
   crownHolderId: string | null;
   obstacles: { x: number; y: number; r: number }[];
+  pickups: { id: string; kind: 'speed-crown' | 'shock-orb' | 'gold-coin'; x: number; y: number }[];
   waves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   entities: InternalCrownPlayer[];
 }
 
@@ -63,6 +68,7 @@ function spawnEntity(
     tackleTimer: 0,
     stunTimer: 0,
     stealGraceTimer: 0,
+    boostTimer: 0,
     score: 0,
     steals: 0,
     cooldownA: 0,
@@ -84,6 +90,8 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
     return {
       timeLeft: totalTime,
       totalTime,
+      nextId: 1,
+      pickupTimer: 3.0,
       crownX: CX,
       crownY: CY,
       crownHolderId: null,
@@ -93,7 +101,9 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
         { x: 340, y: ARENA_HEIGHT - 210, r: 34 },
         { x: ARENA_WIDTH - 340, y: ARENA_HEIGHT - 210, r: 34 },
       ],
+      pickups: [],
       waves: [],
+      popups: [],
       entities,
     };
   },
@@ -113,12 +123,32 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
     const inputById = new Map(players.map((p) => [p.id, p]));
 
     state.timeLeft = Math.max(0, state.timeLeft - dt);
+    const crownFrenzy = state.timeLeft <= 15;
 
     for (let i = state.waves.length - 1; i >= 0; i--) {
       const w = state.waves[i];
       w.radius += 520 * dt;
       w.alpha = Math.max(0, 1 - w.radius / w.maxRadius);
       if (w.radius >= w.maxRadius) state.waves.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 28 * dt;
+      state.popups[i].alpha -= dt * 1.1;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    state.pickupTimer -= dt;
+    if (state.pickupTimer <= 0 && state.pickups.length < 3) {
+      const roll = Math.random();
+      const kind: 'speed-crown' | 'shock-orb' | 'gold-coin' =
+        roll < 0.45 ? 'gold-coin' : roll < 0.75 ? 'speed-crown' : 'shock-orb';
+      state.pickups.push({
+        id: `cpk_${state.nextId++}`,
+        kind,
+        x: 160 + Math.random() * (ARENA_WIDTH - 320),
+        y: 120 + Math.random() * (ARENA_HEIGHT - 240),
+      });
+      state.pickupTimer = 4.2;
     }
 
     for (const e of state.entities) {
@@ -127,6 +157,7 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
       e.tackleTimer = Math.max(0, e.tackleTimer - dt);
       e.stunTimer = Math.max(0, e.stunTimer - dt);
       e.stealGraceTimer = Math.max(0, e.stealGraceTimer - dt);
+      e.boostTimer = Math.max(0, e.boostTimer - dt);
 
       let dx = 0;
       let dy = 0;
@@ -183,8 +214,9 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
         if (!e.isBot) haptics.push({ playerId: e.id, pattern: [26, 20, 32], reason: 'push' });
       }
 
-      const crownFactor = e.hasCrown ? 0.89 : 1.0;
-      const baseSpeed = e.stunTimer > 0 ? 70 : e.tackleTimer > 0 ? 670 : 345 * crownFactor;
+      const crownFactor = e.hasCrown && e.boostTimer <= 0 ? 0.89 : 1.0;
+      const boostFactor = e.boostTimer > 0 ? 1.32 : 1.0;
+      const baseSpeed = e.stunTimer > 0 ? 70 : e.tackleTimer > 0 ? 670 : 345 * crownFactor * boostFactor;
       const tvx = e.tackleTimer > 0 ? e.vx : nx * baseSpeed;
       const tvy = e.tackleTimer > 0 ? e.vy : ny * baseSpeed;
       const accel = e.tackleTimer > 0 ? 3.5 : 13;
@@ -204,12 +236,34 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
         }
       }
 
+      // Collect Royal Pickups
+      for (let pi = state.pickups.length - 1; pi >= 0; pi--) {
+        const pk = state.pickups[pi];
+        if (Math.hypot(e.x - pk.x, e.y - pk.y) < PLAYER_R + 18) {
+          if (pk.kind === 'gold-coin') {
+            e.score += 45;
+            state.popups.push({ x: e.x, y: e.y - 26, text: '+45 GOLD', colorHex: '#FFB800', alpha: 1 });
+          } else if (pk.kind === 'speed-crown') {
+            e.boostTimer = 5.5;
+            state.popups.push({ x: e.x, y: e.y - 26, text: 'ROYAL BOOST!', colorHex: '#10D98B', alpha: 1 });
+          } else {
+            e.pushCd = 0;
+            e.score += 25;
+            state.popups.push({ x: e.x, y: e.y - 26, text: 'SHOCK READY!', colorHex: '#00C2FF', alpha: 1 });
+          }
+          state.pickups.splice(pi, 1);
+          sounds.push({ type: 'pickup', playerId: e.id });
+          if (!e.isBot) haptics.push({ playerId: e.id, pattern: 18, reason: 'pickup' });
+        }
+      }
+
       // Pick up loose crown
       if (!state.crownHolderId && Math.hypot(e.x - state.crownX, e.y - state.crownY) < PLAYER_R + 24) {
         state.crownHolderId = e.id;
         e.hasCrown = true;
         e.stealGraceTimer = 0.9;
         e.score += 20;
+        state.popups.push({ x: e.x, y: e.y - 30, text: 'CROWNED +20', colorHex: '#FFB800', alpha: 1 });
         sounds.push({ type: 'pickup', playerId: e.id });
         if (!e.isBot) haptics.push({ playerId: e.id, pattern: [24, 22, 42], reason: 'crown-grab' });
       }
@@ -221,7 +275,7 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
     // Check steals & scoring
     const holder = state.entities.find((e) => e.id === state.crownHolderId) ?? null;
     if (holder) {
-      holder.score += dt * 18;
+      holder.score += dt * (crownFrenzy ? 36 : 18);
       state.crownX = holder.x;
       state.crownY = holder.y;
 
@@ -240,6 +294,7 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
             state.crownHolderId = rival.id;
             state.crownX = rival.x;
             state.crownY = rival.y;
+            state.popups.push({ x: rival.x, y: rival.y - 30, text: 'STEAL +30!', colorHex: rival.colorHex, alpha: 1 });
             sounds.push({ type: 'bump', intensity: 0.9 });
             if (!rival.isBot) haptics.push({ playerId: rival.id, pattern: [28, 22, 48], reason: 'steal' });
             if (!holder.isBot) haptics.push({ playerId: holder.id, pattern: [50, 28, 50], reason: 'stolen' });
@@ -280,8 +335,11 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
       crownX: state.crownX,
       crownY: state.crownY,
       crownHolderId: state.crownHolderId,
+      crownFrenzy: state.timeLeft <= 15,
       obstacles: state.obstacles,
+      pickups: state.pickups.map((p) => ({ ...p })),
       waves: state.waves.map((w) => ({ ...w })),
+      popups: state.popups.map((p) => ({ ...p })),
       players: state.entities.map((e) => ({
         id: e.id,
         slotIndex: e.slotIndex,
@@ -295,6 +353,7 @@ export const crownHeistModule: ServerGameModule<CrownHeistState> = {
         tackleTimer: e.tackleTimer,
         stunTimer: e.stunTimer,
         stealGraceTimer: e.stealGraceTimer,
+        boostTimer: e.boostTimer,
         score: Math.round(e.score),
         steals: e.steals,
         cooldownA: e.cooldownA,

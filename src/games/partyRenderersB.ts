@@ -7,7 +7,7 @@ import {
   type HookShotSnapshot,
   type MeteorSwarmSnapshot,
 } from '../shared/types';
-import { drawNameplate, tCanvas } from './renderers';
+import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -81,6 +81,35 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
   ctx.stroke();
   ctx.restore();
 
+  // Slippery Ice Patches
+  for (const ip of snap.icePatches ?? []) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(186, 230, 253, 0.16)';
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(ip.x, ip.y, ip.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Ice Rink Pickups
+  const fBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'thaw-star' ? '#FFB800' : pk.kind === 'turbo-skates' ? '#10D98B' : '#00C2FF';
+    const label = pk.kind === 'thaw-star' ? '★' : pk.kind === 'turbo-skates' ? 'SPD' : 'ICE';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 15, 9, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + fBob * 0.4, 15, 7, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 4 + fBob * 0.4);
+    ctx.restore();
+  }
+
   // Ice traps on rink floor
   for (const t of snap.traps) {
     ctx.save();
@@ -120,6 +149,26 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
         ctx.restore();
       }
 
+      if ((p.auraTimer ?? 0) > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#00C2FF';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 44, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      if ((p.skateTimer ?? 0) > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       drawCharacterPod3D(ctx, p.x, p.y, 19, 0, p.colorHex, {
         height: 11,
         rimColor: p.role === 'hunter' ? '#38BDF8' : '#FFFFFF',
@@ -136,6 +185,8 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
   for (const b of snap.bolts) {
     drawSphere3D(ctx, b.x, b.y, 9, '#38BDF8', '#FFFFFF', 7, true);
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawHudPill(ctx, `FROZEN ${snap.frozenCount}/${snap.runnerCount}`, `${Math.ceil(snap.timeLeft)}s`, 'FREEZE TAG');
   if (snap.banner) {
@@ -154,20 +205,56 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
 export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSnapshot): void {
   drawStudioBackdrop(ctx, '#06080D', 'rgba(168, 85, 247, 0.06)', 'rgba(255,255,255,0.025)', 60);
 
-  // Flashlight cones from alive hunters
+  // Flashlight cones from alive hunters (expanded if Super-Flare active)
   for (const p of snap.players) {
     if (p.role !== 'hunter' || !p.alive) continue;
+    const range = (p.flareTimer ?? 0) > 0 ? 440 : 330;
+    const halfAng = (p.flareTimer ?? 0) > 0 ? 0.62 : 0.44;
     ctx.save();
-    const grad = ctx.createRadialGradient(p.x, p.y, 12, p.x, p.y, 330);
-    grad.addColorStop(0, 'rgba(255, 226, 120, 0.36)');
+    const grad = ctx.createRadialGradient(p.x, p.y, 12, p.x, p.y, range);
+    grad.addColorStop(0, (p.flareTimer ?? 0) > 0 ? 'rgba(255, 240, 150, 0.48)' : 'rgba(255, 226, 120, 0.36)');
     grad.addColorStop(0.7, 'rgba(255, 200, 70, 0.14)');
     grad.addColorStop(1, 'rgba(255, 200, 70, 0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(p.x, p.y - 6);
-    ctx.arc(p.x, p.y - 6, 330, p.angle - 0.44, p.angle + 0.44);
+    ctx.arc(p.x, p.y - 6, range, p.angle - halfAng, p.angle + halfAng);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
+  }
+
+  // Manor Orbs (Flare / Ecto)
+  const gBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const ob of snap.orbs ?? []) {
+    const col = ob.kind === 'flare' ? '#FFB800' : '#C084FC';
+    const label = ob.kind === 'flare' ? 'FLR' : 'ECT';
+    drawShadowOval(ctx, ob.x, ob.y + 8, 14, 8, 0.35);
+    drawExtrudedCylinder3D(ctx, ob.x, ob.y + gBob * 0.4, 14, 7, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 9.5px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), ob.x, ob.y - 4 + gBob * 0.4);
+    ctx.restore();
+  }
+
+  // Ghost Decoy Clones
+  for (const dc of snap.decoys ?? []) {
+    ctx.save();
+    ctx.globalAlpha = dc.alpha * 0.6;
+    ctx.fillStyle = '#A855F7';
+    ctx.strokeStyle = '#E9D5FF';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(dc.x, dc.y - 10, 18, Math.PI, 0);
+    ctx.lineTo(dc.x + 18, dc.y + 8);
+    ctx.lineTo(dc.x, dc.y + 4);
+    ctx.lineTo(dc.x - 18, dc.y + 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -258,6 +345,8 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
       }
     }
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   const ghost = snap.players.find((p) => p.role === 'ghost');
   drawHudPill(ctx, `PHANTOM HP ${ghost?.hp ?? 0}`, `${Math.ceil(snap.timeLeft)}s`, 'GHOST HUNT');
@@ -372,6 +461,22 @@ export function renderMeteorSwarm(ctx: CanvasRenderingContext2D, snap: MeteorSwa
     ctx.restore();
   }
 
+  // Space Care Packages
+  const mBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'spread-shot' ? '#FFB800' : pk.kind === 'core-repair' ? '#10D98B' : '#00C2FF';
+    const label = pk.kind === 'spread-shot' ? '4X' : pk.kind === 'core-repair' ? '+HP' : 'OVR';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 15, 9, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + mBob * 0.4, 15, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 4 + mBob * 0.4);
+    ctx.restore();
+  }
+
   // Bullets
   for (const b of snap.bullets) {
     drawSphere3D(ctx, b.x, b.y, b.enemy ? 6.5 : 4.8, b.enemy ? '#FF3B9A' : b.colorHex, '#FFFFFF', 4, false);
@@ -436,8 +541,20 @@ export function renderMeteorSwarm(ctx: CanvasRenderingContext2D, snap: MeteorSwa
     ctx.fill();
     ctx.restore();
 
+    if ((p.spreadTimer ?? 0) > 0 || (p.rapidTimer ?? 0) > 0) {
+      ctx.save();
+      ctx.strokeStyle = (p.spreadTimer ?? 0) > 0 ? '#FFB800' : '#00C2FF';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 2, 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     drawNameplate(ctx, p.x, p.y - 34, p.slotIndex, p.name, p.colorHex, p.downed ? 'REVIVE!' : `HP ${p.hp}`);
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawHudPill(ctx, `WAVE ${snap.wave}`, `${Math.ceil(snap.timeLeft)}s`, `TEAM ${snap.teamScore}`);
 }
@@ -504,6 +621,24 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
     drawSphere3D(ctx, hk.x2, hk.y2, 8.5, '#FFFFFF', hk.colorHex, 8, false);
   }
 
+  // Floating treasure coins & powerups
+  const hkPhase = Date.now() * 0.005;
+  for (const c of snap.coins ?? []) {
+    drawCoin3D(ctx, c.x, c.y, c.value >= 75 ? 16 : 13, hkPhase + c.x * 0.02, c.value >= 75 ? '#10D98B' : '#FFB800');
+  }
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'long-hook' ? '#00C2FF' : '#FFB800';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 15, 9, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + Math.sin(hkPhase) * 2, 15, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(pk.kind === 'long-hook' ? 'HOOK+' : 'SPD+'), pk.x, pk.y - 4 + Math.sin(hkPhase) * 2);
+    ctx.restore();
+  }
+
   // Players: falling below first, then Y-sorted active players
   const players = [...snap.players]
     .filter((p) => p.alive || p.falling)
@@ -525,6 +660,16 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
       ctx.stroke();
       ctx.restore();
     }
+    if (!p.falling && ((p.longHookTimer ?? 0) > 0 || (p.speedTimer ?? 0) > 0)) {
+      ctx.save();
+      ctx.strokeStyle = (p.longHookTimer ?? 0) > 0 ? '#00C2FF' : '#FFB800';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 6, 25, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     drawCharacterPod3D(ctx, p.x, p.y + fallDrop, 18, p.angle, p.colorHex, {
       height: 11,
@@ -537,6 +682,8 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
       drawNameplate(ctx, p.x, p.y - 36, p.slotIndex, p.name, p.colorHex, `${p.kos} KO`);
     }
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawHudPill(ctx, 'HOOK SHOT', `${Math.ceil(snap.timeLeft)}s`, 'YANK RIVALS OFF!');
 }
@@ -583,10 +730,38 @@ export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFl
   ctx.lineTo(ARENA_WIDTH, snap.floorY);
   ctx.stroke();
 
-  // 3D Spinning Coins
+  // Speed Boost Gates
+  for (const gt of snap.gates ?? []) {
+    ctx.save();
+    ctx.strokeStyle = gt.triggered ? 'rgba(16,217,139,0.28)' : '#10D98B';
+    ctx.lineWidth = gt.triggered ? 3 : 6;
+    ctx.beginPath();
+    ctx.roundRect(gt.x - 10, gt.y, 20, gt.h, 10);
+    ctx.stroke();
+    if (!gt.triggered) {
+      ctx.fillStyle = 'rgba(16, 217, 139, 0.22)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // 3D Spinning Coins & Golden Star Coins
   const phase = snap.scrollX * 0.025;
   for (const c of snap.coins) {
-    drawCoin3D(ctx, c.x, c.y, c.r, phase + c.x * 0.01, '#FFB800');
+    drawCoin3D(ctx, c.x, c.y, c.r, phase + c.x * 0.01, c.golden ? '#FFE14D' : '#FFB800');
+  }
+
+  // Magnet & Overdrive Pickups
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'magnet' ? '#00C2FF' : '#FF3B9A';
+    drawSphere3D(ctx, pk.x, pk.y, 14, col, '#FFFFFF', 4, true);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pk.kind === 'magnet' ? 'MAG' : 'OVR', pk.x, pk.y - 4);
+    ctx.restore();
   }
 
   // 3D Obstacles (Buzzsaws & Neon Barriers)
@@ -642,12 +817,21 @@ export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFl
     if (!p.alive) continue;
     ctx.save();
     ctx.globalAlpha = p.phaseTimer > 0 ? 0.52 : 1;
-    if (p.phaseTimer > 0) {
-      ctx.strokeStyle = '#00C2FF';
+    if (p.phaseTimer > 0 || (p.overdriveTimer ?? 0) > 0) {
+      ctx.strokeStyle = (p.overdriveTimer ?? 0) > 0 ? '#10D98B' : '#00C2FF';
       ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.arc(p.x, p.y, 26, 0, Math.PI * 2);
       ctx.stroke();
+    }
+    if ((p.magnetTimer ?? 0) > 0) {
+      ctx.strokeStyle = 'rgba(0, 194, 255, 0.55)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 34, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // Track shadow on ceiling or floor depending on gravityDir
@@ -691,6 +875,8 @@ export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFl
       `${p.score}`
     );
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawHudPill(ctx, `SPEED ${Math.round(snap.speed)}`, `${Math.ceil(snap.timeLeft)}s`, 'GRAVITY FLIP');
 }

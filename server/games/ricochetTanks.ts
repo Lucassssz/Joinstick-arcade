@@ -19,6 +19,8 @@ import type {
 interface InternalTank extends TankPlayerState {
   fireCd: number;
   mineCd: number;
+  tripleTimer: number;
+  speedTimer: number;
 }
 
 interface InternalShell extends TankShellState {
@@ -38,10 +40,31 @@ interface WallRect {
   h: number;
 }
 
+interface InternalCrate {
+  id: string;
+  x: number;
+  y: number;
+  r: number;
+  hp: number;
+  maxHp: number;
+}
+
+interface InternalTankPickup {
+  id: string;
+  kind: 'triple' | 'speed' | 'shield';
+  x: number;
+  y: number;
+}
+
 interface RicochetTanksInternalState {
   timeLeft: number;
   totalTime: number;
   walls: WallRect[];
+  crates: InternalCrate[];
+  pickups: InternalTankPickup[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  crateSpawnTimer: number;
+  pickupSpawnTimer: number;
   shells: InternalShell[];
   mines: InternalMine[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
@@ -129,6 +152,14 @@ function resolveCircleRect(
   return { x: cx, y: rect.y + rect.h + r, hit: true, nx: 0, ny: 1 };
 }
 
+const CRATE_SPOTS = [
+  { x: 600, y: 360 },
+  { x: 350, y: 360 },
+  { x: 850, y: 360 },
+  { x: 600, y: 180 },
+  { x: 600, y: 540 },
+];
+
 function createTank(p: ServerPlayerInputState, idx: number): InternalTank {
   const spot = SPAWN_SPOTS[idx % SPAWN_SPOTS.length];
   return {
@@ -145,6 +176,8 @@ function createTank(p: ServerPlayerInputState, idx: number): InternalTank {
     alive: true,
     respawnTimer: 0,
     shieldTimer: 1.5,
+    tripleTimer: 0,
+    speedTimer: 0,
     fireCd: 0,
     mineCd: 0,
     cooldownA: 0,
@@ -161,6 +194,9 @@ function toSnapshot(state: RicochetTanksInternalState): RicochetTanksSnapshot {
     timeLeft: Math.max(0, state.timeLeft),
     totalTime: state.totalTime,
     walls: state.walls,
+    crates: state.crates.map((c) => ({ ...c })),
+    pickups: state.pickups.map((pk) => ({ ...pk })),
+    popups: state.popups.map((pp) => ({ ...pp })),
     shells: state.shells.map((s) => ({
       id: s.id,
       ownerId: s.ownerId,
@@ -195,6 +231,8 @@ function toSnapshot(state: RicochetTanksInternalState): RicochetTanksSnapshot {
       alive: p.alive,
       respawnTimer: p.respawnTimer,
       shieldTimer: p.shieldTimer,
+      tripleTimer: p.tripleTimer,
+      speedTimer: p.speedTimer,
       cooldownA: Math.min(1, Math.max(0, p.fireCd / FIRE_COOLDOWN)),
       cooldownB: Math.min(1, Math.max(0, p.mineCd / MINE_COOLDOWN)),
       kills: p.kills,
@@ -242,6 +280,15 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
       timeLeft: totalTime,
       totalTime,
       walls: BUNKER_WALLS,
+      crates: [
+        { id: 'cr_init1', x: 600, y: 360, r: 22, hp: 2, maxHp: 2 },
+        { id: 'cr_init2', x: 350, y: 360, r: 22, hp: 2, maxHp: 2 },
+        { id: 'cr_init3', x: 850, y: 360, r: 22, hp: 2, maxHp: 2 },
+      ],
+      pickups: [],
+      popups: [],
+      crateSpawnTimer: 8,
+      pickupSpawnTimer: 4,
       shells: [],
       mines: [],
       explosions: [],
@@ -272,6 +319,37 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
       e.radius += 220 * dt;
       e.alpha = Math.max(0, e.alpha - 2.4 * dt);
       if (e.alpha <= 0) state.explosions.splice(i, 1);
+    }
+
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pp = state.popups[i];
+      pp.y -= 34 * dt;
+      pp.alpha -= 0.9 * dt;
+      if (pp.alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    // Spawn supply crates & pickups
+    state.crateSpawnTimer -= dt;
+    if (state.crateSpawnTimer <= 0 && state.crates.length < 3) {
+      const avail = CRATE_SPOTS.filter(
+        (sp) => !state.crates.some((c) => Math.hypot(c.x - sp.x, c.y - sp.y) < 30)
+      );
+      if (avail.length > 0) {
+        const sp = avail[Math.floor(Math.random() * avail.length)];
+        state.crates.push({ id: `cr_${state.nextId++}`, x: sp.x, y: sp.y, r: 22, hp: 2, maxHp: 2 });
+      }
+      state.crateSpawnTimer = 10;
+    }
+
+    state.pickupSpawnTimer -= dt;
+    if (state.pickupSpawnTimer <= 0 && state.pickups.length < 3) {
+      const sp = CRATE_SPOTS[Math.floor(Math.random() * CRATE_SPOTS.length)];
+      if (!state.pickups.some((pk) => Math.hypot(pk.x - sp.x, pk.y - sp.y) < 40)) {
+        const kinds: ('triple' | 'speed' | 'shield')[] = ['triple', 'speed', 'shield'];
+        const kind = kinds[Math.floor(Math.random() * kinds.length)];
+        state.pickups.push({ id: `pk_${state.nextId++}`, kind, x: sp.x, y: sp.y });
+      }
+      state.pickupSpawnTimer = 6.5;
     }
 
     const damageTank = (
@@ -322,6 +400,8 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
       tank.fireCd = Math.max(0, tank.fireCd - dt);
       tank.mineCd = Math.max(0, tank.mineCd - dt);
       tank.shieldTimer = Math.max(0, tank.shieldTimer - dt);
+      tank.tripleTimer = Math.max(0, tank.tripleTimer - dt);
+      tank.speedTimer = Math.max(0, tank.speedTimer - dt);
 
       if (!tank.alive) {
         tank.respawnTimer -= dt;
@@ -334,6 +414,8 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
           tank.hp = tank.maxHp;
           tank.alive = true;
           tank.shieldTimer = 1.8;
+          tank.tripleTimer = 0;
+          tank.speedTimer = 0;
         }
         continue;
       }
@@ -345,7 +427,7 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
         if (mag > 0.1) {
           const nx = dx / Math.max(1, mag);
           const ny = dy / Math.max(1, mag);
-          const speed = TANK_SPEED * Math.min(1, mag);
+          const speed = (tank.speedTimer > 0 ? TANK_SPEED * 1.4 : TANK_SPEED) * Math.min(1, mag);
           tank.x += nx * speed * dt;
           tank.y += ny * speed * dt;
           const targetAngle = Math.atan2(ny, nx);
@@ -353,24 +435,30 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
           tank.turretAngle = targetAngle;
         }
 
-        // Action A: Fire bouncing shell
+        // Action A: Fire bouncing shell (or Triple Fan!)
         if (a && !src.prevA && tank.fireCd <= 0) {
           tank.fireCd = FIRE_COOLDOWN;
-          const muzzleX = tank.x + Math.cos(tank.turretAngle) * (TANK_RADIUS + 8);
-          const muzzleY = tank.y + Math.sin(tank.turretAngle) * (TANK_RADIUS + 8);
-          state.shells.push({
-            id: `sh_${state.nextId++}`,
-            ownerId: tank.id,
-            colorHex: tank.colorHex,
-            x: muzzleX,
-            y: muzzleY,
-            vx: Math.cos(tank.turretAngle) * SHELL_SPEED,
-            vy: Math.sin(tank.turretAngle) * SHELL_SPEED,
-            bounces: 0,
-            maxBounces: MAX_BOUNCES,
-            life: 3.4,
-            safeAge: 0.18,
-          });
+          const angles =
+            tank.tripleTimer > 0
+              ? [tank.turretAngle - 0.2, tank.turretAngle, tank.turretAngle + 0.2]
+              : [tank.turretAngle];
+          for (const ang of angles) {
+            const muzzleX = tank.x + Math.cos(ang) * (TANK_RADIUS + 8);
+            const muzzleY = tank.y + Math.sin(ang) * (TANK_RADIUS + 8);
+            state.shells.push({
+              id: `sh_${state.nextId++}`,
+              ownerId: tank.id,
+              colorHex: tank.colorHex,
+              x: muzzleX,
+              y: muzzleY,
+              vx: Math.cos(ang) * SHELL_SPEED,
+              vy: Math.sin(ang) * SHELL_SPEED,
+              bounces: 0,
+              maxBounces: tank.tripleTimer > 0 ? MAX_BOUNCES + 1 : MAX_BOUNCES,
+              life: 3.4,
+              safeAge: 0.18,
+            });
+          }
           sounds.push({ type: 'shoot', playerId: tank.id });
           haptics.push({ playerId: tank.id, pattern: 35, reason: 'shoot' });
         }
@@ -408,6 +496,27 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
         if (res.hit) {
           tank.x = res.x;
           tank.y = res.y;
+        }
+      }
+
+      // Collect pickups
+      for (let i = state.pickups.length - 1; i >= 0; i--) {
+        const pk = state.pickups[i];
+        if (Math.hypot(tank.x - pk.x, tank.y - pk.y) < TANK_RADIUS + 18) {
+          if (pk.kind === 'triple') {
+            tank.tripleTimer = 7.5;
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'TRIPLE SHOT!', colorHex: '#FF3B9A', alpha: 1 });
+          } else if (pk.kind === 'speed') {
+            tank.speedTimer = 7.5;
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'TURBO TREADS!', colorHex: '#10D98B', alpha: 1 });
+          } else {
+            tank.shieldTimer = 4.5;
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'ARMOR SHIELD!', colorHex: '#00C2FF', alpha: 1 });
+          }
+          tank.score += 20;
+          state.pickups.splice(i, 1);
+          sounds.push({ type: 'pickup', playerId: tank.id });
+          haptics.push({ playerId: tank.id, pattern: 28, reason: 'pickup' });
         }
       }
     }
@@ -499,6 +608,40 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
         continue;
       }
 
+      // Check shell hit on golden crates
+      let hitCrate = false;
+      for (let c = state.crates.length - 1; c >= 0; c--) {
+        const cr = state.crates[c];
+        if (Math.hypot(sh.x - cr.x, sh.y - cr.y) < cr.r + SHELL_RADIUS) {
+          cr.hp -= 1;
+          hitCrate = true;
+          state.explosions.push({ x: cr.x, y: cr.y, radius: 14, colorHex: '#FFB800', alpha: 0.9 });
+          if (cr.hp <= 0) {
+            const owner = state.players.find((x) => x.id === sh.ownerId);
+            if (owner) {
+              owner.score += 50;
+              state.popups.push({ x: cr.x, y: cr.y - 14, text: '+50 CRATE!', colorHex: '#FFB800', alpha: 1 });
+            }
+            const kinds: ('triple' | 'speed' | 'shield')[] = ['triple', 'speed', 'shield'];
+            state.pickups.push({
+              id: `pk_${state.nextId++}`,
+              kind: kinds[Math.floor(Math.random() * kinds.length)],
+              x: cr.x,
+              y: cr.y,
+            });
+            state.crates.splice(c, 1);
+            sounds.push({ type: 'pickup' });
+          } else {
+            sounds.push({ type: 'bump', intensity: 0.6 });
+          }
+          break;
+        }
+      }
+      if (hitCrate) {
+        state.shells.splice(i, 1);
+        continue;
+      }
+
       // Check shell hit on tanks
       let hitTank = false;
       for (const tank of state.players) {
@@ -506,6 +649,9 @@ export const ricochetTanksModule: ServerGameModule<RicochetTanksInternalState> =
         if (tank.id === sh.ownerId && sh.safeAge > 0) continue;
         if (Math.hypot(sh.x - tank.x, sh.y - tank.y) < TANK_RADIUS + SHELL_RADIUS) {
           damageTank(tank, sh.ownerId, 1, sh.bounces > 0);
+          if (sh.bounces > 0 && sh.ownerId !== tank.id) {
+            state.popups.push({ x: tank.x, y: tank.y - 24, text: 'BANK HIT!', colorHex: '#FFB800', alpha: 1 });
+          }
           hitTank = true;
           break;
         }

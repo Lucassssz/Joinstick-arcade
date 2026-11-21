@@ -42,12 +42,15 @@ interface InternalPowerup {
   id: string;
   col: number;
   row: number;
-  kind: 'flame' | 'bomb' | 'speed';
+  kind: 'flame' | 'bomb' | 'speed' | 'shield' | 'mega';
 }
 
 interface InternalPlayer extends BombGridPlayerState {
   bombCd: number;
   kickCd: number;
+  hasShield: boolean;
+  megaBombs: number;
+  invulnTimer: number;
 }
 
 interface BombGridState {
@@ -62,6 +65,10 @@ interface BombGridState {
   bombs: InternalBomb[];
   flames: InternalFlame[];
   powerups: InternalPowerup[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  shrinkTimer: number;
+  shrinkOrder: [number, number][];
+  shrinkIdx: number;
   players: InternalPlayer[];
   nextId: number;
   finished: boolean;
@@ -121,11 +128,24 @@ function buildMaze(): number[] {
   return cells;
 }
 
+function buildShrinkOrder(): [number, number][] {
+  const coords: [number, number][] = [];
+  for (let c = 1; c <= COLS - 2; c++) coords.push([c, 1]);
+  for (let r = 2; r <= ROWS - 2; r++) coords.push([COLS - 2, r]);
+  for (let c = COLS - 3; c >= 1; c--) coords.push([c, ROWS - 2]);
+  for (let r = ROWS - 3; r >= 2; r--) coords.push([1, r]);
+  return coords;
+}
+
 function resetRound(state: BombGridState): void {
   state.cells = buildMaze();
   state.bombs = [];
   state.flames = [];
   state.powerups = [];
+  state.popups = [];
+  state.shrinkTimer = 0.28;
+  state.shrinkIdx = 0;
+  state.shrinkOrder = buildShrinkOrder();
   state.roundTimer = ROUND_LIMIT;
   state.roundEndPause = 0;
   state.roundBanner = `ROUND ${state.round}`;
@@ -140,6 +160,9 @@ function resetRound(state: BombGridState): void {
     p.speedBonus = 0;
     p.bombCd = 0;
     p.kickCd = 0;
+    p.hasShield = false;
+    p.megaBombs = 0;
+    p.invulnTimer = 0;
   });
 }
 
@@ -191,8 +214,8 @@ function explodeBomb(
         state.cells[idx] = 0;
         const owner = state.players.find((p) => p.id === bomb.ownerId);
         if (owner) owner.score += 15;
-        if (Math.random() < 0.36) {
-          const kinds: ('flame' | 'bomb' | 'speed')[] = ['flame', 'bomb', 'speed'];
+        if (Math.random() < 0.42) {
+          const kinds: ('flame' | 'bomb' | 'speed' | 'shield' | 'mega')[] = ['flame', 'bomb', 'speed', 'shield', 'mega'];
           state.powerups.push({
             id: `pu_${state.nextId++}`,
             col: c,
@@ -239,6 +262,9 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
         cooldownB: 0,
         bombCd: 0,
         kickCd: 0,
+        hasShield: false,
+        megaBombs: 0,
+        invulnTimer: 0,
       };
     });
 
@@ -254,6 +280,10 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
       bombs: [],
       flames: [],
       powerups: [],
+      popups: [],
+      shrinkTimer: 0.28,
+      shrinkOrder: [],
+      shrinkIdx: 0,
       players: list,
       nextId: 1,
       finished: false,
@@ -279,12 +309,44 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
       }
     } else if (!state.finished) {
       state.roundTimer = Math.max(0, state.roundTimer - dt);
-      if (state.roundTimer < ROUND_LIMIT - 1.3) state.roundBanner = null;
+      if (state.roundTimer < ROUND_LIMIT - 1.3 && state.roundTimer >= 16) state.roundBanner = null;
+
+      for (let i = state.popups.length - 1; i >= 0; i--) {
+        state.popups[i].y -= 34 * dt;
+        state.popups[i].alpha -= dt * 0.9;
+        if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
+      }
+
+      // Sudden Death shrinking outer walls in final 16s!
+      if (state.roundTimer < 16 && state.shrinkIdx < state.shrinkOrder.length) {
+        if (state.shrinkIdx === 0 && !state.roundBanner) {
+          state.roundBanner = 'SUDDEN DEATH SHRINK!';
+          sounds.push({ type: 'countdown' });
+        }
+        state.shrinkTimer -= dt;
+        if (state.shrinkTimer <= 0) {
+          state.shrinkTimer = 0.28;
+          const [sc, sr] = state.shrinkOrder[state.shrinkIdx++];
+          state.cells[sr * COLS + sc] = 1;
+          for (const p of state.players) {
+            if (!p.alive) continue;
+            const pc = posToCell(p.x, p.y);
+            if (pc.col === sc && pc.row === sr) {
+              p.alive = false;
+              sounds.push({ type: 'ko', playerId: p.id });
+            }
+          }
+          if (state.shrinkIdx > 4 && state.roundBanner === 'SUDDEN DEATH SHRINK!') {
+            state.roundBanner = null;
+          }
+        }
+      }
 
       // Update players
       for (const p of state.players) {
         p.bombCd = Math.max(0, p.bombCd - dt);
         p.kickCd = Math.max(0, p.kickCd - dt);
+        p.invulnTimer = Math.max(0, p.invulnTimer - dt);
         if (!p.alive) continue;
 
         const inp = players.find((x) => x.id === p.id);
@@ -334,9 +396,22 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
         for (let i = state.powerups.length - 1; i >= 0; i--) {
           const pu = state.powerups[i];
           if (pu.col === myCell.col && pu.row === myCell.row) {
-            if (pu.kind === 'flame') p.blastRange = Math.min(5, p.blastRange + 1);
-            else if (pu.kind === 'bomb') p.maxBombs = Math.min(4, p.maxBombs + 1);
-            else p.speedBonus = Math.min(3, p.speedBonus + 1);
+            if (pu.kind === 'flame') {
+              p.blastRange = Math.min(5, p.blastRange + 1);
+              state.popups.push({ x: p.x, y: p.y - 24, text: 'FLAME +1!', colorHex: '#FF7A1A', alpha: 1.1 });
+            } else if (pu.kind === 'bomb') {
+              p.maxBombs = Math.min(4, p.maxBombs + 1);
+              state.popups.push({ x: p.x, y: p.y - 24, text: 'BOMB +1!', colorHex: '#00C2FF', alpha: 1.1 });
+            } else if (pu.kind === 'speed') {
+              p.speedBonus = Math.min(3, p.speedBonus + 1);
+              state.popups.push({ x: p.x, y: p.y - 24, text: 'SPEED +1!', colorHex: '#9EE622', alpha: 1.1 });
+            } else if (pu.kind === 'shield') {
+              p.hasShield = true;
+              state.popups.push({ x: p.x, y: p.y - 24, text: 'BLAST SHIELD!', colorHex: '#38BDF8', alpha: 1.2 });
+            } else {
+              p.megaBombs += 2;
+              state.popups.push({ x: p.x, y: p.y - 24, text: 'MEGA BOMB x2!', colorHex: '#FF3B9A', alpha: 1.2 });
+            }
             p.score += 40;
             state.powerups.splice(i, 1);
             sounds.push({ type: 'pickup', playerId: p.id });
@@ -350,6 +425,8 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
           const occupied = state.bombs.some((bm) => bm.col === myCell.col && bm.row === myCell.row);
           if (activeOwned < p.maxBombs && !occupied) {
             const center = cellCenter(myCell.col, myCell.row);
+            const isMega = p.megaBombs > 0;
+            if (isMega) p.megaBombs--;
             state.bombs.push({
               id: `bm_${state.nextId++}`,
               ownerId: p.id,
@@ -361,8 +438,8 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
               vy: 0,
               fuse: 2.0,
               maxFuse: 2.0,
-              range: p.blastRange,
-              colorHex: p.colorHex,
+              range: isMega ? Math.min(7, p.blastRange + 2) : p.blastRange,
+              colorHex: isMega ? '#FF3B9A' : p.colorHex,
             });
             p.bombCd = 0.25;
             sounds.push({ type: 'confirm', playerId: p.id });
@@ -426,9 +503,17 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
         const fl = state.flames[i];
         fl.timer -= dt;
         for (const p of state.players) {
-          if (!p.alive) continue;
+          if (!p.alive || p.invulnTimer > 0) continue;
           const pc = posToCell(p.x, p.y);
           if (pc.col === fl.col && pc.row === fl.row) {
+            if (p.hasShield) {
+              p.hasShield = false;
+              p.invulnTimer = 1.1;
+              state.popups.push({ x: p.x, y: p.y - 26, text: 'SHIELD SAVED!', colorHex: '#38BDF8', alpha: 1.2 });
+              sounds.push({ type: 'confirm', playerId: p.id });
+              haptics.push({ playerId: p.id, pattern: 25, reason: 'shield-save' });
+              continue;
+            }
             p.alive = false;
             sounds.push({ type: 'ko', playerId: p.id });
             haptics.push({ playerId: p.id, pattern: [50, 40, 60], reason: 'ko' });
@@ -436,6 +521,7 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
             if (killer && killer.id !== p.id) {
               killer.kos++;
               killer.score += 120;
+              state.popups.push({ x: killer.x, y: killer.y - 28, text: '+120 KO!', colorHex: '#FFB800', alpha: 1.2 });
             }
           }
         }
@@ -518,6 +604,8 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
         colorHex: f.colorHex,
       })),
       powerups: state.powerups.map((pu) => ({ ...pu })),
+      suddenDeath: state.roundTimer < 16,
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: state.players.map((p) => ({
         id: p.id,
         slotIndex: p.slotIndex,
@@ -535,6 +623,8 @@ export const bombGridModule: ServerGameModule<BombGridState> = {
         roundsWon: p.roundsWon,
         cooldownA: p.cooldownA,
         cooldownB: p.cooldownB,
+        hasShield: p.hasShield,
+        megaBombs: p.megaBombs,
       })),
     };
   },

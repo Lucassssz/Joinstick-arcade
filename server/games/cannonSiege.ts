@@ -17,6 +17,8 @@ import type {
 interface InternalCannon extends CannonPlayerState {
   fireCd: number;
   shieldCd: number;
+  tripleTimer: number;
+  heavyCharges: number;
 }
 
 interface InternalBlock {
@@ -41,16 +43,23 @@ interface InternalShell {
   vy: number;
   r: number;
   ttl: number;
+  heavy?: boolean;
 }
 
 interface CannonSiegeState {
   timeLeft: number;
   totalTime: number;
   nextId: number;
+  pickupTimer: number;
+  targetTimer: number;
+  targetDir: number;
   blocks: InternalBlock[];
   cores: { side: 'left' | 'right'; x: number; y: number; r: number; hp: number; maxHp: number; colorHex: string }[];
+  pickups: { id: string; kind: 'triple-shot' | 'bunker-buster'; x: number; y: number; r: number }[];
+  goldenTarget: { x: number; y: number; r: number } | null;
   shells: InternalShell[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   cannons: InternalCannon[];
 }
 
@@ -106,6 +115,8 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
         coreHp: MAX_CORE_HP,
         maxCoreHp: MAX_CORE_HP,
         shieldTimer: 0,
+        tripleTimer: 0,
+        heavyCharges: 0,
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
@@ -118,13 +129,19 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
       timeLeft: totalTime,
       totalTime,
       nextId: 100,
+      pickupTimer: 4.0,
+      targetTimer: 8.0,
+      targetDir: 1,
       blocks: [...buildWallBlocks('left', 1), ...buildWallBlocks('right', 40)],
       cores: [
         { side: 'left', x: 96, y: ARENA_HEIGHT / 2, r: 42, hp: MAX_CORE_HP, maxHp: MAX_CORE_HP, colorHex: cannons[0]?.colorHex ?? '#FF4D2E' },
         { side: 'right', x: ARENA_WIDTH - 96, y: ARENA_HEIGHT / 2, r: 42, hp: MAX_CORE_HP, maxHp: MAX_CORE_HP, colorHex: cannons[1]?.colorHex ?? '#00C2FF' },
       ],
+      pickups: [],
+      goldenTarget: null,
       shells: [],
       explosions: [],
+      popups: [],
       cannons,
     };
   },
@@ -142,11 +159,48 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
       state.explosions[i].alpha -= dt * 3.1;
       if (state.explosions[i].alpha <= 0) state.explosions.splice(i, 1);
     }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 28 * dt;
+      state.popups[i].alpha -= dt * 1.1;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    // Mid-canyon floating supply crates
+    state.pickupTimer -= dt;
+    if (state.pickupTimer <= 0 && state.pickups.length < 2) {
+      const kind: 'triple-shot' | 'bunker-buster' = Math.random() < 0.55 ? 'triple-shot' : 'bunker-buster';
+      state.pickups.push({
+        id: `cp_${state.nextId++}`,
+        kind,
+        x: ARENA_WIDTH / 2 + (Math.random() - 0.5) * 80,
+        y: 130 + Math.random() * (ARENA_HEIGHT - 260),
+        r: 22,
+      });
+      state.pickupTimer = 7.5;
+    }
+
+    // Gliding Golden Target
+    if (!state.goldenTarget) {
+      state.targetTimer -= dt;
+      if (state.targetTimer <= 0) {
+        state.goldenTarget = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, r: 24 };
+      }
+    } else {
+      state.goldenTarget.y += state.targetDir * 145 * dt;
+      if (state.goldenTarget.y < 110) {
+        state.goldenTarget.y = 110;
+        state.targetDir = 1;
+      } else if (state.goldenTarget.y > ARENA_HEIGHT - 110) {
+        state.goldenTarget.y = ARENA_HEIGHT - 110;
+        state.targetDir = -1;
+      }
+    }
 
     for (const c of state.cannons) {
       c.fireCd = Math.max(0, c.fireCd - dt);
       c.shieldCd = Math.max(0, c.shieldCd - dt);
       c.shieldTimer = Math.max(0, c.shieldTimer - dt);
+      c.tripleTimer = Math.max(0, c.tripleTimer - dt);
 
       let moveY = 0;
       let aimTilt = 0;
@@ -169,20 +223,27 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
       if (pressA && c.fireCd <= 0) {
         c.fireCd = FIRE_CD;
         const spd = 610;
-        state.shells.push({
-          id: `sh_${state.nextId++}`,
-          ownerId: c.id,
-          side: c.side,
-          colorHex: c.colorHex,
-          x: c.x + Math.cos(c.aimAngle) * 32,
-          y: c.y + Math.sin(c.aimAngle) * 32,
-          vx: Math.cos(c.aimAngle) * spd,
-          vy: Math.sin(c.aimAngle) * spd,
-          r: 10,
-          ttl: 3.5,
-        });
+        const isHeavy = c.heavyCharges > 0;
+        if (isHeavy) c.heavyCharges -= 1;
+        const offsets = c.tripleTimer > 0 ? [-0.18, 0, 0.18] : [0];
+        for (const off of offsets) {
+          const ang = c.aimAngle + off;
+          state.shells.push({
+            id: `sh_${state.nextId++}`,
+            ownerId: c.id,
+            side: c.side,
+            colorHex: isHeavy ? '#FFB800' : c.colorHex,
+            x: c.x + Math.cos(ang) * 32,
+            y: c.y + Math.sin(ang) * 32,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd,
+            r: isHeavy ? 15 : 10,
+            ttl: 3.5,
+            heavy: isHeavy,
+          });
+        }
         sounds.push({ type: 'shoot', playerId: c.id });
-        if (!c.isBot) haptics.push({ playerId: c.id, pattern: 20, reason: 'cannon-fire' });
+        if (!c.isBot) haptics.push({ playerId: c.id, pattern: isHeavy ? [22, 16, 26] : 20, reason: 'cannon-fire' });
       }
 
       if (pressB && c.shieldCd <= 0) {
@@ -217,6 +278,51 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
         continue;
       }
 
+      // Check shooting mid-canyon supply crates
+      let hitSupply = false;
+      for (let pi = state.pickups.length - 1; pi >= 0; pi--) {
+        const pk = state.pickups[pi];
+        if (Math.hypot(s.x - pk.x, s.y - pk.y) < pk.r + s.r) {
+          const shooter = state.cannons.find((cn) => cn.id === s.ownerId);
+          if (shooter) {
+            if (pk.kind === 'triple-shot') {
+              shooter.tripleTimer = 8.0;
+              state.popups.push({ x: pk.x, y: pk.y - 20, text: 'TRIPLE SHOT!', colorHex: '#FF3B9A', alpha: 1 });
+            } else {
+              shooter.heavyCharges += 2;
+              state.popups.push({ x: pk.x, y: pk.y - 20, text: 'HEAVY SHELL x2!', colorHex: '#FFB800', alpha: 1 });
+            }
+            shooter.score += 35;
+          }
+          state.explosions.push({ x: pk.x, y: pk.y, radius: 18, colorHex: '#FFB800', alpha: 0.9 });
+          state.pickups.splice(pi, 1);
+          state.shells.splice(i, 1);
+          sounds.push({ type: 'pickup', playerId: s.ownerId });
+          hitSupply = true;
+          break;
+        }
+      }
+      if (hitSupply) continue;
+
+      // Check shooting Golden Target
+      if (state.goldenTarget && Math.hypot(s.x - state.goldenTarget.x, s.y - state.goldenTarget.y) < state.goldenTarget.r + s.r) {
+        const shooter = state.cannons.find((cn) => cn.id === s.ownerId);
+        if (shooter) {
+          shooter.score += 80;
+          const ownCore = state.cores.find((co) => co.side === shooter.side);
+          if (ownCore && ownCore.hp < ownCore.maxHp) {
+            ownCore.hp += 1;
+          }
+          state.popups.push({ x: state.goldenTarget.x, y: state.goldenTarget.y - 24, text: '+80 & REPAIR!', colorHex: '#FFB800', alpha: 1 });
+        }
+        state.explosions.push({ x: state.goldenTarget.x, y: state.goldenTarget.y, radius: 26, colorHex: '#FFB800', alpha: 1 });
+        state.goldenTarget = null;
+        state.targetTimer = 11.0;
+        state.shells.splice(i, 1);
+        sounds.push({ type: 'pickup', playerId: s.ownerId });
+        continue;
+      }
+
       // Check shield deflection
       let deflected = false;
       for (const c of state.cannons) {
@@ -227,6 +333,7 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
           s.colorHex = c.colorHex;
           deflected = true;
           c.score += 25;
+          state.popups.push({ x: c.x, y: c.y - 36, text: 'DEFLECT +25', colorHex: '#00C2FF', alpha: 1 });
           sounds.push({ type: 'bump', playerId: c.id, intensity: 0.9 });
           if (!c.isBot) haptics.push({ playerId: c.id, pattern: [24, 20, 40], reason: 'reflect' });
           break;
@@ -240,11 +347,11 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
         const b = state.blocks[bi];
         if (b.side === s.side) continue;
         if (s.x + s.r > b.x && s.x - s.r < b.x + b.w && s.y + s.r > b.y && s.y - s.r < b.y + b.h) {
-          b.hp -= 1;
+          b.hp -= s.heavy ? 3 : 1;
           const shooter = state.cannons.find((cn) => cn.id === s.ownerId);
-          if (shooter) shooter.score += 15;
+          if (shooter) shooter.score += s.heavy ? 25 : 15;
           if (b.hp <= 0) state.blocks.splice(bi, 1);
-          state.explosions.push({ x: s.x, y: s.y, radius: 14, colorHex: s.colorHex, alpha: 0.9 });
+          state.explosions.push({ x: s.x, y: s.y, radius: s.heavy ? 22 : 14, colorHex: s.colorHex, alpha: 0.9 });
           state.shells.splice(i, 1);
           sounds.push({ type: 'hit' });
           hitBlock = true;
@@ -257,12 +364,14 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
       for (const core of state.cores) {
         if (core.side === s.side) continue;
         if (Math.hypot(s.x - core.x, s.y - core.y) < core.r + s.r) {
-          core.hp = Math.max(0, core.hp - 1);
+          const dmg = s.heavy ? 2 : 1;
+          core.hp = Math.max(0, core.hp - dmg);
           const shooter = state.cannons.find((cn) => cn.id === s.ownerId);
           const defender = state.cannons.find((cn) => cn.side === core.side);
-          if (shooter) shooter.score += 65;
+          if (shooter) shooter.score += dmg * 65;
           if (defender) defender.coreHp = core.hp;
-          state.explosions.push({ x: core.x, y: core.y, radius: 28, colorHex: s.colorHex, alpha: 1 });
+          state.explosions.push({ x: core.x, y: core.y, radius: s.heavy ? 38 : 28, colorHex: s.colorHex, alpha: 1 });
+          state.popups.push({ x: core.x, y: core.y - 45, text: s.heavy ? 'MEGA HIT!' : 'CORE HIT!', colorHex: s.colorHex, alpha: 1 });
           state.shells.splice(i, 1);
           sounds.push({ type: 'ko' });
           if (shooter && !shooter.isBot) haptics.push({ playerId: shooter.id, pattern: [30, 20, 45], reason: 'core-hit' });
@@ -308,6 +417,8 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
       totalTime: state.totalTime,
       blocks: state.blocks.map((b) => ({ ...b })),
       cores: state.cores.map((c) => ({ ...c })),
+      pickups: state.pickups.map((p) => ({ ...p })),
+      goldenTarget: state.goldenTarget ? { ...state.goldenTarget } : null,
       shells: state.shells.map((s) => ({
         id: s.id,
         ownerId: s.ownerId,
@@ -317,8 +428,10 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
         vx: s.vx,
         vy: s.vy,
         r: s.r,
+        heavy: s.heavy,
       })),
       explosions: state.explosions.map((e) => ({ ...e })),
+      popups: state.popups.map((p) => ({ ...p })),
       players: state.cannons.map((c) => ({
         id: c.id,
         slotIndex: c.slotIndex,
@@ -332,6 +445,8 @@ export const cannonSiegeModule: ServerGameModule<CannonSiegeState> = {
         coreHp: c.coreHp,
         maxCoreHp: c.maxCoreHp,
         shieldTimer: c.shieldTimer,
+        tripleTimer: c.tripleTimer,
+        heavyCharges: c.heavyCharges,
         score: c.score,
         cooldownA: c.cooldownA,
         cooldownB: c.cooldownB,

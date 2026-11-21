@@ -20,6 +20,7 @@ interface InternalDancer extends ColorMatchPlayerState {
   vy: number;
   hopCd: number;
   shoveCd: number;
+  speedTimer: number;
 }
 
 interface ColorMatchState {
@@ -32,6 +33,8 @@ interface ColorMatchState {
   banner: string | null;
   tiles: ColorMatchTileState[];
   shoveWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  orb: { x: number; y: number; kind: 'speed' | 'shock' } | null;
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: InternalDancer[];
   finished: boolean;
 }
@@ -49,7 +52,6 @@ const BOARD_TOP = Math.floor((ARENA_HEIGHT - BOARD_H) / 2) + 34;
 
 function buildBoard(): ColorMatchTileState[] {
   const tiles: ColorMatchTileState[] = [];
-  // Ensure balanced distribution across all 4 color+symbol pairs (6 tiles each!)
   const bag: number[] = [];
   for (let i = 0; i < COLS * ROWS; i++) bag.push(i % 4);
   for (let i = bag.length - 1; i > 0; i--) {
@@ -73,6 +75,7 @@ function buildBoard(): ColorMatchTileState[] {
         symbol: SYMBOLS[ci],
         dropped: false,
         warning: false,
+        bonus: false,
       });
     }
   }
@@ -83,10 +86,23 @@ function startWave(state: ColorMatchState): void {
   state.tiles = buildBoard();
   state.targetColorIndex = Math.floor(Math.random() * 4);
   state.targetSymbol = SYMBOLS[state.targetColorIndex];
+  // Mark 2 target-color tiles as Golden 2X Bonus tiles!
+  const targetTiles = state.tiles.filter((t) => t.colorIndex === state.targetColorIndex);
+  for (let i = 0; i < Math.min(2, targetTiles.length); i++) {
+    const pick = targetTiles[Math.floor(Math.random() * targetTiles.length)];
+    pick.bonus = true;
+  }
+  state.orb =
+    state.wave >= 2
+      ? {
+          x: BOARD_LEFT + 90 + Math.random() * (BOARD_W - 180),
+          y: BOARD_TOP + 70 + Math.random() * (BOARD_H - 140),
+          kind: Math.random() < 0.55 ? 'speed' : 'shock',
+        }
+      : null;
   state.phase = 'preview';
   state.phaseTimer = 1.05;
-  state.banner = `WAVE ${state.wave}`;
-  // Respawn fallen players cleanly onto the middle so everyone stays engaged for points!
+  state.banner = state.wave >= state.totalWaves - 1 ? `SPEED ROUND — WAVE ${state.wave}!` : `WAVE ${state.wave}`;
   state.players.forEach((p, idx) => {
     if (!p.alive || p.falling) {
       const ang = (idx / Math.max(1, state.players.length)) * Math.PI * 2;
@@ -124,6 +140,7 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
         hopTimer: 0,
         hopDuration: 0.42,
         shoveTimer: 0,
+        speedTimer: 0,
         score: 0,
         survivedWaves: 0,
         cooldownA: 0,
@@ -143,6 +160,8 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
       banner: 'WAVE 1',
       tiles: [],
       shoveWaves: [],
+      orb: null,
+      popups: [],
       players: list,
       finished: false,
     };
@@ -159,6 +178,11 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
       w.radius += 360 * dt;
       w.alpha -= dt * 2.6;
       if (w.alpha <= 0) state.shoveWaves.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 36 * dt;
+      state.popups[i].alpha -= dt * 0.95;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
     if (!state.finished) {
@@ -190,7 +214,18 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
         for (const p of state.players) {
           if (p.alive && !p.falling) {
             p.survivedWaves++;
-            p.score += 100 + state.wave * 15;
+            const onBonus = state.tiles.some(
+              (t) => !t.dropped && t.bonus && p.x >= t.x - 10 && p.x <= t.x + t.w + 10 && p.y >= t.y - 10 && p.y <= t.y + t.h + 10
+            );
+            const pts = (100 + state.wave * 15) * (onBonus ? 2 : 1);
+            p.score += pts;
+            state.popups.push({
+              x: p.x,
+              y: p.y - 30,
+              text: onBonus ? `2X +${pts}!` : `+${pts}`,
+              colorHex: onBonus ? '#FFB800' : '#10D98B',
+              alpha: 1.1,
+            });
             sounds.push({ type: 'pickup', playerId: p.id });
           }
         }
@@ -208,6 +243,7 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
         p.shoveCd = Math.max(0, p.shoveCd - dt);
         p.hopTimer = Math.max(0, p.hopTimer - dt);
         p.shoveTimer = Math.max(0, p.shoveTimer - dt);
+        p.speedTimer = Math.max(0, p.speedTimer - dt);
 
         if (p.falling) {
           p.fallProgress = Math.min(1, p.fallProgress + dt * 2.2);
@@ -216,13 +252,29 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
         }
         if (!p.alive) continue;
 
+        if (state.orb && state.phase !== 'drop' && Math.hypot(p.x - state.orb.x, p.y - state.orb.y) < 34) {
+          const kind = state.orb.kind;
+          state.orb = null;
+          if (kind === 'speed') {
+            p.speedTimer = 6.5;
+            p.hopCd = 0;
+            state.popups.push({ x: p.x, y: p.y - 28, text: 'TURBO DANCE!', colorHex: '#FFB800', alpha: 1.2 });
+          } else {
+            p.shoveCd = 0;
+            p.score += 45;
+            state.popups.push({ x: p.x, y: p.y - 28, text: 'SHOCK READY +45!', colorHex: '#00C2FF', alpha: 1.2 });
+          }
+          sounds.push({ type: 'boost', playerId: p.id });
+          haptics.push({ playerId: p.id, pattern: 20, reason: 'orb-pickup' });
+        }
+
         const inp = players.find((x) => x.id === p.id);
         if (!inp) continue;
         const { dx, dy, a, b } = inp.input;
         const mag = Math.hypot(dx, dy);
         if (mag > 0.12) {
           p.angle = Math.atan2(dy, dx);
-          const spd = p.hopTimer > 0 ? 375 : 295;
+          const spd = (p.hopTimer > 0 ? 375 : 295) * (p.speedTimer > 0 ? 1.28 : 1);
           p.vx += ((dx / Math.max(1, mag)) * spd - p.vx) * Math.min(1, dt * 11);
           p.vy += ((dy / Math.max(1, mag)) * spd - p.vy) * Math.min(1, dt * 11);
         } else {
@@ -318,6 +370,8 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
       banner: state.banner,
       tiles: state.tiles.map((t) => ({ ...t })),
       shoveWaves: state.shoveWaves.map((w) => ({ ...w })),
+      orb: state.orb ? { ...state.orb } : null,
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: state.players.map((p) => ({
         id: p.id,
         slotIndex: p.slotIndex,
@@ -332,6 +386,7 @@ export const colorMatchModule: ServerGameModule<ColorMatchState> = {
         hopTimer: p.hopTimer,
         hopDuration: p.hopDuration,
         shoveTimer: p.shoveTimer,
+        speedTimer: p.speedTimer,
         score: p.score,
         survivedWaves: p.survivedWaves,
         cooldownA: p.cooldownA,

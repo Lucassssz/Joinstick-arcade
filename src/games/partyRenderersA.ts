@@ -8,7 +8,7 @@ import {
   type LaserGauntletSnapshot,
   type VaultHeistSnapshot,
 } from '../shared/types';
-import { drawNameplate, tCanvas } from './renderers';
+import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -189,8 +189,24 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
     drawSphere3D(ctx, o.x, o.y, o.r, '#FF3B9A', '#FFFFFF', 7, true);
   }
 
+  // Powerups (magnet / shield / star)
+  const puBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pu of snap.powerups ?? []) {
+    const col = pu.kind === 'magnet' ? '#00C2FF' : pu.kind === 'shield' ? '#10D98B' : '#FFB800';
+    const label = pu.kind === 'magnet' ? 'MAG' : pu.kind === 'shield' ? 'SHD' : '★';
+    drawShadowOval(ctx, pu.x, pu.y + 8, 16, 10, 0.35);
+    drawExtrudedCylinder3D(ctx, pu.x, pu.y + puBob * 0.5, 16, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pu.x, pu.y - 4 + puBob * 0.5);
+    ctx.restore();
+  }
+
   // 2.5D Extruded Rotating Boss Core Tower
-  const coreAccent = snap.slowMoTimer > 0 ? '#00C2FF' : '#FF4D2E';
+  const coreAccent = snap.overdrive ? '#FF3B9A' : snap.slowMoTimer > 0 ? '#00C2FF' : '#FF4D2E';
   drawShadowOval(ctx, cx + 3, cy + 16, 62, 46, 0.55);
 
   const traceOctagon = (oy: number) => {
@@ -238,6 +254,22 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
       ctx.arc(p.x, p.y - 4, 26, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if ((p.magnetTimer ?? 0) > 0) {
+      ctx.strokeStyle = '#00C2FF';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 4, 34, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if ((p.shieldCharges ?? 0) > 0) {
+      ctx.strokeStyle = '#10D98B';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 4, 30, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // Extruded underside wing shadow
     ctx.save();
@@ -280,9 +312,11 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
     drawNameplate(ctx, p.x, p.y - 36, p.slotIndex, p.name, p.colorHex, `HP ${p.hp} · ${p.combo}x`);
   }
 
+  drawPopupTexts(ctx, snap.popups);
+
   drawTopHud(
     ctx,
-    `WAVE ${snap.wave}`,
+    snap.overdrive ? `WAVE ${snap.wave} OVERDRIVE` : `WAVE ${snap.wave}`,
     `${Math.ceil(snap.timeLeft)}s`,
     snap.slowMoTimer > 0 ? 'EMP SLOW-MO' : `${snap.players[0]?.score ?? 0} PTS`
   );
@@ -312,23 +346,49 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
   ctx.stroke();
 
   // Extraction portal pad in center (3D ringed platform)
+  if (snap.lockdown) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 184, 0, 0.72)';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([10, 6]);
+    ctx.beginPath();
+    ctx.arc(snap.portal.x, snap.portal.y, snap.portal.r + 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
   drawExtrudedCylinder3D(
     ctx,
     snap.portal.x,
     snap.portal.y,
     snap.portal.r,
     6,
-    '#0E2E26',
+    snap.lockdown ? '#2F260B' : '#0E2E26',
     '#091E19',
-    '#10D98B'
+    snap.lockdown ? '#FFB800' : '#10D98B'
   );
   ctx.save();
-  ctx.fillStyle = '#A7F3D0';
+  ctx.fillStyle = snap.lockdown ? '#FDE047' : '#A7F3D0';
   ctx.font = '800 12px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(tCanvas('BANK'), snap.portal.x, snap.portal.y - 6);
+  ctx.fillText(tCanvas(snap.lockdown ? 'BANK 2X' : 'BANK'), snap.portal.x, snap.portal.y - 6);
   ctx.restore();
+
+  // Vault Pickups (EMP Cell & Cloak)
+  const vBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'emp-cell' ? '#00C2FF' : '#C084FC';
+    const label = pk.kind === 'emp-cell' ? 'EMP' : 'CLK';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 15, 9, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + vBob * 0.4, 15, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 4 + vBob * 0.4);
+    ctx.restore();
+  }
 
   // 2.5D Spike pads
   for (const s of snap.spikes) {
@@ -435,7 +495,11 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
       const { w } = it;
       drawExtrudedBox3D(ctx, w.x, w.y, w.w, w.h, 16, 6, '#2A3346', '#181E2B', '#4B5875');
     } else if (it.kind === 'relic') {
-      drawSpinningGem3D(ctx, it.r.x, it.r.y, 13, '#10D98B', now + it.r.x * 0.02, 7);
+      if (it.r.kind === 'crown') {
+        drawCrown3D(ctx, it.r.x, it.r.y - 10 + Math.sin(now + it.r.x) * 3, 1.15);
+      } else {
+        drawSpinningGem3D(ctx, it.r.x, it.r.y, 13, '#10D98B', now + it.r.x * 0.02, 7);
+      }
     } else if (it.kind === 'drone') {
       const { d } = it;
       const bob = Math.sin(now * 1.4 + d.x) * 3;
@@ -444,7 +508,8 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
       const { p } = it;
       drawCharacterPod3D(ctx, p.x, p.y, 17, 0, p.colorHex, {
         height: 10,
-        alpha: p.invulnTimer > 0 ? 0.65 : 1,
+        alpha: p.invulnTimer > 0 ? 0.55 : 1,
+        rimColor: (p.overchargeTimer ?? 0) > 0 ? '#00C2FF' : '#FFFFFF',
         showVisor: false,
       });
 
@@ -460,7 +525,14 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
     }
   }
 
-  drawTopHud(ctx, 'VAULT HEIST', `${Math.ceil(snap.timeLeft)}s`, 'BRING GEMS TO CENTER');
+  drawPopupTexts(ctx, snap.popups);
+
+  drawTopHud(
+    ctx,
+    snap.lockdown ? 'LOCKDOWN 2X' : 'VAULT HEIST',
+    `${Math.ceil(snap.timeLeft)}s`,
+    'BRING GEMS TO CENTER'
+  );
 }
 
 // ============================================================
@@ -505,23 +577,43 @@ export function renderHyperPong(ctx: CanvasRenderingContext2D, snap: HyperPongSn
   ctx.strokeStyle = '#00C2FF';
   ctx.strokeRect(ARENA_WIDTH - 56, ARENA_HEIGHT / 2 - goalH / 2, 20, goalH);
 
-  // Puck trail
-  snap.puck.trail.forEach((pt, idx) => {
-    const a = (idx / Math.max(1, snap.puck.trail.length)) * 0.42;
-    ctx.fillStyle = snap.puck.hot ? `rgba(255, 77, 46, ${a})` : `rgba(255, 184, 0, ${a})`;
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y - 3, snap.puck.radius * (0.45 + idx * 0.05), 0, Math.PI * 2);
-    ctx.fill();
-  });
+  // Center Power Orb
+  if (snap.powerOrb) {
+    const orb = snap.powerOrb;
+    const col = orb.kind === 'multiball' ? '#FFB800' : orb.kind === 'giant' ? '#10D98B' : '#FF4D2E';
+    const label = orb.kind === 'multiball' ? '2X' : orb.kind === 'giant' ? 'BIG' : '🔥';
+    const pulse = Math.sin(Date.now() * 0.007) * 3;
+    drawShadowOval(ctx, orb.x, orb.y + 8, 18, 12, 0.35);
+    drawExtrudedCylinder3D(ctx, orb.x, orb.y + pulse * 0.4, 18, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), orb.x, orb.y - 4 + pulse * 0.4);
+    ctx.restore();
+  }
 
-  // Y-sort bumpers, puck, and mallet paddles
+  // Puck & extraPucks trails
+  const allPucks = [snap.puck, ...(snap.extraPucks ?? [])];
+  for (const pk of allPucks) {
+    pk.trail.forEach((pt, idx) => {
+      const a = (idx / Math.max(1, pk.trail.length)) * 0.42;
+      ctx.fillStyle = pk.hot ? `rgba(255, 77, 46, ${a})` : `rgba(255, 184, 0, ${a})`;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y - 3, pk.radius * (0.45 + idx * 0.05), 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // Y-sort bumpers, pucks, and mallet paddles
   type PongItem =
     | { kind: 'bumper'; y: number; b: (typeof snap.bumpers)[number] }
-    | { kind: 'puck'; y: number }
+    | { kind: 'puck'; y: number; pk: (typeof allPucks)[number] }
     | { kind: 'paddle'; y: number; p: (typeof snap.players)[number] };
   const pongItems: PongItem[] = [
     ...snap.bumpers.map((b) => ({ kind: 'bumper' as const, y: b.y, b })),
-    { kind: 'puck' as const, y: snap.puck.y },
+    ...allPucks.map((pk) => ({ kind: 'puck' as const, y: pk.y, pk })),
     ...snap.players.map((p) => ({ kind: 'paddle' as const, y: p.y, p })),
   ];
   pongItems.sort((a, b) => a.y - b.y);
@@ -541,14 +633,15 @@ export function renderHyperPong(ctx: CanvasRenderingContext2D, snap: HyperPongSn
         b.flash > 0 ? '#FFFFFF' : '#528BFF'
       );
     } else if (it.kind === 'puck') {
+      const pk = it.pk;
       drawExtrudedCylinder3D(
         ctx,
-        snap.puck.x,
-        snap.puck.y,
-        snap.puck.radius,
+        pk.x,
+        pk.y,
+        pk.radius,
         6,
-        snap.puck.hot ? '#FF4D2E' : '#FFB800',
-        snap.puck.hot ? '#9A2210' : '#9C6B00',
+        pk.hot ? '#FF4D2E' : '#FFB800',
+        pk.hot ? '#9A2210' : '#9C6B00',
         '#FFFFFF'
       );
     } else {
@@ -559,6 +652,20 @@ export function renderHyperPong(ctx: CanvasRenderingContext2D, snap: HyperPongSn
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius + 24, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((p.giantTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius + 14, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((p.fireTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#FF4D2E';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius + 18, 0, Math.PI * 2);
         ctx.stroke();
       }
       if (p.smashTimer > 0) {
@@ -586,6 +693,8 @@ export function renderHyperPong(ctx: CanvasRenderingContext2D, snap: HyperPongSn
       drawNameplate(ctx, p.x, p.y - p.radius - 26, p.slotIndex, p.name, p.colorHex);
     }
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawTopHud(ctx, `FIRST TO ${snap.targetScore}`, `${snap.scoreLeft}  –  ${snap.scoreRight}`, 'HYPER PONG');
   if (snap.goalBanner) drawBanner(ctx, snap.goalBanner, snap.goalBannerColor ?? '#FFB800');
@@ -627,6 +736,52 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
   ctx.beginPath();
   ctx.arc(ARENA_WIDTH / 2, ARENA_HEIGHT / 2, 110, 0, Math.PI * 2);
   ctx.stroke();
+
+  // Sudden death shrinking hazard ring
+  if ((snap.dangerRadius ?? 560) < 550) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 77, 46, 0.78)';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([12, 8]);
+    ctx.beginPath();
+    ctx.arc(ARENA_WIDTH / 2, ARENA_HEIGHT / 2, snap.dangerRadius ?? 560, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Dojo Power Scrolls
+  const scBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const sc of snap.scrolls ?? []) {
+    const col = sc.kind === 'blade-wave' ? '#FF3B9A' : '#10D98B';
+    const label = sc.kind === 'blade-wave' ? 'WAVE' : 'WIND';
+    drawShadowOval(ctx, sc.x, sc.y + 8, 16, 10, 0.35);
+    drawExtrudedCylinder3D(ctx, sc.x, sc.y + scBob * 0.5, 16, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 9.5px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), sc.x, sc.y - 4 + scBob * 0.5);
+    ctx.restore();
+  }
+
+  // Flying Blade Wave Projectiles
+  for (const w of snap.waveProjectiles ?? []) {
+    ctx.save();
+    ctx.translate(w.x, w.y - 8);
+    ctx.rotate(w.angle);
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(-6, 0, 24, -1.0, 1.0);
+    ctx.stroke();
+    ctx.strokeStyle = w.colorHex;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(-6, 0, 24, -1.0, 1.0);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // Slash arcs
   for (const s of snap.slashes) {
@@ -677,6 +832,22 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
         ctx.beginPath();
         ctx.arc(p.x, p.y - 8, 34, 0, Math.PI * 2);
         ctx.stroke();
+      }
+      if ((p.waveTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#FF3B9A';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 8, 28, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if ((p.windTimer ?? 0) > 0) {
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 8, 31, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       if (p.stunTimer > 0) {
         ctx.strokeStyle = '#FF4D2E';
@@ -733,6 +904,8 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
     }
   }
 
+  drawPopupTexts(ctx, snap.popups);
+
   drawTopHud(ctx, `ROUND ${snap.round}`, `${Math.ceil(snap.roundTimer)}s`, `FIRST TO ${snap.targetWins}`);
   if (snap.roundBanner) drawBanner(ctx, snap.roundBanner, '#FFB800');
 }
@@ -765,6 +938,41 @@ export function renderCannonSiege(ctx: CanvasRenderingContext2D, snap: CannonSie
   ctx.strokeStyle = 'rgba(255, 122, 26, 0.25)';
   ctx.lineWidth = 2;
   ctx.strokeRect(40, 40, ARENA_WIDTH - 80, ARENA_HEIGHT - 80);
+
+  // Mid-canyon floating ammo crates
+  const cBob = Math.sin(Date.now() * 0.006) * 4;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'triple-shot' ? '#FF3B9A' : '#FFB800';
+    const label = pk.kind === 'triple-shot' ? '3X' : 'HVY';
+    drawShadowOval(ctx, pk.x, pk.y + 12, 18, 10, 0.35);
+    drawExtrudedBox3D(ctx, pk.x - 16, pk.y - 16 + cBob, 32, 32, 12, 5, col, shadeHex(col, -0.45), '#FFFFFF');
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 6 + cBob);
+    ctx.restore();
+  }
+
+  // Golden Target gliding in center
+  if (snap.goldenTarget) {
+    const gt = snap.goldenTarget;
+    drawShadowOval(ctx, gt.x, gt.y + 12, 20, 10, 0.4);
+    drawExtrudedCylinder3D(ctx, gt.x, gt.y, gt.r, 10, '#F59E0B', '#92400E', '#FEF08A');
+    ctx.save();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(gt.x, gt.y - 5, gt.r * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('+80', gt.x, gt.y - 5);
+    ctx.restore();
+  }
 
   // Y-sort destructible fortress bricks, power cores, and cannons
   type SiegeItem =
@@ -854,7 +1062,7 @@ export function renderCannonSiege(ctx: CanvasRenderingContext2D, snap: CannonSie
 
   // 3D Cannonballs & explosions
   for (const s of snap.shells) {
-    drawSphere3D(ctx, s.x, s.y, s.r, s.colorHex, '#FFFFFF', 14, true);
+    drawSphere3D(ctx, s.x, s.y, s.r, s.heavy ? '#FFB800' : s.colorHex, s.heavy ? '#FF4D2E' : '#FFFFFF', 14, true);
   }
   for (const ex of snap.explosions) {
     ctx.save();
@@ -866,6 +1074,8 @@ export function renderCannonSiege(ctx: CanvasRenderingContext2D, snap: CannonSie
     ctx.stroke();
     ctx.restore();
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   drawTopHud(
     ctx,
@@ -892,6 +1102,31 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
         ctx.fillRect(x, y, 64, 64);
       }
     }
+  }
+
+  // Crown Frenzy 2X floor glow
+  if (snap.crownFrenzy) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 184, 0, 0.72)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(32, 32, ARENA_WIDTH - 64, ARENA_HEIGHT - 64);
+    ctx.restore();
+  }
+
+  // Royal Pickups
+  const pkBob = Math.sin(Date.now() * 0.006) * 3;
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'gold-coin' ? '#FFB800' : pk.kind === 'speed-crown' ? '#10D98B' : '#00C2FF';
+    const label = pk.kind === 'gold-coin' ? '+45' : pk.kind === 'speed-crown' ? 'SPD' : 'EMP';
+    drawShadowOval(ctx, pk.x, pk.y + 8, 15, 9, 0.35);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + pkBob * 0.4, 15, 7, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    ctx.save();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas(label), pk.x, pk.y - 4 + pkBob * 0.4);
+    ctx.restore();
   }
 
   // Shockwaves
@@ -942,6 +1177,15 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
         ctx.fill();
         ctx.restore();
       }
+      if ((p.boostTimer ?? 0) > 0) {
+        ctx.save();
+        ctx.strokeStyle = '#10D98B';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
       drawCharacterPod3D(ctx, p.x, p.y, 19, 0, p.colorHex, {
         height: 11,
         rimColor: p.hasCrown ? '#FFB800' : '#FFFFFF',
@@ -961,6 +1205,13 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
     }
   }
 
+  drawPopupTexts(ctx, snap.popups);
+
   const leader = [...snap.players].sort((a, b) => b.score - a.score)[0];
-  drawTopHud(ctx, 'CROWN HEIST', `${Math.ceil(snap.timeLeft)}s`, leader ? `LEAD: ${leader.name}` : '');
+  drawTopHud(
+    ctx,
+    snap.crownFrenzy ? 'FRENZY 2X!' : 'CROWN HEIST',
+    `${Math.ceil(snap.timeLeft)}s`,
+    leader ? `LEAD: ${leader.name}` : ''
+  );
 }

@@ -29,6 +29,7 @@ interface JungleLaddersState {
   ladders: { from: number; to: number }[];
   snakes: { from: number; to: number; colorHex: string }[];
   mysteryTiles: number[];
+  goldenTiles: number[];
   bananas: number[];
   players: JungleLaddersPlayerState[];
   finished: boolean;
@@ -71,6 +72,8 @@ const SNAKES_50 = [
 ];
 
 const MYSTERY_50 = [8, 17, 26, 39];
+const GOLDEN_100 = [16, 35, 58, 79, 91];
+const GOLDEN_50 = [12, 23, 35, 42];
 
 const TURN_TIMEOUT = 10;
 
@@ -117,6 +120,15 @@ function resolveTile(
   const bananaIdx = state.bananas.indexOf(active.tile);
   if (bananaIdx !== -1) {
     state.bananas.splice(bananaIdx, 1);
+    if (active.shielded) {
+      active.shielded = false;
+      state.banner = 'LEAF SHIELD SAVED!';
+      state.eventText = `${active.name}'s Leaf Shield blocked a Banana slip!`;
+      sounds.push({ type: 'confirm', playerId: active.id });
+      state.phase = 'event';
+      state.phaseTimer = 0.95;
+      return;
+    }
     const slipTo = Math.max(1, active.tile - 3);
     active.slideFrom = active.tile;
     active.slideTo = slipTo;
@@ -146,6 +158,16 @@ function resolveTile(
   // Snake check
   const snake = state.snakes.find((s) => s.from === active.tile);
   if (snake) {
+    if (active.shielded) {
+      active.shielded = false;
+      state.banner = 'LEAF SHIELD SAVED!';
+      state.eventText = `${active.name}'s Leaf Shield chased away the Snake!`;
+      sounds.push({ type: 'pulse', playerId: active.id });
+      haptics.push({ playerId: active.id, pattern: 26, reason: 'shield-save' });
+      state.phase = 'event';
+      state.phaseTimer = 1.0;
+      return;
+    }
     active.slideFrom = snake.from;
     active.slideTo = snake.to;
     active.slideProgress = 0;
@@ -158,10 +180,30 @@ function resolveTile(
     return;
   }
 
+  // Golden Vine tile check (Leaf Shield + +3 Tile Surge!)
+  if (state.goldenTiles.includes(active.tile)) {
+    active.shielded = true;
+    const leapTo = Math.min(state.targetTile - 1, active.tile + 3);
+    active.slideFrom = active.tile;
+    active.slideTo = leapTo;
+    active.slideProgress = 0;
+    state.phase = 'sliding';
+    state.banner = 'GOLDEN VINE + SHIELD!';
+    state.eventText = `${active.name} got a Leaf Shield & swung to #${leapTo}!`;
+    sounds.push({ type: 'boost', playerId: active.id });
+    haptics.push({ playerId: active.id, pattern: [22, 20, 36], reason: 'golden-vine' });
+    return;
+  }
+
   // Mystery tile check
   if (state.mysteryTiles.includes(active.tile)) {
-    active.trickReady = true;
-    state.eventText = `${active.name} found a Mystery Tile! TRICK (B) Ready!`;
+    if (active.trickReady) {
+      active.shielded = true;
+      state.eventText = `${active.name} found a Leaf Shield on Mystery Tile!`;
+    } else {
+      active.trickReady = true;
+      state.eventText = `${active.name} found a Mystery Tile! TRICK (B) Ready!`;
+    }
     sounds.push({ type: 'pickup', playerId: active.id });
     haptics.push({ playerId: active.id, pattern: 30, reason: 'mystery' });
     state.phase = 'event';
@@ -192,6 +234,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
       slideProgress: 0,
       trickReady: false,
       boostQueued: false,
+      shielded: false,
       climbs: 0,
       slides: 0,
       cooldownA: 0,
@@ -215,6 +258,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
       ladders: is50 ? LADDERS_50.map((l) => ({ ...l })) : LADDERS_100.map((l) => ({ ...l })),
       snakes: is50 ? SNAKES_50.map((s) => ({ ...s })) : SNAKES_100.map((s) => ({ ...s })),
       mysteryTiles: is50 ? [...MYSTERY_50] : [...MYSTERY_100],
+      goldenTiles: is50 ? [...GOLDEN_50] : [...GOLDEN_100],
       bananas: [],
       players: boardPlayers,
       finished: false,
@@ -273,15 +317,18 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
           state.diceRolling = false;
           const finalRoll = rollFromPower(state.powerMeter);
           state.diceValue = finalRoll;
-          const bonus = active.boostQueued ? 2 : 0;
+          const trickBonus = active.boostQueued ? 2 : 0;
+          const perfectBonus = state.powerMeter >= 0.88 ? 2 : 0;
           active.boostQueued = false;
+          const bonus = trickBonus + perfectBonus;
           const steps = finalRoll + bonus;
           state.stepsRemaining = Math.min(steps, state.targetTile - active.tile);
           state.hopProgress = 0;
           state.phase = 'moving';
+          if (perfectBonus > 0) state.banner = 'PERFECT ROLL +2!';
           state.eventText =
             bonus > 0
-              ? `${active.name} rolled ${finalRoll} + 2 Boost = ${steps}!`
+              ? `${active.name} rolled ${finalRoll} + ${bonus} Bonus = ${steps}!`
               : `${active.name} rolled a ${finalRoll}!`;
           sounds.push({ type: 'bump', playerId: active.id });
           if (state.stepsRemaining <= 0) {
@@ -363,6 +410,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
       ladders: state.ladders,
       snakes: state.snakes,
       mysteryTiles: state.mysteryTiles,
+      goldenTiles: state.goldenTiles,
       bananas: [...state.bananas],
       players: state.players.map((p) => ({ ...p })),
     };

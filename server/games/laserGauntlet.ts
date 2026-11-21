@@ -20,6 +20,8 @@ interface InternalLaserPlayer extends LaserGauntletPlayerState {
   blinkCd: number;
   empCd: number;
   respawnTimer: number;
+  magnetTimer: number;
+  shieldCharges: number;
 }
 
 interface InternalBeam {
@@ -66,11 +68,14 @@ interface LaserGauntletState {
   beamSpawnTimer: number;
   ringSpawnTimer: number;
   orbSpawnTimer: number;
+  powerupSpawnTimer: number;
   nextId: number;
   beams: InternalBeam[];
   rings: InternalRing[];
   orbs: InternalOrb[];
   shards: InternalShard[];
+  powerups: { id: string; kind: 'magnet' | 'shield' | 'star'; x: number; y: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: Map<string, InternalLaserPlayer>;
 }
 
@@ -113,6 +118,8 @@ function makePlayer(p: ServerPlayerInputState, idx: number, total: number): Inte
     alive: true,
     blinkTimer: 0,
     invulnTimer: 1.4,
+    magnetTimer: 0,
+    shieldCharges: 0,
     combo: 1,
     score: 0,
     cooldownA: 0,
@@ -149,11 +156,14 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
       beamSpawnTimer: 1.2,
       ringSpawnTimer: 3.4,
       orbSpawnTimer: 4.5,
+      powerupSpawnTimer: 6.0,
       nextId: 1,
       beams: [],
       rings: [],
       orbs: [],
       shards: [],
+      powerups: [],
+      popups: [],
       players: new Map(),
     };
 
@@ -185,6 +195,28 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
     const hazardDt = state.slowMoTimer > 0 ? dt * 0.42 : dt;
     state.coreAngle += hazardDt * (0.65 + state.wave * 0.14);
 
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pp = state.popups[i];
+      pp.y -= 32 * dt;
+      pp.alpha -= 0.9 * dt;
+      if (pp.alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    state.powerupSpawnTimer -= dt;
+    if (state.powerupSpawnTimer <= 0 && state.powerups.length < 2) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 160 + Math.random() * 190;
+      const kinds: ('magnet' | 'shield' | 'star')[] = ['magnet', 'shield', 'star'];
+      const kind = kinds[Math.floor(Math.random() * kinds.length)];
+      state.powerups.push({
+        id: `lgp_${state.nextId++}`,
+        kind,
+        x: Math.max(80, Math.min(ARENA_WIDTH - 80, CX + Math.cos(angle) * dist * 1.3)),
+        y: Math.max(80, Math.min(ARENA_HEIGHT - 80, CY + Math.sin(angle) * dist * 0.85)),
+      });
+      state.powerupSpawnTimer = 7.5;
+    }
+
     // Move & act players
     for (const p of players) {
       const entity = state.players.get(p.id);
@@ -210,6 +242,7 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
       entity.empCd = Math.max(0, entity.empCd - dt);
       entity.blinkTimer = Math.max(0, entity.blinkTimer - dt);
       entity.invulnTimer = Math.max(0, entity.invulnTimer - dt);
+      entity.magnetTimer = Math.max(0, entity.magnetTimer - dt);
 
       const mag = Math.hypot(p.input.dx, p.input.dy);
       const nx = mag > 0.12 ? p.input.dx / mag : 0;
@@ -268,6 +301,19 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
       // Passive survival trickle
       entity.score += dt * 4;
 
+      // Magnet pulls shards toward player
+      if (entity.magnetTimer > 0) {
+        for (const sh of state.shards) {
+          const sx = entity.x - sh.x;
+          const sy = entity.y - sh.y;
+          const sd = Math.hypot(sx, sy);
+          if (sd > 4 && sd < 260) {
+            sh.x += (sx / sd) * 320 * dt;
+            sh.y += (sy / sd) * 320 * dt;
+          }
+        }
+      }
+
       // Collect shards
       for (let i = state.shards.length - 1; i >= 0; i--) {
         const sh = state.shards[i];
@@ -279,6 +325,27 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
           state.shards.push(spawnShard(state));
           sounds.push({ type: 'pickup', playerId: p.id });
           haptics.push({ playerId: p.id, pattern: 18, reason: 'shard' });
+        }
+      }
+
+      // Collect powerups
+      for (let i = state.powerups.length - 1; i >= 0; i--) {
+        const pk = state.powerups[i];
+        if (Math.hypot(entity.x - pk.x, entity.y - pk.y) < PLAYER_RADIUS + 20) {
+          if (pk.kind === 'magnet') {
+            entity.magnetTimer = 7.5;
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'SHARD MAGNET!', colorHex: '#00C2FF', alpha: 1 });
+          } else if (pk.kind === 'shield') {
+            entity.shieldCharges = Math.min(2, entity.shieldCharges + 1);
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: 'ENERGY SHIELD!', colorHex: '#10D98B', alpha: 1 });
+          } else {
+            entity.score += 80;
+            entity.combo = Math.min(5, entity.combo + 1);
+            state.popups.push({ x: pk.x, y: pk.y - 12, text: '+80 STAR!', colorHex: '#FFB800', alpha: 1 });
+          }
+          state.powerups.splice(i, 1);
+          sounds.push({ type: 'pickup', playerId: p.id });
+          haptics.push({ playerId: p.id, pattern: 26, reason: 'powerup' });
         }
       }
 
@@ -393,9 +460,17 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
     // Pulse shards
     for (const sh of state.shards) sh.pulse += dt * 4;
 
-    // Damage checks (forgiving inner hitbox + 1.3s i-frames)
+    // Damage checks (forgiving inner hitbox + 1.3s i-frames + shield charge block)
     const damagePlayer = (entity: InternalLaserPlayer) => {
       if (entity.invulnTimer > 0 || !entity.alive) return;
+      if (entity.shieldCharges > 0) {
+        entity.shieldCharges -= 1;
+        entity.invulnTimer = 1.1;
+        state.popups.push({ x: entity.x, y: entity.y - 24, text: 'SHIELD SAVED!', colorHex: '#10D98B', alpha: 1 });
+        sounds.push({ type: 'bump', playerId: entity.id });
+        haptics.push({ playerId: entity.id, pattern: 24, reason: 'shield' });
+        return;
+      }
       entity.hp -= 1;
       entity.combo = 1;
       entity.invulnTimer = 1.35;
@@ -468,6 +543,7 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
       timeLeft: state.timeLeft,
       totalTime: state.totalTime,
       wave: state.wave,
+      overdrive: state.wave >= 4,
       slowMoTimer: state.slowMoTimer,
       coreAngle: state.coreAngle,
       beams: state.beams.map((b) => ({
@@ -484,6 +560,8 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
       })),
       orbs: state.orbs.map((o) => ({ id: o.id, x: o.x, y: o.y, r: o.r })),
       shards: state.shards.map((s) => ({ ...s })),
+      powerups: state.powerups.map((pk) => ({ ...pk })),
+      popups: state.popups.map((pp) => ({ ...pp })),
       players: [...state.players.values()].map((e) => ({
         id: e.id,
         slotIndex: e.slotIndex,
@@ -497,6 +575,8 @@ export const laserGauntletModule: ServerGameModule<LaserGauntletState> = {
         alive: e.alive,
         blinkTimer: e.blinkTimer,
         invulnTimer: e.invulnTimer,
+        magnetTimer: e.magnetTimer,
+        shieldCharges: e.shieldCharges,
         combo: e.combo,
         score: Math.round(e.score),
         cooldownA: e.cooldownA,

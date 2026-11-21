@@ -19,6 +19,8 @@ interface InternalFreezePlayer extends FreezePlayerState {
   vy: number;
   cdA: number;
   cdB: number;
+  skateTimer: number;
+  auraTimer: number;
 }
 
 interface InternalBolt {
@@ -44,10 +46,14 @@ interface FreezeTagState {
   timeLeft: number;
   totalTime: number;
   nextId: number;
+  pickupTimer: number;
   banner: string | null;
   bannerTimer: number;
   bolts: InternalBolt[];
   traps: InternalTrap[];
+  icePatches: { x: number; y: number; r: number }[];
+  pickups: { id: string; kind: 'thaw-star' | 'turbo-skates' | 'frost-aura'; x: number; y: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   pillars: { x: number; y: number; r: number }[];
   entities: InternalFreezePlayer[];
 }
@@ -93,6 +99,8 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
         frozen: false,
         dashTimer: 0,
         immuneTimer: 1.8,
+        skateTimer: 0,
+        auraTimer: 0,
         saves: 0,
         freezes: 0,
         score: 0,
@@ -107,10 +115,18 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
       timeLeft: totalTime,
       totalTime,
       nextId: 1,
+      pickupTimer: 3.5,
       banner: 'RUNNERS: THAW FROZEN FRIENDS!',
       bannerTimer: 2.2,
       bolts: [],
       traps: [],
+      icePatches: [
+        { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, r: 85 },
+        { x: 200, y: ARENA_HEIGHT / 2, r: 62 },
+        { x: ARENA_WIDTH - 200, y: ARENA_HEIGHT / 2, r: 62 },
+      ],
+      pickups: [],
+      popups: [],
       pillars: [
         { x: 320, y: 200, r: 30 },
         { x: ARENA_WIDTH - 320, y: 200, r: 30 },
@@ -137,6 +153,25 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
       state.traps[i].ttl -= dt;
       if (state.traps[i].ttl <= 0) state.traps.splice(i, 1);
     }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 28 * dt;
+      state.popups[i].alpha -= dt * 1.1;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    state.pickupTimer -= dt;
+    if (state.pickupTimer <= 0 && state.pickups.length < 3) {
+      const roll = Math.random();
+      const kind: 'thaw-star' | 'turbo-skates' | 'frost-aura' =
+        roll < 0.36 ? 'thaw-star' : roll < 0.72 ? 'turbo-skates' : 'frost-aura';
+      state.pickups.push({
+        id: `fp_${state.nextId++}`,
+        kind,
+        x: 150 + Math.random() * (ARENA_WIDTH - 300),
+        y: 110 + Math.random() * (ARENA_HEIGHT - 220),
+      });
+      state.pickupTimer = 5.2;
+    }
 
     const freezeRunner = (runner: InternalFreezePlayer, hunter?: InternalFreezePlayer) => {
       if (runner.frozen || runner.immuneTimer > 0 || runner.role !== 'runner') return;
@@ -146,6 +181,7 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
       if (hunter) {
         hunter.freezes += 1;
         hunter.score += 65;
+        state.popups.push({ x: runner.x, y: runner.y - 24, text: 'FROZEN +65!', colorHex: '#38BDF8', alpha: 1 });
         if (!hunter.isBot) haptics.push({ playerId: hunter.id, pattern: [26, 20, 42], reason: 'freeze-hit' });
       }
       sounds.push({ type: 'hit', playerId: runner.id });
@@ -157,6 +193,8 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
       e.cdB = Math.max(0, e.cdB - dt);
       e.dashTimer = Math.max(0, e.dashTimer - dt);
       e.immuneTimer = Math.max(0, e.immuneTimer - dt);
+      e.skateTimer = Math.max(0, e.skateTimer - dt);
+      e.auraTimer = Math.max(0, e.auraTimer - dt);
 
       if (e.frozen) {
         e.cooldownA = 1;
@@ -230,10 +268,12 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
         }
       }
 
-      const baseSpeed = e.dashTimer > 0 ? 640 : e.role === 'hunter' ? 345 : 325;
+      const onIcePatch = state.icePatches.some((ip) => Math.hypot(e.x - ip.x, e.y - ip.y) < ip.r);
+      const skateMult = e.skateTimer > 0 ? 1.32 : onIcePatch ? 1.18 : 1;
+      const baseSpeed = e.dashTimer > 0 ? 640 : (e.role === 'hunter' ? 345 : 325) * skateMult;
       const tvx = e.dashTimer > 0 ? e.vx : nx * baseSpeed;
       const tvy = e.dashTimer > 0 ? e.vy : ny * baseSpeed;
-      const accel = e.dashTimer > 0 ? 4 : 11; // Slight icy glide
+      const accel = e.dashTimer > 0 ? 4 : onIcePatch ? 5.5 : 11; // Extra glide on slick ice patches
       e.vx += (tvx - e.vx) * Math.min(1, accel * dt);
       e.vy += (tvy - e.vy) * Math.min(1, accel * dt);
 
@@ -247,6 +287,48 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
         if (pd < pil.r + PLAYER_R) {
           e.x = pil.x + (pdx / pd) * (pil.r + PLAYER_R);
           e.y = pil.y + (pdy / pd) * (pil.r + PLAYER_R);
+        }
+      }
+
+      // Ice rink pickups
+      for (let pi = state.pickups.length - 1; pi >= 0; pi--) {
+        const pk = state.pickups[pi];
+        if (Math.hypot(e.x - pk.x, e.y - pk.y) < PLAYER_R + 18) {
+          if (pk.kind === 'thaw-star') {
+            if (e.role === 'runner') {
+              const frozenAlly = state.entities.find((a) => a.role === 'runner' && a.frozen);
+              if (frozenAlly) {
+                frozenAlly.frozen = false;
+                frozenAlly.immuneTimer = 2.0;
+                e.saves += 1;
+                e.score += 75;
+                state.popups.push({ x: e.x, y: e.y - 26, text: 'STAR THAW +75!', colorHex: '#FFB800', alpha: 1 });
+              } else {
+                e.score += 45;
+                state.popups.push({ x: e.x, y: e.y - 26, text: '+45 STAR!', colorHex: '#FFB800', alpha: 1 });
+              }
+            } else {
+              e.cdA = 0;
+              e.score += 45;
+              state.popups.push({ x: e.x, y: e.y - 26, text: 'BOLT READY +45', colorHex: '#FFB800', alpha: 1 });
+            }
+          } else if (pk.kind === 'turbo-skates') {
+            e.skateTimer = 5.5;
+            state.popups.push({ x: e.x, y: e.y - 26, text: 'TURBO SKATES!', colorHex: '#10D98B', alpha: 1 });
+          } else {
+            e.auraTimer = 5.5;
+            if (e.role === 'runner') e.immuneTimer = Math.max(e.immuneTimer, 3.0);
+            state.popups.push({
+              x: e.x,
+              y: e.y - 26,
+              text: e.role === 'runner' ? 'ICE SHIELD!' : 'FROST AURA!',
+              colorHex: '#00C2FF',
+              alpha: 1,
+            });
+          }
+          state.pickups.splice(pi, 1);
+          sounds.push({ type: 'pickup', playerId: e.id });
+          if (!e.isBot) haptics.push({ playerId: e.id, pattern: 18, reason: 'ice-pickup' });
         }
       }
 
@@ -283,14 +365,15 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
       }
     }
 
-    // Contact freeze, trap freeze, and teammate thaws
+    // Contact freeze, hunter frost-aura freeze, trap freeze, and teammate thaws
     const hunters = state.entities.filter((e) => e.role === 'hunter');
     const runners = state.entities.filter((e) => e.role === 'runner');
 
     for (const r of runners) {
       if (!r.frozen && r.immuneTimer <= 0) {
         for (const h of hunters) {
-          if (Math.hypot(r.x - h.x, r.y - h.y) < PLAYER_R * 2.05) {
+          const hitRange = h.auraTimer > 0 ? PLAYER_R * 3.1 : PLAYER_R * 2.05;
+          if (Math.hypot(r.x - h.x, r.y - h.y) < hitRange) {
             freezeRunner(r, h);
             break;
           }
@@ -322,6 +405,7 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
           ally.score += 20;
           state.banner = `${rescuer.name} THAWED ${ally.name}!`;
           state.bannerTimer = 1.5;
+          state.popups.push({ x: rescuer.x, y: rescuer.y - 28, text: 'THAW +85!', colorHex: '#10D98B', alpha: 1 });
           sounds.push({ type: 'pickup', playerId: rescuer.id });
           if (!rescuer.isBot) haptics.push({ playerId: rescuer.id, pattern: [24, 20, 48], reason: 'thaw-save' });
           if (!ally.isBot) haptics.push({ playerId: ally.id, pattern: [20, 20, 35], reason: 'thawed' });
@@ -374,6 +458,9 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
       banner: state.banner,
       bolts: state.bolts.map((b) => ({ id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy })),
       traps: state.traps.map((t) => ({ id: t.id, x: t.x, y: t.y, r: t.r, alpha: Math.min(1, t.ttl / 2) })),
+      icePatches: state.icePatches,
+      pickups: state.pickups.map((p) => ({ ...p })),
+      popups: state.popups.map((p) => ({ ...p })),
       pillars: state.pillars,
       players: state.entities.map((e) => ({
         id: e.id,
@@ -388,6 +475,8 @@ export const freezeTagModule: ServerGameModule<FreezeTagState> = {
         frozen: e.frozen,
         dashTimer: e.dashTimer,
         immuneTimer: e.immuneTimer,
+        skateTimer: e.skateTimer,
+        auraTimer: e.auraTimer,
         saves: e.saves,
         freezes: e.freezes,
         score: Math.round(e.score),

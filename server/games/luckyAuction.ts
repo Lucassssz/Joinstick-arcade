@@ -30,6 +30,8 @@ interface LuckyAuctionState {
   phase: 'bidding' | 'reveal';
   timer: number;
   currentChest: ChestDef;
+  multiplier: number;
+  firstPassClaimed: boolean;
   highestBid: number;
   highestBidderId: string | null;
   banner: string | null;
@@ -53,18 +55,22 @@ const START_CASH = 900;
 
 function pickChest(): ChestDef {
   const base = CHEST_POOL[Math.floor(Math.random() * CHEST_POOL.length)];
-  // Add slight playful variance
   const variance = base.prize === 'duck' ? 0 : Math.round((Math.random() - 0.5) * 60 / 10) * 10;
   return { ...base, value: Math.max(30, base.value + variance) };
 }
 
 function startAuctionRound(state: LuckyAuctionState): void {
   state.currentChest = pickChest();
+  state.multiplier = state.round === state.totalRounds || Math.random() < 0.32 ? 2 : 1;
+  state.firstPassClaimed = false;
   state.phase = 'bidding';
   state.timer = 10.5;
   state.highestBid = 0;
   state.highestBidderId = null;
-  state.banner = `CHEST ${state.round} OF ${state.totalRounds}`;
+  state.banner =
+    state.multiplier > 1
+      ? `2X GOLDEN GAVEL · CHEST ${state.round}/${state.totalRounds}!`
+      : `CHEST ${state.round} OF ${state.totalRounds}`;
   for (const p of state.players) {
     p.passed = false;
     p.draftBid = Math.min(p.cash, 50);
@@ -99,6 +105,8 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
       phase: 'bidding',
       timer: 10.5,
       currentChest: pickChest(),
+      multiplier: 1,
+      firstPassClaimed: false,
       highestBid: 0,
       highestBidderId: null,
       banner: null,
@@ -150,9 +158,14 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
             }
           }
 
-          // Action B: Pass this chest
+          // Action B: Pass this chest (first pass after a bid claims +$60 tactical rebate!)
           if (b && !inp.prevB && state.highestBidderId !== p.id) {
             p.passed = true;
+            if (!state.firstPassClaimed && state.highestBid > 0) {
+              state.firstPassClaimed = true;
+              p.cash += 60;
+              state.banner = `${p.name} PASSED EARLY (+$60)!`;
+            }
             sounds.push({ type: 'nav', playerId: p.id });
             haptics.push({ playerId: p.id, pattern: 14, reason: 'pass' });
           }
@@ -168,16 +181,17 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
           state.phase = 'reveal';
           state.timer = 3.2;
           const winner = state.players.find((p) => p.id === state.highestBidderId);
+          const payout = state.currentChest.value * state.multiplier;
           if (winner) {
             winner.cash = Math.max(0, winner.cash - state.highestBid);
-            winner.treasureValue += state.currentChest.value;
+            winner.treasureValue += payout;
             winner.totalWorth = winner.cash + winner.treasureValue;
             winner.itemsWon++;
-            const profit = state.currentChest.value - state.highestBid;
+            const profit = payout - state.highestBid;
             state.banner =
               state.currentChest.prize === 'duck'
-                ? `QUACK! ${winner.name} paid $${state.highestBid} for a Duck ($${state.currentChest.value})!`
-                : `${winner.name} WON $${state.currentChest.value} (${profit >= 0 ? `+$${profit}` : `-$${Math.abs(profit)}`})!`;
+                ? `QUACK! ${winner.name} paid $${state.highestBid} for a Duck ($${payout})!`
+                : `${winner.name} WON $${payout} (${profit >= 0 ? `+$${profit}` : `-$${Math.abs(profit)}`})!`;
             sounds.push({ type: state.currentChest.prize === 'duck' ? 'hit' : 'win', playerId: winner.id });
             haptics.push({
               playerId: winner.id,
@@ -185,7 +199,7 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
               reason: 'auction-result',
             });
           } else {
-            state.banner = `NO BIDS! Chest held $${state.currentChest.value}!`;
+            state.banner = `NO BIDS! Chest held $${payout}!`;
             sounds.push({ type: 'bump' });
           }
         }
@@ -246,11 +260,12 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
       chestClue: state.currentChest.clue,
       chestVisual: state.currentChest.visual,
       revealedPrize: state.phase === 'reveal' ? state.currentChest.prize : null,
-      revealedValue: state.phase === 'reveal' ? state.currentChest.value : 0,
+      revealedValue: state.phase === 'reveal' ? state.currentChest.value * state.multiplier : 0,
       highestBid: state.highestBid,
       highestBidderId: state.highestBidderId,
       highestBidderName: bidder?.name ?? null,
       highestBidderColor: bidder?.colorHex ?? null,
+      multiplier: state.multiplier,
       banner: state.banner,
       players: state.players.map((p) => ({
         id: p.id,

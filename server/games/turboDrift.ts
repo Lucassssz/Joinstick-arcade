@@ -21,6 +21,18 @@ interface InternalCar extends DriftCarState {
   lapStartMs: number;
   lastSafeTrackIdx: number;
   fallTimer: number;
+  coins: number;
+  slipTimer: number;
+}
+
+interface InternalTrackCoin {
+  id: string;
+  trackIdx: number;
+  offset: number;
+  x: number;
+  y: number;
+  kind: 'coin' | 'mystery';
+  respawn: number;
 }
 
 interface TurboInternalState {
@@ -30,20 +42,21 @@ interface TurboInternalState {
   trackPoints: { x: number; y: number }[];
   trackHalfWidth: number;
   boostPads: { x: number; y: number; angle: number }[];
+  coins: InternalTrackCoin[];
+  oils: { x: number; y: number; r: number }[];
   checkpoints: { x: number; y: number; index: number }[];
   players: InternalCar[];
   finished: boolean;
 }
 
-// Sweeping, wide arcade circuit with straights, a hairpin, and an S-chicane
 const CONTROL_POINTS = [
-  { x: 340, y: 580 }, // Start / Finish straight heading right
+  { x: 340, y: 580 },
   { x: 660, y: 585 },
   { x: 960, y: 570 },
   { x: 1055, y: 430 },
   { x: 970, y: 205 },
   { x: 760, y: 155 },
-  { x: 610, y: 310 }, // Inner chicane dip
+  { x: 610, y: 310 },
   { x: 430, y: 155 },
   { x: 185, y: 200 },
   { x: 150, y: 435 },
@@ -97,7 +110,50 @@ function buildBoostPads(): { x: number; y: number; angle: number }[] {
   });
 }
 
+function buildTrackCoins(): InternalTrackCoin[] {
+  const specs: { idx: number; offset: number; kind: 'coin' | 'mystery' }[] = [
+    { idx: 22, offset: -22, kind: 'coin' },
+    { idx: 34, offset: 0, kind: 'mystery' },
+    { idx: 56, offset: 24, kind: 'coin' },
+    { idx: 70, offset: 0, kind: 'mystery' },
+    { idx: 82, offset: -22, kind: 'coin' },
+    { idx: 102, offset: 22, kind: 'coin' },
+  ];
+  return specs.map((sp, i) => {
+    const p = TRACK_POINTS[sp.idx % TRACK_POINTS.length];
+    const next = TRACK_POINTS[(sp.idx + 1) % TRACK_POINTS.length];
+    const ang = Math.atan2(next.y - p.y, next.x - p.x);
+    return {
+      id: `tc_${i}`,
+      trackIdx: sp.idx,
+      offset: sp.offset,
+      x: p.x - Math.sin(ang) * sp.offset,
+      y: p.y + Math.cos(ang) * sp.offset,
+      kind: sp.kind,
+      respawn: 0,
+    };
+  });
+}
+
+function buildOilSlicks(): { x: number; y: number; r: number }[] {
+  const specs = [
+    { idx: 63, offset: -26, r: 22 },
+    { idx: 96, offset: 26, r: 22 },
+  ];
+  return specs.map((sp) => {
+    const p = TRACK_POINTS[sp.idx % TRACK_POINTS.length];
+    const next = TRACK_POINTS[(sp.idx + 1) % TRACK_POINTS.length];
+    const ang = Math.atan2(next.y - p.y, next.x - p.x);
+    return {
+      x: p.x - Math.sin(ang) * sp.offset,
+      y: p.y + Math.cos(ang) * sp.offset,
+      r: sp.r,
+    };
+  });
+}
+
 const BOOST_PADS = buildBoostPads();
+const OIL_SLICKS = buildOilSlicks();
 
 function buildCheckpoints(count = 8): { x: number; y: number; index: number }[] {
   const step = Math.floor(TRACK_POINTS.length / count);
@@ -138,6 +194,8 @@ function toSnapshot(state: TurboInternalState): TurboDriftSnapshot {
     trackPoints: state.trackPoints,
     trackHalfWidth: state.trackHalfWidth,
     boostPads: state.boostPads,
+    coins: state.coins.filter((c) => c.respawn <= 0).map((c) => ({ id: c.id, x: c.x, y: c.y, kind: c.kind })),
+    oils: state.oils,
     players: state.players.map((p) => ({
       id: p.id,
       slotIndex: p.slotIndex,
@@ -151,6 +209,8 @@ function toSnapshot(state: TurboInternalState): TurboDriftSnapshot {
       speed: p.speed,
       drifting: p.drifting,
       boosting: p.boosting,
+      drafting: p.drafting,
+      slipping: p.slipTimer > 0,
       nitro: p.nitro,
       lap: p.lap,
       totalLaps: p.totalLaps,
@@ -162,6 +222,7 @@ function toSnapshot(state: TurboInternalState): TurboDriftSnapshot {
       falling: p.falling,
       fallProgress: p.fallProgress,
       respawnBlink: p.respawnBlink,
+      coins: p.coins,
       cooldownA: Math.max(0, 1 - p.nitro),
       cooldownB: 0,
     })),
@@ -187,7 +248,7 @@ function buildRankings(
       textOnColor: '#FFFFFF',
     },
     rank: idx + 1,
-    score: Math.max(100, (sorted.length - idx) * 100 + p.lap * 25),
+    score: Math.max(100, (sorted.length - idx) * 100 + p.lap * 25 + p.coins * 15),
     highlight:
       p.finishTimeMs !== null
         ? `Finished ${formatMs(p.finishTimeMs)}`
@@ -224,6 +285,8 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         speed: 0,
         drifting: false,
         boosting: false,
+        drafting: false,
+        slipping: false,
         nitro: 0.45,
         lap: 1,
         totalLaps,
@@ -235,6 +298,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         falling: false,
         fallProgress: 0,
         respawnBlink: 0,
+        coins: 0,
         cooldownA: 0.55,
         cooldownB: 0,
         boostPadTimer: 0,
@@ -243,6 +307,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         lapStartMs: 0,
         lastSafeTrackIdx: 0,
         fallTimer: 0,
+        slipTimer: 0,
       };
     });
 
@@ -253,6 +318,8 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       trackPoints: TRACK_POINTS,
       trackHalfWidth: TRACK_HALF_WIDTH,
       boostPads: BOOST_PADS,
+      coins: buildTrackCoins(),
+      oils: OIL_SLICKS,
       checkpoints: CHECKPOINTS,
       players: cars,
       finished: false,
@@ -277,6 +344,8 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       speed: 0,
       drifting: false,
       boosting: false,
+      drafting: false,
+      slipping: false,
       nitro: 0.45,
       lap: 1,
       totalLaps: state.totalLaps,
@@ -288,6 +357,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       falling: false,
       fallProgress: 0,
       respawnBlink: 0,
+      coins: 0,
       cooldownA: 0.55,
       cooldownB: 0,
       boostPadTimer: 0,
@@ -296,6 +366,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       lapStartMs: state.elapsedMs,
       lastSafeTrackIdx: 0,
       fallTimer: 0,
+      slipTimer: 0,
     });
   },
 
@@ -305,6 +376,10 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
     const inputMap = new Map(inputPlayers.map((p) => [p.id, p]));
 
     state.elapsedMs += dt * 1000;
+
+    for (const c of state.coins) {
+      if (c.respawn > 0) c.respawn = Math.max(0, c.respawn - dt);
+    }
 
     if (state.finishCountdown !== null) {
       state.finishCountdown -= dt;
@@ -321,8 +396,10 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       const src = inputMap.get(car.id);
       car.boostPadTimer = Math.max(0, car.boostPadTimer - dt);
       car.respawnBlink = Math.max(0, car.respawnBlink - dt);
+      car.slipTimer = Math.max(0, car.slipTimer - dt);
+      car.slipping = car.slipTimer > 0;
+      car.drafting = false;
 
-      // Handle falling off the elevated track & respawning right where the car went off
       if (car.falling) {
         car.fallTimer -= dt;
         car.fallProgress = Math.min(1, 1 - Math.max(0, car.fallTimer) / FALL_DURATION);
@@ -359,7 +436,6 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       }
 
       if (car.finished) {
-        // Coast gently after finish
         car.vx *= Math.pow(0.25, dt);
         car.vy *= Math.pow(0.25, dt);
         car.x += car.vx * dt;
@@ -368,6 +444,23 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         car.drifting = false;
         car.boosting = false;
         continue;
+      }
+
+      // Check Slipstream Drafting behind a rival car ahead
+      const myFwdX = Math.cos(car.angle);
+      const myFwdY = Math.sin(car.angle);
+      for (const other of state.players) {
+        if (other.id === car.id || other.falling) continue;
+        const rx = other.x - car.x;
+        const ry = other.y - car.y;
+        const d = Math.hypot(rx, ry);
+        if (d > 34 && d < 155) {
+          const dot = (rx / d) * myFwdX + (ry / d) * myFwdY;
+          if (dot > 0.86) {
+            car.drafting = true;
+            break;
+          }
+        }
       }
 
       let throttle = 0;
@@ -379,7 +472,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         const mag = Math.hypot(dx, dy);
         drifting = b && mag > 0.15;
 
-        if (mag > 0.08) {
+        if (mag > 0.08 && car.slipTimer <= 0) {
           const desiredAngle = Math.atan2(dy, dx);
           let diff = desiredAngle - car.angle;
           while (diff > Math.PI) diff -= Math.PI * 2;
@@ -389,6 +482,9 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
           const maxStep = turnRate * dt;
           car.angle += Math.max(-maxStep, Math.min(maxStep, diff * 9.5 * dt));
           throttle = Math.min(1, mag * 1.25);
+        } else if (car.slipTimer > 0) {
+          car.angle += 7.5 * dt;
+          throttle = 0.55;
         }
 
         if (a && car.nitro > 0.08) {
@@ -401,9 +497,8 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         }
       }
 
-      // Recharge nitro faster while drifting on tarmac
       if (!usingNitro) {
-        const chargeRate = drifting && onRoad && car.speed > 130 ? 0.34 : 0.12;
+        const chargeRate = (drifting && onRoad && car.speed > 130 ? 0.34 : 0.12) + (car.drafting ? 0.18 : 0);
         car.nitro = Math.min(1, car.nitro + chargeRate * dt);
       }
 
@@ -411,8 +506,10 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       car.drifting = drifting && car.speed > 110;
       car.boosting = isBoosted;
 
-      const maxSpeed = 335 * (isBoosted ? 1.42 : 1.0);
-      const accel = 650 * (isBoosted ? 1.55 : 1.0);
+      const coinSpeedMult = 1 + Math.min(0.12, car.coins * 0.015);
+      const draftMult = car.drafting ? 1.15 : 1.0;
+      const maxSpeed = 335 * (isBoosted ? 1.42 : 1.0) * coinSpeedMult * draftMult;
+      const accel = 650 * (isBoosted ? 1.55 : 1.0) * draftMult;
 
       const fwdX = Math.cos(car.angle);
       const fwdY = Math.sin(car.angle);
@@ -420,13 +517,12 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       car.vx += fwdX * throttle * accel * dt;
       car.vy += fwdY * throttle * accel * dt;
 
-      // Decompose velocity into forward & lateral for juicy drift feel
       const fwdVel = car.vx * fwdX + car.vy * fwdY;
       const latX = -fwdY;
       const latY = fwdX;
       const latVel = car.vx * latX + car.vy * latY;
 
-      const lateralGrip = drifting ? Math.pow(0.18, dt) : Math.pow(0.015, dt);
+      const lateralGrip = car.slipTimer > 0 ? Math.pow(0.45, dt) : drifting ? Math.pow(0.18, dt) : Math.pow(0.015, dt);
       const forwardDrag = throttle > 0.1 ? Math.pow(0.45, dt) : Math.pow(0.14, dt);
 
       const newFwd = Math.max(-90, Math.min(maxSpeed, fwdVel * forwardDrag));
@@ -439,7 +535,6 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       car.y += car.vy * dt;
       car.speed = Math.hypot(car.vx, car.vy);
 
-      // Check if car drove off the elevated track edge -> fall off & respawn at fall-off point!
       const afterNearest = nearestTrackIndex(car.x, car.y);
       if (afterNearest.dist > OFF_TRACK_LIMIT) {
         car.falling = true;
@@ -448,11 +543,42 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         car.drifting = false;
         car.boosting = false;
         car.boostPadTimer = 0;
-        // Anchor respawn point right on the track edge nearest to where they fell off
         car.lastSafeTrackIdx = afterNearest.index;
         sounds.push({ type: 'ko', playerId: car.id });
         haptics.push({ playerId: car.id, pattern: [65, 35, 90], reason: 'falloff' });
         continue;
+      }
+
+      // Oil slick check (unless currently boosting!)
+      if (!isBoosted && car.slipTimer <= 0 && car.respawnBlink <= 0) {
+        for (const oil of state.oils) {
+          if (Math.hypot(car.x - oil.x, car.y - oil.y) < oil.r + 8) {
+            car.slipTimer = 0.72;
+            sounds.push({ type: 'bump', intensity: 0.5 });
+            haptics.push({ playerId: car.id, pattern: 50, reason: 'slip' });
+            break;
+          }
+        }
+      }
+
+      // Coin & Mystery Item Box collection
+      for (const coin of state.coins) {
+        if (coin.respawn > 0) continue;
+        if (Math.hypot(car.x - coin.x, car.y - coin.y) < CAR_RADIUS + 16) {
+          coin.respawn = 8.0;
+          sounds.push({ type: 'pickup', playerId: car.id });
+          haptics.push({ playerId: car.id, pattern: [18, 12, 24], reason: 'coin' });
+          if (coin.kind === 'coin') {
+            car.coins += 1;
+            car.nitro = Math.min(1, car.nitro + 0.3);
+          } else {
+            // Mystery Box: Super Nitro + Surge!
+            car.nitro = 1.0;
+            car.boostPadTimer = Math.max(car.boostPadTimer, 1.35);
+            car.vx += Math.cos(car.angle) * 180;
+            car.vy += Math.sin(car.angle) * 180;
+          }
+        }
       }
 
       // Boost pad trigger
@@ -502,7 +628,6 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         }
       }
 
-      // Compute continuous progress for live standings
       const trackFrac = afterNearest.index / state.trackPoints.length;
       const cpFrac = car.checkpoint / state.checkpoints.length;
       const distToNext = Math.hypot(car.x - nextCp.x, car.y - nextCp.y);
@@ -513,7 +638,6 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
         (Math.abs(trackFrac - cpFrac) < 0.25 ? trackFrac * 2 : 0);
     }
 
-    // Car-to-car gentle bumping (skip falling or freshly respawning cars)
     for (let i = 0; i < state.players.length; i++) {
       const a = state.players[i];
       if (a.falling || a.respawnBlink > 0.6) continue;
@@ -550,7 +674,6 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       }
     }
 
-    // Update live race positions
     const ordered = [...state.players].sort((a, b) => {
       if (a.finished && b.finished) return (a.finishTimeMs ?? 0) - (b.finishTimeMs ?? 0);
       if (a.finished) return -1;
@@ -571,7 +694,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
     const hudUpdates: Record<string, PlayerHudUpdate> = {};
     for (const p of state.players) {
       hudUpdates[p.id] = {
-        score: Math.round(p.progress),
+        score: Math.round(p.progress + p.coins * 15),
         alive: !p.falling,
         statText: p.falling
           ? 'OFF TRACK · Respawning'

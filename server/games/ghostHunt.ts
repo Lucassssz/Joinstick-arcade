@@ -21,6 +21,7 @@ interface InternalGhostPlayer extends GhostPlayerState {
   cdB: number;
   revealTimer: number;
   invulnTimer: number;
+  flareTimer: number;
 }
 
 interface InternalNet {
@@ -39,11 +40,15 @@ interface GhostHuntState {
   timeLeft: number;
   totalTime: number;
   nextId: number;
+  orbTimer: number;
   banner: string | null;
   bannerTimer: number;
   walls: { x: number; y: number; w: number; h: number }[];
   nets: InternalNet[];
   pings: { x: number; y: number; radius: number; maxRadius: number; alpha: number }[];
+  orbs: { id: string; kind: 'flare' | 'ecto'; x: number; y: number }[];
+  decoys: { x: number; y: number; vx: number; vy: number; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   entities: InternalGhostPlayer[];
 }
 
@@ -105,6 +110,7 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
         maxHp: role === 'ghost' ? 6 : 2,
         visibility: role === 'ghost' ? 0.15 : 1,
         dashTimer: 0,
+        flareTimer: 0,
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
@@ -119,6 +125,7 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
       timeLeft: totalTime,
       totalTime,
       nextId: 1,
+      orbTimer: 4.0,
       banner: 'SWEEP FLASHLIGHTS TO EXPOSE THE PHANTOM!',
       bannerTimer: 2.2,
       walls: [
@@ -132,6 +139,9 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
       ],
       nets: [],
       pings: [],
+      orbs: [],
+      decoys: [],
+      popups: [],
       entities,
     };
   },
@@ -154,6 +164,34 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
       pg.alpha = Math.max(0, 1 - pg.radius / pg.maxRadius);
       if (pg.radius >= pg.maxRadius) state.pings.splice(i, 1);
     }
+    for (let i = state.decoys.length - 1; i >= 0; i--) {
+      const dc = state.decoys[i];
+      dc.x += dc.vx * dt;
+      dc.y += dc.vy * dt;
+      dc.alpha -= dt * 0.48;
+      if (dc.alpha <= 0) state.decoys.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 28 * dt;
+      state.popups[i].alpha -= dt * 1.1;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
+    }
+
+    state.orbTimer -= dt;
+    if (state.orbTimer <= 0 && state.orbs.length < 3) {
+      const kind: 'flare' | 'ecto' = Math.random() < 0.5 ? 'flare' : 'ecto';
+      const spots = [
+        { x: 420, y: 120 },
+        { x: 780, y: 120 },
+        { x: 420, y: ARENA_HEIGHT - 120 },
+        { x: 780, y: ARENA_HEIGHT - 120 },
+        { x: 160, y: ARENA_HEIGHT / 2 },
+        { x: ARENA_WIDTH - 160, y: ARENA_HEIGHT / 2 },
+      ];
+      const sp = spots[Math.floor(Math.random() * spots.length)];
+      state.orbs.push({ id: `go_${state.nextId++}`, kind, x: sp.x, y: sp.y });
+      state.orbTimer = 5.5;
+    }
 
     const ghost = state.entities.find((e) => e.role === 'ghost');
     const hunters = state.entities.filter((e) => e.role === 'hunter');
@@ -166,12 +204,14 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
         const dx = ghost.x - h.x;
         const dy = ghost.y - h.y;
         const dist = Math.hypot(dx, dy);
-        if (dist < 330) {
+        const coneDist = h.flareTimer > 0 ? 440 : 330;
+        const coneAng = h.flareTimer > 0 ? 0.62 : 0.44;
+        if (dist < coneDist) {
           const ang = Math.atan2(dy, dx);
           let diff = ang - h.angle;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          if (Math.abs(diff) < 0.44) {
+          if (Math.abs(diff) < coneAng) {
             ghostLit = true;
             h.score += dt * 12;
           }
@@ -188,6 +228,7 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
       e.cdB = Math.max(0, e.cdB - dt);
       e.dashTimer = Math.max(0, e.dashTimer - dt);
       e.invulnTimer = Math.max(0, e.invulnTimer - dt);
+      e.flareTimer = Math.max(0, e.flareTimer - dt);
 
       let dx = 0;
       let dy = 0;
@@ -247,7 +288,14 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
           sounds.push({ type: 'pulse', playerId: e.id });
           if (!e.isBot) haptics.push({ playerId: e.id, pattern: [22, 22, 28], reason: 'sonar' });
         } else {
-          // Phantom Shadow Blink
+          // Phantom Shadow Blink + spawn illusory Decoy Clone
+          state.decoys.push({
+            x: e.x,
+            y: e.y,
+            vx: Math.cos(e.angle + Math.PI * 0.65) * 220,
+            vy: Math.sin(e.angle + Math.PI * 0.65) * 220,
+            alpha: 0.85,
+          });
           e.dashTimer = 0.24;
           e.vx = Math.cos(e.angle) * 760;
           e.vy = Math.sin(e.angle) * 760;
@@ -266,6 +314,38 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
       e.x = Math.max(36, Math.min(ARENA_WIDTH - 36, e.x + e.vx * dt));
       e.y = Math.max(36, Math.min(ARENA_HEIGHT - 36, e.y + e.vy * dt));
       for (const w of state.walls) resolveWall(e, PLAYER_R, w);
+
+      // Collect Orbs
+      for (let oi = state.orbs.length - 1; oi >= 0; oi--) {
+        const ob = state.orbs[oi];
+        if (Math.hypot(e.x - ob.x, e.y - ob.y) < PLAYER_R + 18) {
+          if (ob.kind === 'flare') {
+            if (e.role === 'hunter') {
+              e.flareTimer = 7.0;
+              e.hp = Math.min(e.maxHp, e.hp + 1);
+              e.score += 50;
+              if (ghost && ghost.alive) ghost.revealTimer = Math.max(ghost.revealTimer, 2.8);
+              state.pings.push({ x: e.x, y: e.y, radius: 14, maxRadius: 420, alpha: 1 });
+              state.popups.push({ x: e.x, y: e.y - 26, text: 'SUPER FLARE!', colorHex: '#FFB800', alpha: 1 });
+            } else {
+              e.score += 40;
+              state.popups.push({ x: e.x, y: e.y - 26, text: 'DENIED +40', colorHex: '#C084FC', alpha: 1 });
+            }
+          } else {
+            if (e.role === 'ghost') {
+              e.hp = Math.min(e.maxHp, e.hp + 1);
+              e.score += 55;
+              state.popups.push({ x: e.x, y: e.y - 26, text: 'ECTO HEAL +1!', colorHex: '#C084FC', alpha: 1 });
+            } else {
+              e.score += 40;
+              state.popups.push({ x: e.x, y: e.y - 26, text: 'ECTO +40', colorHex: '#00C2FF', alpha: 1 });
+            }
+          }
+          state.orbs.splice(oi, 1);
+          sounds.push({ type: 'pickup', playerId: e.id });
+          if (!e.isBot) haptics.push({ playerId: e.id, pattern: 18, reason: 'orb-pickup' });
+        }
+      }
 
       if (e.role === 'ghost') e.score += dt * 4;
 
@@ -370,6 +450,9 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
       walls: state.walls,
       nets: state.nets.map((n) => ({ id: n.id, x: n.x, y: n.y, r: n.r, colorHex: n.colorHex })),
       pings: state.pings.map((p) => ({ ...p })),
+      orbs: state.orbs.map((o) => ({ ...o })),
+      decoys: state.decoys.map((d) => ({ x: d.x, y: d.y, alpha: d.alpha })),
+      popups: state.popups.map((p) => ({ ...p })),
       players: state.entities.map((e) => ({
         id: e.id,
         slotIndex: e.slotIndex,
@@ -385,6 +468,7 @@ export const ghostHuntModule: ServerGameModule<GhostHuntState> = {
         maxHp: e.maxHp,
         visibility: e.visibility,
         dashTimer: e.dashTimer,
+        flareTimer: e.flareTimer,
         score: Math.round(e.score),
         cooldownA: e.cooldownA,
         cooldownB: e.cooldownB,

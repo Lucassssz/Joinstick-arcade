@@ -7,7 +7,7 @@ import {
   type RichStreetSnapshot,
   type TreasureDigSnapshot,
 } from '../shared/types';
-import { drawNameplate, tCanvas } from './renderers';
+import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -194,9 +194,10 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
     // Price or rent tag
     if (t.kind === 'property') {
       ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.fillStyle = t.ownerColor ? '#FFB800' : '#94A3B8';
-      const rent = t.level <= 1 ? t.baseRent : t.level === 2 ? Math.round(t.baseRent * 1.9) : Math.round(t.baseRent * 3.1);
-      ctx.fillText(t.ownerId ? `R:$${rent}` : `$${t.price}`, r.x + r.w / 2, r.y + r.h - 16);
+      ctx.fillStyle = t.monopoly ? '#10D98B' : t.ownerColor ? '#FFB800' : '#94A3B8';
+      const baseRent = t.level <= 1 ? t.baseRent : t.level === 2 ? Math.round(t.baseRent * 1.9) : Math.round(t.baseRent * 3.1);
+      const rent = t.monopoly ? baseRent * 2 : baseRent;
+      ctx.fillText(t.ownerId ? `R:$${rent}${t.monopoly ? '★' : ''}` : `$${t.price}`, r.x + r.w / 2, r.y + r.h - 16);
     } else if (t.kind === 'tax') {
       ctx.font = '700 10px "JetBrains Mono", monospace';
       ctx.fillStyle = '#FF7A1A';
@@ -391,11 +392,12 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
   for (let n = snap.targetTile; n >= 1; n--) {
     const c = getJungleTileCenter(n, snap.targetTile);
     const isMystery = snap.mysteryTiles.includes(n);
+    const isGolden = (snap.goldenTiles ?? []).includes(n);
     const isGoal = n === snap.targetTile;
     const alt = ((n - 1) + Math.floor((n - 1) / cols)) % 2 === 0;
 
-    const tileTop = isGoal ? '#59410E' : isMystery ? '#1E3C4F' : alt ? '#1E3529' : '#254133';
-    const tileBorder = isGoal ? '#FFB800' : isMystery ? '#00C2FF' : '#355B47';
+    const tileTop = isGoal ? '#59410E' : isGolden ? '#4A3910' : isMystery ? '#1E3C4F' : alt ? '#1E3529' : '#254133';
+    const tileBorder = isGoal ? '#FFB800' : isGolden ? '#FDE047' : isMystery ? '#00C2FF' : '#355B47';
 
     drawExtrudedBox3D(
       ctx,
@@ -411,7 +413,7 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       false
     );
 
-    ctx.fillStyle = isGoal ? '#FFB800' : isMystery ? '#7DD3FC' : 'rgba(241,245,249,0.78)';
+    ctx.fillStyle = isGoal || isGolden ? '#FFB800' : isMystery ? '#7DD3FC' : 'rgba(241,245,249,0.78)';
     ctx.font = isGoal ? '800 15px "JetBrains Mono", monospace' : '700 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -423,6 +425,12 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('?', c.x, c.y + 1);
+    } else if (isGolden && !isGoal) {
+      ctx.fillStyle = '#FDE047';
+      ctx.font = '800 16px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('★', c.x, c.y + 1);
     }
 
     if (snap.bananas.includes(n)) {
@@ -565,6 +573,15 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       ctx.stroke();
       ctx.restore();
     }
+    if (p.shielded) {
+      ctx.save();
+      ctx.strokeStyle = '#10D98B';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(px, py - 4 - hopZ, 19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     drawCharacterPod3D(ctx, px, py - 4, 12, 0, p.colorHex, {
       height: 10,
       zHeight: hopZ,
@@ -649,7 +666,7 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
     ctx.textAlign = 'right';
     ctx.fillStyle = p.trickReady ? '#FFB800' : '#10D98B';
     ctx.font = '800 14px "JetBrains Mono", monospace';
-    ctx.fillText(`#${p.tile}${p.trickReady ? ' ★' : ''}`, px + pw - 26, ry + 22);
+    ctx.fillText(`#${p.tile}${p.shielded ? ' 🛡️' : ''}${p.trickReady ? ' ★' : ''}`, px + pw - 26, ry + 22);
     ctx.textAlign = 'center';
   });
 
@@ -772,8 +789,19 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
       12,
       pal.bg,
       shadeHex(pal.bg, -0.45),
-      pal.border
+      t.bonus ? '#FFB800' : pal.border
     );
+    if (t.bonus) {
+      ctx.strokeStyle = '#FFB800';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.roundRect(t.x + shake + 2, t.y + 2, t.w - 4, t.h - depth - 4, 10);
+      ctx.stroke();
+      ctx.fillStyle = '#FFB800';
+      ctx.font = '800 12px "JetBrains Mono", monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('2X', t.x + t.w + shake - 10, t.y + 18);
+    }
     drawSymbol(ctx, t.symbol, t.x + t.w / 2 + shake, t.y + t.h / 2 - depth, 24, 'rgba(255,255,255,0.92)');
     ctx.restore();
   }
@@ -790,6 +818,21 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
     ctx.restore();
   }
 
+  // Center Orb pickup (Turbo Dance / Shock Ready)
+  if (snap.orb) {
+    const ob = snap.orb;
+    const orbCol = ob.kind === 'speed' ? '#FFB800' : '#00C2FF';
+    drawShadowOval(ctx, ob.x, ob.y + 12, 18, 7, 0.38);
+    drawSphere3D(ctx, ob.x, ob.y, 17, orbCol, '#FFFFFF', 6, true);
+    ctx.save();
+    ctx.fillStyle = '#0D0F14';
+    ctx.font = '800 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ob.kind === 'speed' ? 'SPD' : 'SHK', ob.x, ob.y - 6);
+    ctx.restore();
+  }
+
   // Players (falling first, then Y-sorted)
   const dancers = [...snap.players]
     .filter((p) => p.alive)
@@ -802,13 +845,25 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
     const hopZ = p.hopTimer > 0 ? Math.sin((p.hopTimer / p.hopDuration) * Math.PI) * 26 : 0;
     const fallDrop = p.falling ? p.fallProgress * 50 : 0;
     const scale = p.falling ? Math.max(0.2, 1 - p.fallProgress * 0.8) : 1 + (hopZ > 0 ? 0.12 : 0);
+    const hasSpeed = (p.speedTimer ?? 0) > 0 && !p.falling;
+
+    if (hasSpeed) {
+      ctx.save();
+      ctx.strokeStyle = '#FFB800';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 4, 27, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     drawCharacterPod3D(ctx, p.x, p.y - 6 + fallDrop, 19, 0, p.colorHex, {
       height: 11,
       zHeight: hopZ,
       scale,
       alpha: p.falling ? Math.max(0.15, 1 - p.fallProgress) : 1,
-      rimColor: '#FFFFFF',
+      rimColor: hasSpeed ? '#FFB800' : '#FFFFFF',
       showVisor: false,
     });
 
@@ -816,6 +871,8 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
       drawNameplate(ctx, p.x, p.y - hopZ - 42, p.slotIndex, p.name, p.colorHex);
     }
   }
+
+  drawPopupTexts(ctx, snap.popups);
 
   if (snap.banner) {
     drawCenterBanner(ctx, snap.banner, targetCol.border, ARENA_HEIGHT / 2);
@@ -924,6 +981,20 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
     ctx.restore();
   }
 
+  // Beach powerup pickups (Treasure Map & Gold Magnet)
+  for (const pk of snap.pickups ?? []) {
+    const col = pk.kind === 'map' ? '#FFB800' : '#00C2FF';
+    drawShadowOval(ctx, pk.x, pk.y + 10, 15, 6, 0.35);
+    drawSphere3D(ctx, pk.x, pk.y, 15, col, '#FFFFFF', 5, true);
+    ctx.save();
+    ctx.fillStyle = '#0D0F14';
+    ctx.font = '800 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pk.kind === 'map' ? 'MAP' : 'MAG', pk.x, pk.y - 5);
+    ctx.restore();
+  }
+
   // Y-sort Crabs and Hunters
   type DigItem =
     | { kind: 'crab'; y: number; c: (typeof snap.crabs)[number] }
@@ -964,6 +1035,7 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
       ctx.restore();
     } else {
       const { p } = it;
+      const hasMagnet = (p.magnetTimer ?? 0) > 0;
       ctx.save();
       const heatColor = p.heat > 0.75 ? '#FF4D2E' : p.heat > 0.42 ? '#FFB800' : '#00C2FF';
       const ringR = 28 + p.heat * 18 + Math.sin(performance.now() * (0.008 + p.heat * 0.02)) * 4;
@@ -973,15 +1045,24 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
       ctx.beginPath();
       ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
       ctx.stroke();
+      if (hasMagnet) {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#00C2FF';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([7, 5]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 44, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.restore();
 
       drawCharacterPod3D(ctx, p.x, p.y, 19, 0, p.stunTimer > 0 ? '#64748B' : p.colorHex, {
         height: 11,
-        rimColor: '#FFFFFF',
+        rimColor: hasMagnet ? '#00C2FF' : '#FFFFFF',
         showVisor: false,
       });
 
-      const tag = p.heat > 0.76 ? 'HOT!' : undefined;
+      const tag = hasMagnet ? 'MAG' : p.heat > 0.76 ? 'HOT!' : undefined;
       drawNameplate(ctx, p.x, p.y - 40, p.slotIndex, p.name, p.colorHex, tag);
     }
   }
@@ -1017,11 +1098,26 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
     '#FFB800',
     'center'
   );
+  const isDouble = (snap.multiplier ?? 1) > 1;
+  if (isDouble) {
+    drawChip(ctx, ARENA_WIDTH - 28, 18, '2X GOLDEN GAVEL', '#FFB800', 'right');
+  }
 
   // 2.5D Extruded Cylindrical Center Stage Pedestal
   const cx = ARENA_WIDTH / 2;
   const cy = 248;
   drawShadowOval(ctx, cx, cy + 92, 178, 36, 0.55);
+  if (isDouble) {
+    ctx.save();
+    const glow = ctx.createRadialGradient(cx, cy, 24, cx, cy, 170);
+    glow.addColorStop(0, 'rgba(255, 184, 0, 0.28)');
+    glow.addColorStop(1, 'rgba(255, 184, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 170, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.save();
   // Pedestal side wall
   ctx.fillStyle = '#151221';
@@ -1030,12 +1126,12 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
   ctx.fill();
   ctx.fillRect(cx - 170, cy + 66, 340, 18);
   // Pedestal top disc
-  ctx.fillStyle = '#252036';
+  ctx.fillStyle = isDouble ? '#332818' : '#252036';
   ctx.beginPath();
   ctx.ellipse(cx, cy + 66, 170, 34, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = '#FFB800';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = isDouble ? 4 : 3;
   ctx.stroke();
   ctx.restore();
 

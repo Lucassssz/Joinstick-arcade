@@ -2,6 +2,7 @@ import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
   type FusePassSnapshot,
+  type FusePickupState,
   type FusePlayerState,
   type RankingEntry,
   type SoundEvent,
@@ -18,6 +19,17 @@ interface InternalFusePlayer extends FusePlayerState {
   sprintCd: number;
   lungeCd: number;
   roundsWon: number;
+  shieldTimer: number;
+  speedBuffTimer: number;
+  padCd: number;
+}
+
+interface InternalPopup {
+  x: number;
+  y: number;
+  text: string;
+  colorHex: string;
+  alpha: number;
 }
 
 interface FusePassInternalState {
@@ -30,6 +42,11 @@ interface FusePassInternalState {
   betweenRoundTimer: number;
   roundBanner: string | null;
   pillars: { x: number; y: number; r: number }[];
+  pickups: FusePickupState[];
+  pickupTimer: number;
+  pickupSeq: number;
+  jumpPads: { x: number; y: number; r: number }[];
+  popups: InternalPopup[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
   players: InternalFusePlayer[];
   soloMode: boolean;
@@ -50,6 +67,11 @@ const ARENA_PILLARS = [
   { x: 350, y: 505, r: 36 },
   { x: 850, y: 505, r: 36 },
   { x: 600, y: 360, r: 44 },
+];
+
+const JUMP_PADS = [
+  { x: 155, y: 360, r: 26 },
+  { x: 1045, y: 360, r: 26 },
 ];
 
 function spawnPlayers(
@@ -76,6 +98,9 @@ function spawnPlayers(
       sprintTimer: 0,
       lungeTimer: 0,
       immuneTimer: 0,
+      shieldTimer: 0,
+      speedBuffTimer: 0,
+      padCd: 0,
       sprintCd: 0,
       lungeCd: 0,
       cooldownA: 0,
@@ -112,6 +137,9 @@ function toSnapshot(state: FusePassInternalState): FusePassSnapshot {
     bombMaxTime: state.bombMaxTime,
     roundBanner: state.roundBanner,
     pillars: state.pillars,
+    pickups: state.pickups.map((p) => ({ ...p })),
+    jumpPads: state.jumpPads,
+    popups: state.popups.map((p) => ({ ...p })),
     explosions: state.explosions.map((e) => ({ ...e })),
     players: state.players.map((p) => ({
       id: p.id,
@@ -128,6 +156,8 @@ function toSnapshot(state: FusePassInternalState): FusePassSnapshot {
       sprintTimer: p.sprintTimer,
       lungeTimer: p.lungeTimer,
       immuneTimer: p.immuneTimer,
+      shieldTimer: p.shieldTimer,
+      speedBuffTimer: p.speedBuffTimer,
       cooldownA: Math.min(1, Math.max(0, p.sprintCd / SPRINT_COOLDOWN)),
       cooldownB: Math.min(1, Math.max(0, p.lungeCd / LUNGE_COOLDOWN)),
       score: p.score,
@@ -177,6 +207,11 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
       betweenRoundTimer: 0,
       roundBanner: null,
       pillars: ARENA_PILLARS,
+      pickups: [],
+      pickupTimer: 3.5,
+      pickupSeq: 0,
+      jumpPads: JUMP_PADS,
+      popups: [],
       explosions: [],
       players: spawnPlayers(players),
       soloMode: players.length <= 1,
@@ -204,6 +239,9 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
       sprintTimer: 0,
       lungeTimer: 0,
       immuneTimer: 0.6,
+      shieldTimer: 0,
+      speedBuffTimer: 0,
+      padCd: 0,
       sprintCd: 0,
       lungeCd: 0,
       cooldownA: 0,
@@ -228,6 +266,13 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
       if (e.alpha <= 0) state.explosions.splice(i, 1);
     }
 
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pop = state.popups[i];
+      pop.y -= 34 * dt;
+      pop.alpha -= 0.9 * dt;
+      if (pop.alpha <= 0) state.popups.splice(i, 1);
+    }
+
     if (state.betweenRoundTimer > 0) {
       state.betweenRoundTimer -= dt;
       if (state.betweenRoundTimer <= 0) {
@@ -238,6 +283,8 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
           state.round += 1;
           state.detonationsThisRound = 0;
           state.roundBanner = null;
+          state.pickups = [];
+          state.pickupTimer = 3.2;
           const prevMap = new Map(
             state.players.map((p) => [
               p.id,
@@ -250,7 +297,6 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         }
       }
     } else {
-      // Tick bomb countdown
       const prevSec = Math.ceil(state.bombTimer);
       state.bombTimer = Math.max(0, state.bombTimer - dt);
       const currSec = Math.ceil(state.bombTimer);
@@ -259,7 +305,25 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         haptics.push({ playerId: state.bombHolderId, pattern: 35, reason: 'tick' });
       }
 
-      // Move players
+      // Spawn arena pickups
+      state.pickupTimer -= dt;
+      if (state.pickupTimer <= 0 && state.pickups.length < 2) {
+        state.pickupTimer = 5.5;
+        state.pickupSeq += 1;
+        const spots = [
+          { x: 600, y: 155 },
+          { x: 600, y: 565 },
+          { x: 240, y: 360 },
+          { x: 960, y: 360 },
+        ];
+        const sp = spots[state.pickupSeq % spots.length];
+        const kinds: FusePickupState['kind'][] = ['speed', 'shield', 'chill'];
+        const kind = kinds[state.pickupSeq % kinds.length];
+        if (!state.pickups.some((pk) => Math.hypot(pk.x - sp.x, pk.y - sp.y) < 30)) {
+          state.pickups.push({ id: `fp_${state.pickupSeq}`, kind, x: sp.x, y: sp.y });
+        }
+      }
+
       for (const p of state.players) {
         if (!p.alive) continue;
         const src = inputMap.get(p.id);
@@ -268,6 +332,9 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         p.sprintTimer = Math.max(0, p.sprintTimer - dt);
         p.lungeTimer = Math.max(0, p.lungeTimer - dt);
         p.immuneTimer = Math.max(0, p.immuneTimer - dt);
+        p.shieldTimer = Math.max(0, p.shieldTimer - dt);
+        p.speedBuffTimer = Math.max(0, p.speedBuffTimer - dt);
+        p.padCd = Math.max(0, p.padCd - dt);
 
         if (src) {
           const { dx, dy, a, b } = src.input;
@@ -276,13 +343,12 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
             const nx = dx / Math.max(1, mag);
             const ny = dy / Math.max(1, mag);
             const baseAccel = p.hasBomb ? 1580 : 1360;
-            const accel = p.sprintTimer > 0 ? baseAccel * 1.4 : baseAccel;
+            const accel = p.sprintTimer > 0 || p.speedBuffTimer > 0 ? baseAccel * 1.4 : baseAccel;
             p.vx += nx * accel * dt;
             p.vy += ny * accel * dt;
             p.angle = Math.atan2(ny, nx);
           }
 
-          // Action A: SPRINT
           if (a && !src.prevA && p.sprintCd <= 0) {
             p.sprintTimer = SPRINT_DURATION;
             p.sprintCd = SPRINT_COOLDOWN;
@@ -294,7 +360,6 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
             haptics.push({ playerId: p.id, pattern: 38, reason: 'sprint' });
           }
 
-          // Action B: PASS LUNGE
           if (b && !src.prevB && p.lungeCd <= 0) {
             p.lungeTimer = LUNGE_DURATION;
             p.lungeCd = LUNGE_COOLDOWN;
@@ -311,7 +376,7 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         p.vx *= damping;
         p.vy *= damping;
 
-        const baseMax = p.hasBomb ? 375 : 325;
+        const baseMax = (p.hasBomb ? 375 : 325) * (p.speedBuffTimer > 0 ? 1.26 : 1.0);
         const maxSpeed = p.lungeTimer > 0 ? 620 : p.sprintTimer > 0 ? baseMax * 1.38 : baseMax;
         const speed = Math.hypot(p.vx, p.vy);
         if (speed > maxSpeed) {
@@ -322,7 +387,46 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
 
-        // Arena wall bounce
+        // Workshop launch pads fling players toward the center
+        if (p.padCd <= 0) {
+          for (const pad of state.jumpPads) {
+            if (Math.hypot(p.x - pad.x, p.y - pad.y) < pad.r + 12) {
+              p.padCd = 1.4;
+              const toCenterX = ARENA_WIDTH / 2 - pad.x;
+              const toCenterY = ARENA_HEIGHT / 2 - pad.y;
+              const m = Math.hypot(toCenterX, toCenterY) || 1;
+              p.vx = (toCenterX / m) * 580;
+              p.vy = (toCenterY / m) * 580;
+              sounds.push({ type: 'boost', playerId: p.id });
+              haptics.push({ playerId: p.id, pattern: 40, reason: 'pad' });
+              break;
+            }
+          }
+        }
+
+        // Collect pickups
+        for (let i = state.pickups.length - 1; i >= 0; i--) {
+          const pk = state.pickups[i];
+          if (Math.hypot(p.x - pk.x, p.y - pk.y) < PLAYER_RADIUS + 16) {
+            state.pickups.splice(i, 1);
+            sounds.push({ type: 'pickup', playerId: p.id });
+            haptics.push({ playerId: p.id, pattern: [18, 12, 24], reason: 'pickup' });
+            if (pk.kind === 'speed') {
+              p.speedBuffTimer = 5.0;
+              p.score += 25;
+              state.popups.push({ x: p.x, y: p.y - 26, text: 'TURBO BOOTS!', colorHex: '#10D98B', alpha: 1 });
+            } else if (pk.kind === 'shield') {
+              p.shieldTimer = 4.8;
+              p.score += 25;
+              state.popups.push({ x: p.x, y: p.y - 26, text: 'PASS SHIELD!', colorHex: '#00C2FF', alpha: 1 });
+            } else {
+              state.bombTimer = Math.min(state.bombMaxTime, state.bombTimer + 2.5);
+              p.score += 40;
+              state.popups.push({ x: p.x, y: p.y - 26, text: '+2.5s CHILL!', colorHex: '#FFB800', alpha: 1 });
+            }
+          }
+        }
+
         if (p.x < ARENA_MARGIN + PLAYER_RADIUS) {
           p.x = ARENA_MARGIN + PLAYER_RADIUS;
           p.vx = Math.abs(p.vx) * 0.5;
@@ -338,7 +442,6 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
           p.vy = -Math.abs(p.vy) * 0.5;
         }
 
-        // Pillar collisions
         for (const pil of state.pillars) {
           const dx = p.x - pil.x;
           const dy = p.y - pil.y;
@@ -368,19 +471,35 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
           const dy = target.y - holder.y;
           const dist = Math.hypot(dx, dy);
           if (dist < PLAYER_RADIUS * 2 + 8 + reachBonus) {
+            const nx = dist > 0.01 ? dx / dist : 1;
+            const ny = dist > 0.01 ? dy / dist : 0;
+
+            // Pass Shield blocks one bomb pass!
+            if (target.shieldTimer > 0) {
+              target.shieldTimer = 0;
+              target.immuneTimer = 0.7;
+              holder.vx -= nx * 360;
+              holder.vy -= ny * 360;
+              state.popups.push({ x: target.x, y: target.y - 30, text: 'BLOCKED!', colorHex: '#00C2FF', alpha: 1 });
+              sounds.push({ type: 'pulse', playerId: target.id });
+              haptics.push({ playerId: target.id, pattern: 45, reason: 'shield' });
+              break;
+            }
+
+            const clutchPass = state.bombTimer <= 2.2;
+            const passPts = clutchPass ? 65 : 35;
             holder.hasBomb = false;
             holder.immuneTimer = PASS_IMMUNITY;
             holder.passes += 1;
-            holder.score += 35;
+            holder.score += passPts;
+            if (clutchPass) {
+              state.popups.push({ x: holder.x, y: holder.y - 30, text: 'CLUTCH PASS! +65', colorHex: '#FFB800', alpha: 1 });
+            }
 
             target.hasBomb = true;
             state.bombHolderId = target.id;
-            // Small breath of time if passed at the buzzer
             if (state.bombTimer < 1.6) state.bombTimer = 1.6;
 
-            // Separation bounce
-            const nx = dist > 0.01 ? dx / dist : 1;
-            const ny = dist > 0.01 ? dy / dist : 0;
             holder.vx -= nx * 160;
             holder.vy -= ny * 160;
             target.vx += nx * 190;
@@ -394,7 +513,6 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         }
       }
 
-      // Bomb detonation!
       if (state.bombTimer <= 0 && holder) {
         state.explosions.push({
           x: holder.x,
@@ -407,7 +525,6 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
         haptics.push({ playerId: holder.id, pattern: [80, 40, 110], reason: 'ko' });
 
         if (state.soloMode) {
-          // Solo mode: survive-the-fuse practice, blow up & end round cleanly
           holder.alive = false;
           holder.hasBomb = false;
           state.bombHolderId = null;

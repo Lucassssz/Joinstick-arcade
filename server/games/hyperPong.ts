@@ -19,6 +19,18 @@ interface InternalPaddle extends HyperPongPaddleState {
   vy: number;
   smashCd: number;
   magnetCd: number;
+  giantTimer: number;
+  fireTimer: number;
+}
+
+interface PuckObj {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  hot: boolean;
+  trail: { x: number; y: number }[];
 }
 
 interface HyperPongState {
@@ -28,15 +40,12 @@ interface HyperPongState {
   goalBanner: string | null;
   goalBannerColor: string | null;
   goalPauseTimer: number;
-  puck: {
-    x: number;
-    y: number;
-    vx: number;
-    vy: number;
-    radius: number;
-    hot: boolean;
-    trail: { x: number; y: number }[];
-  };
+  puck: PuckObj;
+  extraPucks: PuckObj[];
+  powerOrb: { x: number; y: number; kind: 'multiball' | 'giant' | 'fire' } | null;
+  orbSpawnTimer: number;
+  lastHitPadId: string | null;
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   bumpers: { x: number; y: number; r: number; flash: number }[];
   paddles: InternalPaddle[];
 }
@@ -90,6 +99,8 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
         radius: PADDLE_R,
         smashTimer: 0,
         magnetTimer: 0,
+        giantTimer: 0,
+        fireTimer: 0,
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
@@ -106,6 +117,11 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
       goalBannerColor: null,
       goalPauseTimer: 0,
       puck: { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, vx: 0, vy: 0, radius: PUCK_R, hot: false, trail: [] },
+      extraPucks: [],
+      powerOrb: null,
+      orbSpawnTimer: 5.5,
+      lastHitPadId: null,
+      popups: [],
       bumpers: [
         { x: ARENA_WIDTH / 2, y: COURT_TOP + 58, r: 24, flash: 0 },
         { x: ARENA_WIDTH / 2, y: COURT_BOTTOM - 58, r: 24, flash: 0 },
@@ -127,6 +143,13 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
       if (b.flash > 0) b.flash = Math.max(0, b.flash - dt * 3);
     }
 
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pp = state.popups[i];
+      pp.y -= 32 * dt;
+      pp.alpha -= 0.9 * dt;
+      if (pp.alpha <= 0) state.popups.splice(i, 1);
+    }
+
     if (state.goalPauseTimer > 0) {
       state.goalPauseTimer = Math.max(0, state.goalPauseTimer - dt);
       if (state.goalPauseTimer <= 0) {
@@ -141,6 +164,9 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
       pad.magnetCd = Math.max(0, pad.magnetCd - dt);
       pad.smashTimer = Math.max(0, pad.smashTimer - dt);
       pad.magnetTimer = Math.max(0, pad.magnetTimer - dt);
+      pad.giantTimer = Math.max(0, pad.giantTimer - dt);
+      pad.fireTimer = Math.max(0, pad.fireTimer - dt);
+      pad.radius = pad.giantTimer > 0 ? PADDLE_R * 1.48 : PADDLE_R;
 
       let dx = 0;
       let dy = 0;
@@ -192,127 +218,188 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
       pad.cooldownB = pad.magnetCd / MAGNET_CD;
     }
 
-    // Update puck when not paused for a goal celebration
+    // Update puck(s) when not paused for a goal celebration
     if (state.goalPauseTimer <= 0) {
-      const puck = state.puck;
+      if (!state.powerOrb) {
+        state.orbSpawnTimer -= dt;
+        if (state.orbSpawnTimer <= 0) {
+          const kinds: ('multiball' | 'giant' | 'fire')[] = ['multiball', 'giant', 'fire'];
+          const kind = kinds[Math.floor(Math.random() * kinds.length)];
+          state.powerOrb = {
+            x: ARENA_WIDTH / 2,
+            y: ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 240,
+            kind,
+          };
+          state.orbSpawnTimer = 8;
+        }
+      }
 
-      // Magnet gentle pull / spin
-      for (const pad of state.paddles) {
-        if (pad.magnetTimer > 0) {
-          const dx = pad.x - puck.x;
-          const dy = pad.y - puck.y;
-          const d = Math.hypot(dx, dy) || 1;
-          if (d < 260) {
-            puck.vx += (dx / d) * 650 * dt;
-            puck.vy += (dy / d) * 650 * dt;
+      const allPucks = [state.puck, ...state.extraPucks];
+      for (let pi = allPucks.length - 1; pi >= 0; pi--) {
+        const puck = allPucks[pi];
+        const isMain = pi === 0;
+
+        // Magnet gentle pull / spin
+        for (const pad of state.paddles) {
+          if (pad.magnetTimer > 0) {
+            const dx = pad.x - puck.x;
+            const dy = pad.y - puck.y;
+            const d = Math.hypot(dx, dy) || 1;
+            if (d < 260) {
+              puck.vx += (dx / d) * 650 * dt;
+              puck.vy += (dy / d) * 650 * dt;
+            }
           }
         }
-      }
 
-      puck.x += puck.vx * dt;
-      puck.y += puck.vy * dt;
-      // Mild air friction while keeping minimum rally energy
-      puck.vx *= 1 - 0.12 * dt;
-      puck.vy *= 1 - 0.12 * dt;
-      const spd = Math.hypot(puck.vx, puck.vy);
-      if (spd < 290 && spd > 1) {
-        puck.vx = (puck.vx / spd) * 290;
-        puck.vy = (puck.vy / spd) * 290;
-      } else if (spd > 960) {
-        puck.vx = (puck.vx / spd) * 960;
-        puck.vy = (puck.vy / spd) * 960;
-      }
-
-      puck.trail.push({ x: puck.x, y: puck.y });
-      if (puck.trail.length > 10) puck.trail.shift();
-
-      // Top/bottom court walls
-      if (puck.y - puck.radius < COURT_TOP) {
-        puck.y = COURT_TOP + puck.radius;
-        puck.vy = Math.abs(puck.vy);
-        sounds.push({ type: 'bump', intensity: 0.35 });
-      } else if (puck.y + puck.radius > COURT_BOTTOM) {
-        puck.y = COURT_BOTTOM - puck.radius;
-        puck.vy = -Math.abs(puck.vy);
-        sounds.push({ type: 'bump', intensity: 0.35 });
-      }
-
-      // Goal mouth vs side walls
-      const inGoalY = Math.abs(puck.y - ARENA_HEIGHT / 2) < GOAL_HALF;
-      if (puck.x - puck.radius < COURT_LEFT) {
-        if (inGoalY) {
-          state.scoreRight += 1;
-          const rightPad = state.paddles.find((p) => p.side === 'right');
-          if (rightPad) rightPad.score = state.scoreRight;
-          state.goalBanner = `${rightPad?.name ?? 'Right'} SCORES!`;
-          state.goalBannerColor = rightPad?.colorHex ?? '#00C2FF';
-          state.goalPauseTimer = 1.35;
-          resetPuck(state, 'left');
-          sounds.push({ type: 'lap' });
-          for (const pl of players) haptics.push({ playerId: pl.id, pattern: [50, 35, 70], reason: 'goal' });
-        } else {
-          puck.x = COURT_LEFT + puck.radius;
-          puck.vx = Math.abs(puck.vx);
-          sounds.push({ type: 'bump', intensity: 0.4 });
+        puck.x += puck.vx * dt;
+        puck.y += puck.vy * dt;
+        puck.vx *= 1 - 0.12 * dt;
+        puck.vy *= 1 - 0.12 * dt;
+        const spd = Math.hypot(puck.vx, puck.vy);
+        if (spd < 290 && spd > 1) {
+          puck.vx = (puck.vx / spd) * 290;
+          puck.vy = (puck.vy / spd) * 290;
+        } else if (spd > 980) {
+          puck.vx = (puck.vx / spd) * 980;
+          puck.vy = (puck.vy / spd) * 980;
         }
-      } else if (puck.x + puck.radius > COURT_RIGHT) {
-        if (inGoalY) {
-          state.scoreLeft += 1;
-          const leftPad = state.paddles.find((p) => p.side === 'left');
-          if (leftPad) leftPad.score = state.scoreLeft;
-          state.goalBanner = `${leftPad?.name ?? 'Left'} SCORES!`;
-          state.goalBannerColor = leftPad?.colorHex ?? '#FF4D2E';
-          state.goalPauseTimer = 1.35;
-          resetPuck(state, 'right');
-          sounds.push({ type: 'lap' });
-          for (const pl of players) haptics.push({ playerId: pl.id, pattern: [50, 35, 70], reason: 'goal' });
-        } else {
-          puck.x = COURT_RIGHT - puck.radius;
-          puck.vx = -Math.abs(puck.vx);
-          sounds.push({ type: 'bump', intensity: 0.4 });
+
+        puck.trail.push({ x: puck.x, y: puck.y });
+        if (puck.trail.length > 10) puck.trail.shift();
+
+        // Check Power Orb hit
+        if (state.powerOrb && Math.hypot(puck.x - state.powerOrb.x, puck.y - state.powerOrb.y) < puck.radius + 24) {
+          const orb = state.powerOrb;
+          state.powerOrb = null;
+          const hitter = state.paddles.find((pd) => pd.id === state.lastHitPadId) ?? state.paddles[0];
+          if (orb.kind === 'multiball') {
+            state.extraPucks.push({
+              x: orb.x,
+              y: orb.y,
+              vx: -puck.vx * 0.9,
+              vy: (Math.random() - 0.5) * 440,
+              radius: 15,
+              hot: true,
+              trail: [],
+            });
+            state.popups.push({ x: orb.x, y: orb.y - 16, text: 'MULTI PUCK!', colorHex: '#FF3B9A', alpha: 1 });
+          } else if (orb.kind === 'giant' && hitter) {
+            hitter.giantTimer = 8;
+            state.popups.push({ x: orb.x, y: orb.y - 16, text: 'GIANT MALLET!', colorHex: '#10D98B', alpha: 1 });
+          } else if (hitter) {
+            hitter.fireTimer = 8;
+            puck.hot = true;
+            puck.vx *= 1.2;
+            puck.vy *= 1.2;
+            state.popups.push({ x: orb.x, y: orb.y - 16, text: 'FIREBALL!', colorHex: '#FFB800', alpha: 1 });
+          }
+          sounds.push({ type: 'pickup' });
         }
-      }
 
-      // Bumpers
-      for (const b of state.bumpers) {
-        const dx = puck.x - b.x;
-        const dy = puck.y - b.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        const minD = puck.radius + b.r;
-        if (dist < minD) {
-          const nx = dx / dist;
-          const ny = dy / dist;
-          puck.x = b.x + nx * minD;
-          puck.y = b.y + ny * minD;
-          const s = Math.max(460, Math.hypot(puck.vx, puck.vy) * 1.08);
-          puck.vx = nx * s;
-          puck.vy = ny * s;
-          b.flash = 1;
-          sounds.push({ type: 'bump', intensity: 0.6 });
+        // Top/bottom court walls
+        if (puck.y - puck.radius < COURT_TOP) {
+          puck.y = COURT_TOP + puck.radius;
+          puck.vy = Math.abs(puck.vy);
+          sounds.push({ type: 'bump', intensity: 0.35 });
+        } else if (puck.y + puck.radius > COURT_BOTTOM) {
+          puck.y = COURT_BOTTOM - puck.radius;
+          puck.vy = -Math.abs(puck.vy);
+          sounds.push({ type: 'bump', intensity: 0.35 });
         }
-      }
 
-      // Paddle collisions
-      for (const pad of state.paddles) {
-        const dx = puck.x - pad.x;
-        const dy = puck.y - pad.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        const minD = puck.radius + pad.radius;
-        if (dist < minD) {
-          const nx = dx / dist;
-          const ny = dy / dist;
-          puck.x = pad.x + nx * (minD + 2);
-          puck.y = pad.y + ny * (minD + 2);
+        // Goal mouth vs side walls
+        const inGoalY = Math.abs(puck.y - ARENA_HEIGHT / 2) < GOAL_HALF;
+        if (puck.x - puck.radius < COURT_LEFT) {
+          if (inGoalY) {
+            state.scoreRight += 1;
+            const rightPad = state.paddles.find((p) => p.side === 'right');
+            if (rightPad) rightPad.score = state.scoreRight;
+            if (isMain) {
+              state.goalBanner = `${rightPad?.name ?? 'Right'} SCORES!`;
+              state.goalBannerColor = rightPad?.colorHex ?? '#00C2FF';
+              state.goalPauseTimer = 1.35;
+              resetPuck(state, 'left');
+              state.extraPucks = [];
+            } else {
+              state.extraPucks.splice(pi - 1, 1);
+            }
+            sounds.push({ type: 'lap' });
+            for (const pl of players) haptics.push({ playerId: pl.id, pattern: [50, 35, 70], reason: 'goal' });
+            if (isMain) break;
+            continue;
+          } else {
+            puck.x = COURT_LEFT + puck.radius;
+            puck.vx = Math.abs(puck.vx);
+            sounds.push({ type: 'bump', intensity: 0.4 });
+          }
+        } else if (puck.x + puck.radius > COURT_RIGHT) {
+          if (inGoalY) {
+            state.scoreLeft += 1;
+            const leftPad = state.paddles.find((p) => p.side === 'left');
+            if (leftPad) leftPad.score = state.scoreLeft;
+            if (isMain) {
+              state.goalBanner = `${leftPad?.name ?? 'Left'} SCORES!`;
+              state.goalBannerColor = leftPad?.colorHex ?? '#FF4D2E';
+              state.goalPauseTimer = 1.35;
+              resetPuck(state, 'right');
+              state.extraPucks = [];
+            } else {
+              state.extraPucks.splice(pi - 1, 1);
+            }
+            sounds.push({ type: 'lap' });
+            for (const pl of players) haptics.push({ playerId: pl.id, pattern: [50, 35, 70], reason: 'goal' });
+            if (isMain) break;
+            continue;
+          } else {
+            puck.x = COURT_RIGHT - puck.radius;
+            puck.vx = -Math.abs(puck.vx);
+            sounds.push({ type: 'bump', intensity: 0.4 });
+          }
+        }
 
-          const isSmash = pad.smashTimer > 0;
-          const baseSpeed = Math.max(520, Math.hypot(puck.vx, puck.vy) * 1.06);
-          const launchSpeed = isSmash ? Math.min(920, baseSpeed + 280) : Math.min(780, baseSpeed);
-          puck.vx = nx * launchSpeed + pad.vx * 0.45;
-          puck.vy = ny * launchSpeed + pad.vy * 0.45;
-          puck.hot = isSmash;
-          sounds.push({ type: isSmash ? 'pulse' : 'bump', playerId: pad.id, intensity: isSmash ? 1 : 0.7 });
-          if (!pad.isBot) {
-            haptics.push({ playerId: pad.id, pattern: isSmash ? [40, 25, 45] : 22, reason: 'paddle-hit' });
+        // Bumpers
+        for (const b of state.bumpers) {
+          const dx = puck.x - b.x;
+          const dy = puck.y - b.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const minD = puck.radius + b.r;
+          if (dist < minD) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            puck.x = b.x + nx * minD;
+            puck.y = b.y + ny * minD;
+            const s = Math.max(460, Math.hypot(puck.vx, puck.vy) * 1.08);
+            puck.vx = nx * s;
+            puck.vy = ny * s;
+            b.flash = 1;
+            sounds.push({ type: 'bump', intensity: 0.6 });
+          }
+        }
+
+        // Paddle collisions
+        for (const pad of state.paddles) {
+          const dx = puck.x - pad.x;
+          const dy = puck.y - pad.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const minD = puck.radius + pad.radius;
+          if (dist < minD) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            puck.x = pad.x + nx * (minD + 2);
+            puck.y = pad.y + ny * (minD + 2);
+
+            const isSmash = pad.smashTimer > 0 || pad.fireTimer > 0;
+            const baseSpeed = Math.max(520, Math.hypot(puck.vx, puck.vy) * 1.06);
+            const launchSpeed = isSmash ? Math.min(960, baseSpeed + 280) : Math.min(780, baseSpeed);
+            puck.vx = nx * launchSpeed + pad.vx * 0.45;
+            puck.vy = ny * launchSpeed + pad.vy * 0.45;
+            puck.hot = isSmash;
+            state.lastHitPadId = pad.id;
+            sounds.push({ type: isSmash ? 'pulse' : 'bump', playerId: pad.id, intensity: isSmash ? 1 : 0.7 });
+            if (!pad.isBot) {
+              haptics.push({ playerId: pad.id, pattern: isSmash ? [40, 25, 45] : 22, reason: 'paddle-hit' });
+            }
           }
         }
       }
@@ -356,6 +443,9 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
         ...state.puck,
         trail: [...state.puck.trail],
       },
+      extraPucks: state.extraPucks.map((ep) => ({ ...ep, trail: [...ep.trail] })),
+      powerOrb: state.powerOrb ? { ...state.powerOrb } : null,
+      popups: state.popups.map((pp) => ({ ...pp })),
       bumpers: state.bumpers.map((b) => ({ ...b })),
       players: state.paddles.map((p) => ({
         id: p.id,
@@ -369,6 +459,8 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
         radius: p.radius,
         smashTimer: p.smashTimer,
         magnetTimer: p.magnetTimer,
+        giantTimer: p.giantTimer,
+        fireTimer: p.fireTimer,
         score: p.side === 'left' ? state.scoreLeft : state.scoreRight,
         cooldownA: p.cooldownA,
         cooldownB: p.cooldownB,

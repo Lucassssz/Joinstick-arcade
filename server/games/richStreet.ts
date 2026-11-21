@@ -66,7 +66,25 @@ const START_CASH = 1200;
 const ROLL_TIMEOUT = 10;
 const DECISION_TIMEOUT = 8;
 
+function refreshMonopolies(state: RichStreetState): void {
+  const propGroups = new Map<string, RichStreetTileState[]>();
+  for (const t of state.tiles) {
+    if (t.kind !== 'property') continue;
+    const arr = propGroups.get(t.groupColor) ?? [];
+    arr.push(t);
+    propGroups.set(t.groupColor, arr);
+  }
+  for (const groupTiles of propGroups.values()) {
+    const firstOwner = groupTiles[0]?.ownerId;
+    const isMonopoly = Boolean(firstOwner && groupTiles.length >= 2 && groupTiles.every((gt) => gt.ownerId === firstOwner));
+    for (const gt of groupTiles) {
+      gt.monopoly = isMonopoly;
+    }
+  }
+}
+
 function recalcWealth(state: RichStreetState): void {
+  refreshMonopolies(state);
   for (const p of state.players) {
     let propVal = 0;
     let count = 0;
@@ -82,9 +100,9 @@ function recalcWealth(state: RichStreetState): void {
 }
 
 function getRent(tile: RichStreetTileState): number {
-  if (tile.level <= 1) return tile.baseRent;
-  if (tile.level === 2) return Math.round(tile.baseRent * 1.9);
-  return Math.round(tile.baseRent * 3.1);
+  const base =
+    tile.level <= 1 ? tile.baseRent : tile.level === 2 ? Math.round(tile.baseRent * 1.9) : Math.round(tile.baseRent * 3.1);
+  return tile.monopoly ? base * 2 : base;
 }
 
 function advanceTurn(state: RichStreetState): void {
@@ -202,7 +220,7 @@ function handleLanding(
   }
 
   if (tile.kind === 'chance') {
-    const roll = Math.floor(Math.random() * 4);
+    const roll = Math.floor(Math.random() * 5);
     if (roll === 0) {
       active.cash += 200;
       state.eventText = `Lucky Card: Street Festival! ${active.name} +$200`;
@@ -223,6 +241,19 @@ function handleLanding(
       active.cash += Math.max(80, stolen);
       state.eventText = `Lucky Card: Party Gift! ${active.name} +$${Math.max(80, stolen)}`;
       sounds.push({ type: 'pickup', playerId: active.id });
+    } else if (roll === 3) {
+      const owned = state.tiles.filter((t) => t.ownerId === active.id && t.level < 3);
+      if (owned.length > 0) {
+        const chosen = owned[Math.floor(Math.random() * owned.length)];
+        chosen.level = Math.min(3, chosen.level + 1);
+        state.banner = 'FREE UPGRADE!';
+        state.eventText = `Lucky Card: Property Boom! ${chosen.name} Lv.${chosen.level}`;
+        sounds.push({ type: 'boost', playerId: active.id });
+      } else {
+        active.cash += 160;
+        state.eventText = `Lucky Card: Tax Rebate! ${active.name} +$160`;
+        sounds.push({ type: 'pickup', playerId: active.id });
+      }
     } else {
       const fee = 90;
       active.cash = Math.max(0, active.cash - fee);
@@ -300,7 +331,7 @@ function handleLanding(
     active.bankrupt = true;
     state.eventText = `${active.name} paid $${paid} rent & went bankrupt!`;
   } else {
-    state.eventText = `${active.name} paid $${paid} rent to ${owner?.name ?? 'Rival'}!`;
+    state.eventText = `${active.name} paid $${paid}${tile.monopoly ? ' (2X MONOPOLY!)' : ''} rent to ${owner?.name ?? 'Rival'}!`;
   }
   state.phase = 'event';
   state.phaseTimer = 1.65;

@@ -19,6 +19,19 @@ interface InternalDuelist extends BladeDuelPlayerState {
   vy: number;
   slashCd: number;
   parryCd: number;
+  waveTimer: number;
+  windTimer: number;
+}
+
+interface InternalWave {
+  ownerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  angle: number;
+  colorHex: string;
+  ttl: number;
 }
 
 interface BladeDuelState {
@@ -27,9 +40,15 @@ interface BladeDuelState {
   roundTimer: number;
   roundBanner: string | null;
   betweenRoundTimer: number;
+  dangerRadius: number;
+  nextId: number;
+  scrollTimer: number;
   pillars: { x: number; y: number; r: number }[];
+  scrolls: { id: string; kind: 'blade-wave' | 'wind-step'; x: number; y: number }[];
+  waveProjectiles: InternalWave[];
   slashes: { x: number; y: number; angle: number; colorHex: string; alpha: number }[];
   sparks: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   duelists: InternalDuelist[];
 }
 
@@ -37,10 +56,34 @@ const SLASH_CD = 1.25;
 const PARRY_CD = 1.7;
 const PARRY_WINDOW = 0.44; // Generous intermediate parry window
 const PLAYER_R = 20;
+const CX = ARENA_WIDTH / 2;
+const CY = ARENA_HEIGHT / 2;
+
+function spawnScroll(state: BladeDuelState) {
+  const spots = [
+    { x: CX, y: CY },
+    { x: CX - 180, y: 180 },
+    { x: CX + 180, y: 180 },
+    { x: CX - 180, y: ARENA_HEIGHT - 180 },
+    { x: CX + 180, y: ARENA_HEIGHT - 180 },
+  ];
+  const sp = spots[Math.floor(Math.random() * spots.length)];
+  const kind: 'blade-wave' | 'wind-step' = Math.random() < 0.55 ? 'blade-wave' : 'wind-step';
+  state.scrolls.push({
+    id: `sc_${state.nextId++}`,
+    kind,
+    x: sp.x + (Math.random() - 0.5) * 40,
+    y: sp.y + (Math.random() - 0.5) * 40,
+  });
+}
 
 function resetRound(state: BladeDuelState) {
   state.roundTimer = 35;
+  state.dangerRadius = 560;
   state.slashes = [];
+  state.waveProjectiles = [];
+  state.scrolls = [];
+  state.scrollTimer = 3.5;
   const total = state.duelists.length;
   state.duelists.forEach((d, idx) => {
     if (total <= 2) {
@@ -59,6 +102,8 @@ function resetRound(state: BladeDuelState) {
     d.slashTimer = 0;
     d.parryTimer = 0;
     d.stunTimer = 0;
+    d.waveTimer = 0;
+    d.windTimer = 0;
     d.slashCd = 0.35;
     d.parryCd = 0.35;
   });
@@ -84,6 +129,8 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       slashTimer: 0,
       parryTimer: 0,
       stunTimer: 0,
+      waveTimer: 0,
+      windTimer: 0,
       roundsWon: 0,
       parries: 0,
       score: 0,
@@ -99,12 +146,18 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       roundTimer: 35,
       roundBanner: null,
       betweenRoundTimer: 0,
+      dangerRadius: 560,
+      nextId: 1,
+      scrollTimer: 3.5,
       pillars: [
         { x: ARENA_WIDTH / 2, y: 205, r: 30 },
         { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT - 205, r: 30 },
       ],
+      scrolls: [],
+      waveProjectiles: [],
       slashes: [],
       sparks: [],
+      popups: [],
       duelists,
     };
     resetRound(state);
@@ -125,6 +178,11 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       state.sparks[i].radius += 260 * dt;
       state.sparks[i].alpha -= dt * 2.8;
       if (state.sparks[i].alpha <= 0) state.sparks.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      state.popups[i].y -= 28 * dt;
+      state.popups[i].alpha -= dt * 1.1;
+      if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
     if (state.betweenRoundTimer > 0) {
@@ -148,6 +206,19 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
     } else {
       state.roundTimer = Math.max(0, state.roundTimer - dt);
 
+      // Sudden death shrinking hazard ring in final 14s
+      if (state.roundTimer < 14) {
+        state.dangerRadius = Math.max(175, 175 + (state.roundTimer / 14) * 385);
+      } else {
+        state.dangerRadius = 560;
+      }
+
+      state.scrollTimer -= dt;
+      if (state.scrollTimer <= 0 && state.scrolls.length < 2) {
+        spawnScroll(state);
+        state.scrollTimer = 7.5;
+      }
+
       for (let idx = 0; idx < state.duelists.length; idx++) {
         const d = state.duelists[idx];
         if (!d.alive) continue;
@@ -157,6 +228,8 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
         d.slashTimer = Math.max(0, d.slashTimer - dt);
         d.parryTimer = Math.max(0, d.parryTimer - dt);
         d.stunTimer = Math.max(0, d.stunTimer - dt);
+        d.waveTimer = Math.max(0, d.waveTimer - dt);
+        d.windTimer = Math.max(0, d.windTimer - dt);
 
         let dx = 0;
         let dy = 0;
@@ -186,18 +259,31 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
           if (!d.isBot) haptics.push({ playerId: d.id, pattern: 18, reason: 'parry-stance' });
         }
 
-        // Button A: Dash Slash
+        // Button A: Dash Slash (plus Blade Wave projectile if buffed!)
         if (pressA && d.slashCd <= 0 && d.parryTimer <= 0) {
           d.slashTimer = 0.24;
-          d.slashCd = SLASH_CD;
+          d.slashCd = d.windTimer > 0 ? SLASH_CD * 0.72 : SLASH_CD;
           d.vx = Math.cos(d.angle) * 760;
           d.vy = Math.sin(d.angle) * 760;
           state.slashes.push({ x: d.x, y: d.y, angle: d.angle, colorHex: d.colorHex, alpha: 1 });
+          if (d.waveTimer > 0) {
+            state.waveProjectiles.push({
+              ownerId: d.id,
+              x: d.x + Math.cos(d.angle) * 26,
+              y: d.y + Math.sin(d.angle) * 26,
+              vx: Math.cos(d.angle) * 620,
+              vy: Math.sin(d.angle) * 620,
+              angle: d.angle,
+              colorHex: d.colorHex,
+              ttl: 0.9,
+            });
+          }
           sounds.push({ type: 'boost', playerId: d.id });
           if (!d.isBot) haptics.push({ playerId: d.id, pattern: 26, reason: 'slash' });
         }
 
-        const speed = d.stunTimer > 0 ? 0 : d.parryTimer > 0 ? 110 : d.slashTimer > 0 ? 740 : 300;
+        const windMult = d.windTimer > 0 ? 1.32 : 1;
+        const speed = d.stunTimer > 0 ? 0 : d.parryTimer > 0 ? 110 : d.slashTimer > 0 ? 740 : 300 * windMult;
         const tvx = d.slashTimer > 0 ? d.vx : mag > 0.14 ? (dx / mag) * speed : 0;
         const tvy = d.slashTimer > 0 ? d.vy : mag > 0.14 ? (dy / mag) * speed : 0;
         const accel = d.slashTimer > 0 ? 3.5 : 15;
@@ -217,8 +303,77 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
           }
         }
 
+        // Scroll pickup
+        for (let si = state.scrolls.length - 1; si >= 0; si--) {
+          const sc = state.scrolls[si];
+          if (Math.hypot(d.x - sc.x, d.y - sc.y) < PLAYER_R + 20) {
+            if (sc.kind === 'blade-wave') {
+              d.waveTimer = 8.5;
+              state.popups.push({ x: d.x, y: d.y - 26, text: 'BLADE WAVE!', colorHex: '#FF3B9A', alpha: 1 });
+            } else {
+              d.windTimer = 8.0;
+              state.popups.push({ x: d.x, y: d.y - 26, text: 'WIND STEP!', colorHex: '#10D98B', alpha: 1 });
+            }
+            d.score += 30;
+            state.scrolls.splice(si, 1);
+            sounds.push({ type: 'pickup', playerId: d.id });
+            if (!d.isBot) haptics.push({ playerId: d.id, pattern: 22, reason: 'scroll' });
+          }
+        }
+
+        // Sudden death ring out-of-bounds KO
+        if (state.roundTimer < 14 && Math.hypot(d.x - CX, d.y - CY) > state.dangerRadius) {
+          d.alive = false;
+          state.sparks.push({ x: d.x, y: d.y, radius: 22, colorHex: '#FF4D2E', alpha: 1 });
+          state.popups.push({ x: d.x, y: d.y - 24, text: 'RING OUT!', colorHex: '#FF4D2E', alpha: 1 });
+          sounds.push({ type: 'ko' });
+        }
+
         d.cooldownA = d.slashCd / SLASH_CD;
         d.cooldownB = d.parryCd / PARRY_CD;
+      }
+
+      // Step Blade Wave projectiles
+      for (let wi = state.waveProjectiles.length - 1; wi >= 0; wi--) {
+        const w = state.waveProjectiles[wi];
+        w.ttl -= dt;
+        w.x += w.vx * dt;
+        w.y += w.vy * dt;
+        if (w.ttl <= 0 || w.x < 70 || w.x > ARENA_WIDTH - 70 || w.y < 70 || w.y > ARENA_HEIGHT - 70) {
+          state.waveProjectiles.splice(wi, 1);
+          continue;
+        }
+        if (state.pillars.some((pil) => Math.hypot(w.x - pil.x, w.y - pil.y) < pil.r + 14)) {
+          state.waveProjectiles.splice(wi, 1);
+          continue;
+        }
+        for (const target of state.duelists) {
+          if (!target.alive || target.id === w.ownerId) continue;
+          if (Math.hypot(w.x - target.x, w.y - target.y) < PLAYER_R + 22) {
+            const owner = state.duelists.find((du) => du.id === w.ownerId);
+            if (target.parryTimer > 0) {
+              // Reflected!
+              w.vx = -w.vx;
+              w.vy = -w.vy;
+              w.angle += Math.PI;
+              w.ownerId = target.id;
+              w.colorHex = target.colorHex;
+              target.parries += 1;
+              target.score += 45;
+              state.sparks.push({ x: target.x, y: target.y, radius: 18, colorHex: '#FFB800', alpha: 1 });
+              state.popups.push({ x: target.x, y: target.y - 28, text: 'DEFLECT +45', colorHex: '#FFB800', alpha: 1 });
+              sounds.push({ type: 'pulse', playerId: target.id });
+            } else {
+              target.alive = false;
+              if (owner) owner.score += 100;
+              state.sparks.push({ x: target.x, y: target.y, radius: 22, colorHex: w.colorHex, alpha: 1 });
+              state.popups.push({ x: target.x, y: target.y - 24, text: 'WAVE KO!', colorHex: w.colorHex, alpha: 1 });
+              sounds.push({ type: 'ko' });
+              state.waveProjectiles.splice(wi, 1);
+            }
+            break;
+          }
+        }
       }
 
       // Check pairwise blade clashes & hits across all active duelists
@@ -250,6 +405,7 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
               b.score += 40;
               b.slashCd = 0;
               state.sparks.push({ x: b.x, y: b.y, radius: 18, colorHex: '#FFB800', alpha: 1 });
+              state.popups.push({ x: b.x, y: b.y - 26, text: 'PARRY +40', colorHex: '#FFB800', alpha: 1 });
               sounds.push({ type: 'pulse', playerId: b.id });
               if (!b.isBot) haptics.push({ playerId: b.id, pattern: [25, 20, 60], reason: 'parry-win' });
               if (!a.isBot) haptics.push({ playerId: a.id, pattern: [60, 30, 60], reason: 'parried' });
@@ -268,6 +424,7 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
               a.score += 40;
               a.slashCd = 0;
               state.sparks.push({ x: a.x, y: a.y, radius: 18, colorHex: '#FFB800', alpha: 1 });
+              state.popups.push({ x: a.x, y: a.y - 26, text: 'PARRY +40', colorHex: '#FFB800', alpha: 1 });
               sounds.push({ type: 'pulse', playerId: a.id });
               if (!a.isBot) haptics.push({ playerId: a.id, pattern: [25, 20, 60], reason: 'parry-win' });
               if (!b.isBot) haptics.push({ playerId: b.id, pattern: [60, 30, 60], reason: 'parried' });
@@ -328,9 +485,18 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       targetWins: state.targetWins,
       roundTimer: state.roundTimer,
       roundBanner: state.roundBanner,
+      dangerRadius: state.dangerRadius,
       pillars: state.pillars,
+      scrolls: state.scrolls.map((s) => ({ ...s })),
+      waveProjectiles: state.waveProjectiles.map((w) => ({
+        x: w.x,
+        y: w.y,
+        angle: w.angle,
+        colorHex: w.colorHex,
+      })),
       slashes: state.slashes.map((s) => ({ ...s })),
       sparks: state.sparks.map((s) => ({ ...s })),
+      popups: state.popups.map((p) => ({ ...p })),
       players: state.duelists.map((d) => ({
         id: d.id,
         slotIndex: d.slotIndex,
@@ -344,6 +510,8 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
         slashTimer: d.slashTimer,
         parryTimer: d.parryTimer,
         stunTimer: d.stunTimer,
+        waveTimer: d.waveTimer,
+        windTimer: d.windTimer,
         roundsWon: d.roundsWon,
         parries: d.parries,
         score: d.score,

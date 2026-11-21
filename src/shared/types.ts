@@ -190,10 +190,20 @@ export interface BumperPlayerState {
   alive: boolean;
   dashTimer: number;
   pulseTimer: number;
+  giantTimer?: number;
+  shockTimer?: number;
+  streak?: number;
   cooldownA: number;
   cooldownB: number;
   kos: number;
   score: number;
+}
+
+export interface BumperPowerupState {
+  id: string;
+  kind: 'giant' | 'shock' | 'star';
+  x: number;
+  y: number;
 }
 
 export interface BumperBrawlSnapshot {
@@ -207,6 +217,8 @@ export interface BumperBrawlSnapshot {
   ringCenterY: number;
   roundBanner: string | null;
   pylons: { x: number; y: number; r: number }[];
+  powerups?: BumperPowerupState[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   shockwaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   players: BumperPlayerState[];
 }
@@ -227,6 +239,8 @@ export interface AstroShipState {
   respawnTimer: number;
   shieldTimer: number;
   rapidTimer: number;
+  tripleTimer?: number;
+  pierceTimer?: number;
   boostTimer: number;
   cooldownA: number;
   cooldownB: number;
@@ -242,11 +256,12 @@ export interface AstroBulletState {
   y: number;
   vx: number;
   vy: number;
+  pierce?: boolean;
 }
 
 export interface AstroPickupState {
   id: string;
-  kind: 'shield' | 'rapid' | 'heal';
+  kind: 'shield' | 'rapid' | 'heal' | 'triple' | 'pierce';
   x: number;
   y: number;
 }
@@ -256,9 +271,12 @@ export interface AstroBlasterSnapshot {
   timeLeft: number;
   totalTime: number;
   asteroids: { x: number; y: number; r: number; seed: number }[];
+  crystals?: { id: string; x: number; y: number; r: number; hp: number; maxHp: number }[];
+  vortex?: { x: number; y: number; r: number; active: boolean; timer: number } | null;
   pickups: AstroPickupState[];
   bullets: AstroBulletState[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: AstroShipState[];
 }
 
@@ -275,6 +293,8 @@ export interface DriftCarState {
   speed: number;
   drifting: boolean;
   boosting: boolean;
+  drafting?: boolean;
+  slipping?: boolean;
   nitro: number; // 0 to 1
   lap: number;
   totalLaps: number;
@@ -286,6 +306,7 @@ export interface DriftCarState {
   falling: boolean;
   fallProgress: number; // 0 to 1 while falling off track
   respawnBlink: number; // > 0 briefly after respawning
+  coins?: number;
   cooldownA: number;
   cooldownB: number;
 }
@@ -298,6 +319,8 @@ export interface TurboDriftSnapshot {
   trackPoints: { x: number; y: number }[];
   trackHalfWidth: number;
   boostPads: { x: number; y: number; angle: number }[];
+  coins?: { id: string; x: number; y: number; kind: 'coin' | 'mystery' }[];
+  oils?: { x: number; y: number; r: number }[];
   players: DriftCarState[];
 }
 
@@ -307,6 +330,8 @@ export interface HexTileState {
   x: number;
   y: number;
   radius: number;
+  kind?: 'normal' | 'gold' | 'spring' | 'ice';
+  targeted?: boolean;
   state: 'solid' | 'cracking' | 'falling' | 'gone';
   progress: number; // 0..1 within current state
 }
@@ -340,6 +365,7 @@ export interface HexDropSnapshot {
   roundTimer: number;
   roundBanner: string | null;
   tiles: HexTileState[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   shoveWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   players: HexPlayerState[];
 }
@@ -360,10 +386,19 @@ export interface FusePlayerState {
   sprintTimer: number;
   lungeTimer: number;
   immuneTimer: number;
+  shieldTimer?: number;
+  speedBuffTimer?: number;
   cooldownA: number;
   cooldownB: number;
   score: number;
   passes: number;
+}
+
+export interface FusePickupState {
+  id: string;
+  kind: 'speed' | 'shield' | 'chill';
+  x: number;
+  y: number;
 }
 
 export interface FusePassSnapshot {
@@ -375,6 +410,9 @@ export interface FusePassSnapshot {
   bombMaxTime: number;
   roundBanner: string | null;
   pillars: { x: number; y: number; r: number }[];
+  pickups?: FusePickupState[];
+  jumpPads?: { x: number; y: number; r: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
   players: FusePlayerState[];
 }
@@ -405,6 +443,13 @@ export interface GridTrailPoint {
   gap?: boolean;
 }
 
+export interface GridPickupState {
+  id: string;
+  kind: 'energy' | 'emp' | 'score';
+  x: number;
+  y: number;
+}
+
 export interface GridRunnersSnapshot {
   gameId: 'grid-runners';
   round: number;
@@ -412,6 +457,9 @@ export interface GridRunnersSnapshot {
   roundTimer: number;
   roundBanner: string | null;
   trails: { playerId: string; colorHex: string; points: GridTrailPoint[] }[];
+  pickups?: GridPickupState[];
+  obstacles?: { x: number; y: number; w: number; h: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
   players: GridRunnerPlayerState[];
 }
@@ -431,6 +479,8 @@ export interface TankPlayerState {
   alive: boolean;
   respawnTimer: number;
   shieldTimer: number;
+  tripleTimer?: number;
+  speedTimer?: number;
   cooldownA: number;
   cooldownB: number;
   kills: number;
@@ -464,6 +514,9 @@ export interface RicochetTanksSnapshot {
   timeLeft: number;
   totalTime: number;
   walls: { x: number; y: number; w: number; h: number }[];
+  crates?: { id: string; x: number; y: number; r: number; hp: number; maxHp: number }[];
+  pickups?: { id: string; kind: 'triple' | 'speed' | 'shield'; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   shells: TankShellState[];
   mines: TankMineState[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
@@ -484,6 +537,8 @@ export interface StrikerPlayerState {
   angle: number;
   tackleTimer: number;
   kickRingTimer: number;
+  megaKickTimer?: number;
+  speedTimer?: number;
   cooldownA: number;
   cooldownB: number;
   goals: number;
@@ -506,9 +561,13 @@ export interface TurboStrikerSnapshot {
   totalTime: number;
   scoreRed: number;
   scoreBlue: number;
+  goldenTime?: boolean;
   goalBanner: string | null;
   goalBannerColor: string | null;
   ball: StrikerBallState;
+  bonusBalls?: StrikerBallState[];
+  powerups?: { id: string; kind: 'mega-kick' | 'speed' | 'twin-ball'; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: StrikerPlayerState[];
 }
 
@@ -524,6 +583,8 @@ export interface PaintPlayerState {
   vy: number;
   angle: number;
   slideTimer: number;
+  wideTimer?: number;
+  turboTimer?: number;
   cooldownA: number;
   cooldownB: number;
   tilesOwned: number;
@@ -538,6 +599,9 @@ export interface PaintRushSnapshot {
   cols: number;
   rows: number;
   grid: number[]; // -1 unpainted, 0..7 slotIndex
+  bonusCells?: number[];
+  pickups?: { id: string; kind: 'wide' | 'bomb' | 'turbo'; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   splashes: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   players: PaintPlayerState[];
 }
@@ -556,6 +620,8 @@ export interface LaserGauntletPlayerState {
   alive: boolean;
   blinkTimer: number;
   invulnTimer: number;
+  magnetTimer?: number;
+  shieldCharges?: number;
   combo: number;
   score: number;
   cooldownA: number;
@@ -567,12 +633,15 @@ export interface LaserGauntletSnapshot {
   timeLeft: number;
   totalTime: number;
   wave: number;
+  overdrive?: boolean;
   slowMoTimer: number;
   coreAngle: number;
   beams: { angle: number; width: number; state: 'warn' | 'active'; progress: number }[];
   rings: { radius: number; maxRadius: number; thickness: number; alpha: number }[];
   orbs: { id: string; x: number; y: number; r: number }[];
   shards: { id: string; x: number; y: number; value: number; pulse: number }[];
+  powerups?: { id: string; kind: 'magnet' | 'shield' | 'star'; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: LaserGauntletPlayerState[];
 }
 
@@ -587,6 +656,7 @@ export interface VaultPlayerState {
   angle: number;
   dashTimer: number;
   invulnTimer: number;
+  overchargeTimer?: number;
   carrying: number;
   banked: number;
   score: number;
@@ -598,11 +668,14 @@ export interface VaultHeistSnapshot {
   gameId: 'vault-heist';
   timeLeft: number;
   totalTime: number;
+  lockdown?: boolean;
   walls: { x: number; y: number; w: number; h: number }[];
   spikes: { x: number; y: number; w: number; h: number; state: 'idle' | 'warn' | 'active'; disabledTimer: number }[];
   lasers: { x1: number; y1: number; x2: number; y2: number; state: 'off' | 'warn' | 'active'; disabledTimer: number }[];
   drones: { x: number; y: number; r: number; angle: number; disabledTimer: number }[];
-  relics: { id: string; x: number; y: number; value: number }[];
+  relics: { id: string; x: number; y: number; value: number; kind?: 'gem' | 'crown' }[];
+  pickups?: { id: string; kind: 'emp-cell' | 'cloak'; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   portal: { x: number; y: number; r: number };
   hackWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   players: VaultPlayerState[];
@@ -621,6 +694,8 @@ export interface HyperPongPaddleState {
   radius: number;
   smashTimer: number;
   magnetTimer: number;
+  giantTimer?: number;
+  fireTimer?: number;
   score: number;
   cooldownA: number;
   cooldownB: number;
@@ -634,6 +709,9 @@ export interface HyperPongSnapshot {
   goalBanner: string | null;
   goalBannerColor: string | null;
   puck: { x: number; y: number; vx: number; vy: number; radius: number; hot: boolean; trail: { x: number; y: number }[] };
+  extraPucks?: { x: number; y: number; vx: number; vy: number; radius: number; hot: boolean; trail: { x: number; y: number }[] }[];
+  powerOrb?: { x: number; y: number; kind: 'multiball' | 'giant' | 'fire' } | null;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   bumpers: { x: number; y: number; r: number; flash: number }[];
   players: HyperPongPaddleState[];
 }
@@ -652,6 +730,8 @@ export interface BladeDuelPlayerState {
   slashTimer: number;
   parryTimer: number;
   stunTimer: number;
+  waveTimer?: number;
+  windTimer?: number;
   roundsWon: number;
   parries: number;
   score: number;
@@ -665,9 +745,13 @@ export interface BladeDuelSnapshot {
   targetWins: number;
   roundTimer: number;
   roundBanner: string | null;
+  dangerRadius?: number;
   pillars: { x: number; y: number; r: number }[];
+  scrolls?: { id: string; kind: 'blade-wave' | 'wind-step'; x: number; y: number }[];
+  waveProjectiles?: { x: number; y: number; angle: number; colorHex: string }[];
   slashes: { x: number; y: number; angle: number; colorHex: string; alpha: number }[];
   sparks: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: BladeDuelPlayerState[];
 }
 
@@ -685,6 +769,8 @@ export interface CannonPlayerState {
   coreHp: number;
   maxCoreHp: number;
   shieldTimer: number;
+  tripleTimer?: number;
+  heavyCharges?: number;
   score: number;
   cooldownA: number;
   cooldownB: number;
@@ -696,8 +782,11 @@ export interface CannonSiegeSnapshot {
   totalTime: number;
   blocks: { id: number; side: 'left' | 'right'; x: number; y: number; w: number; h: number; hp: number; maxHp: number }[];
   cores: { side: 'left' | 'right'; x: number; y: number; r: number; hp: number; maxHp: number; colorHex: string }[];
-  shells: { id: string; ownerId: string; colorHex: string; x: number; y: number; vx: number; vy: number; r: number }[];
+  pickups?: { id: string; kind: 'triple-shot' | 'bunker-buster'; x: number; y: number; r: number }[];
+  goldenTarget?: { x: number; y: number; r: number } | null;
+  shells: { id: string; ownerId: string; colorHex: string; x: number; y: number; vx: number; vy: number; r: number; heavy?: boolean }[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: CannonPlayerState[];
 }
 
@@ -715,6 +804,7 @@ export interface CrownPlayerState {
   tackleTimer: number;
   stunTimer: number;
   stealGraceTimer: number;
+  boostTimer?: number;
   score: number;
   steals: number;
   cooldownA: number;
@@ -728,8 +818,11 @@ export interface CrownHeistSnapshot {
   crownX: number;
   crownY: number;
   crownHolderId: string | null;
+  crownFrenzy?: boolean;
   obstacles: { x: number; y: number; r: number }[];
+  pickups?: { id: string; kind: 'speed-crown' | 'shock-orb' | 'gold-coin'; x: number; y: number }[];
   waves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: CrownPlayerState[];
 }
 
@@ -747,6 +840,8 @@ export interface FreezePlayerState {
   frozen: boolean;
   dashTimer: number;
   immuneTimer: number;
+  skateTimer?: number;
+  auraTimer?: number;
   saves: number;
   freezes: number;
   score: number;
@@ -763,6 +858,9 @@ export interface FreezeTagSnapshot {
   banner: string | null;
   bolts: { id: string; x: number; y: number; vx: number; vy: number }[];
   traps: { id: string; x: number; y: number; r: number; alpha: number }[];
+  icePatches?: { x: number; y: number; r: number }[];
+  pickups?: { id: string; kind: 'thaw-star' | 'turbo-skates' | 'frost-aura'; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   pillars: { x: number; y: number; r: number }[];
   players: FreezePlayerState[];
 }
@@ -783,6 +881,7 @@ export interface GhostPlayerState {
   maxHp: number;
   visibility: number; // 0 (invisible) .. 1 (fully revealed)
   dashTimer: number;
+  flareTimer?: number;
   score: number;
   cooldownA: number;
   cooldownB: number;
@@ -796,6 +895,9 @@ export interface GhostHuntSnapshot {
   walls: { x: number; y: number; w: number; h: number }[];
   nets: { id: string; x: number; y: number; r: number; colorHex: string }[];
   pings: { x: number; y: number; radius: number; maxRadius: number; alpha: number }[];
+  orbs?: { id: string; kind: 'flare' | 'ecto'; x: number; y: number }[];
+  decoys?: { x: number; y: number; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: GhostPlayerState[];
 }
 
@@ -813,6 +915,8 @@ export interface MeteorPlayerState {
   downed: boolean;
   reviveProgress: number;
   novaTimer: number;
+  spreadTimer?: number;
+  rapidTimer?: number;
   kills: number;
   score: number;
   cooldownA: number;
@@ -829,7 +933,9 @@ export interface MeteorSwarmSnapshot {
   teamScore: number;
   meteors: { id: string; kind: 'rock' | 'ufo'; x: number; y: number; r: number; hp: number; maxHp: number; angle: number }[];
   bullets: { id: string; x: number; y: number; colorHex: string; enemy?: boolean }[];
+  pickups?: { id: string; kind: 'spread-shot' | 'core-repair' | 'overcharge'; x: number; y: number }[];
   explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: MeteorPlayerState[];
 }
 
@@ -853,6 +959,8 @@ export interface HookPlayerState {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  longHookTimer?: number;
+  speedTimer?: number;
 }
 
 export interface HookLineState {
@@ -872,6 +980,9 @@ export interface HookShotSnapshot {
   islands: { x: number; y: number; w: number; h: number }[];
   hooks: HookLineState[];
   waves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  coins?: { id: string; x: number; y: number; value: number }[];
+  pickups?: { id: string; x: number; y: number; kind: 'long-hook' | 'speed-anchor' }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: HookPlayerState[];
 }
 
@@ -891,6 +1002,8 @@ export interface GravityPlayerState {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  magnetTimer?: number;
+  overdriveTimer?: number;
 }
 
 export interface GravityFlipSnapshot {
@@ -902,7 +1015,10 @@ export interface GravityFlipSnapshot {
   floorY: number;
   ceilingY: number;
   obstacles: { id: string; kind: 'saw' | 'barrier' | 'gap'; x: number; y: number; w: number; h: number; side: 'floor' | 'ceiling' | 'mid' }[];
-  coins: { id: string; x: number; y: number; r: number }[];
+  coins: { id: string; x: number; y: number; r: number; golden?: boolean }[];
+  gates?: { id: string; x: number; y: number; h: number; triggered?: boolean }[];
+  pickups?: { id: string; x: number; y: number; kind: 'magnet' | 'overdrive' }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: GravityPlayerState[];
 }
 
@@ -917,6 +1033,7 @@ export interface RichStreetTileState {
   ownerId: string | null;
   ownerColor: string | null;
   level: number; // 0 unowned, 1 shop, 2 plaza, 3 tower
+  monopoly?: boolean;
 }
 
 export interface RichStreetPlayerState {
@@ -971,6 +1088,7 @@ export interface JungleLaddersPlayerState {
   slideProgress: number; // 0..1
   trickReady: boolean;
   boostQueued: boolean;
+  shielded?: boolean;
   climbs: number;
   slides: number;
   cooldownA: number;
@@ -991,6 +1109,7 @@ export interface JungleLaddersSnapshot {
   ladders: { from: number; to: number }[];
   snakes: { from: number; to: number; colorHex: string }[];
   mysteryTiles: number[];
+  goldenTiles?: number[];
   bananas: number[];
   players: JungleLaddersPlayerState[];
 }
@@ -1013,6 +1132,8 @@ export interface BombGridPlayerState {
   roundsWon: number;
   cooldownA: number;
   cooldownB: number;
+  hasShield?: boolean;
+  megaBombs?: number;
 }
 
 export interface BombGridSnapshot {
@@ -1026,7 +1147,9 @@ export interface BombGridSnapshot {
   cells: number[]; // 0 empty, 1 steel wall, 2 wooden crate
   bombs: { id: string; ownerId: string; col: number; row: number; x: number; y: number; fuse: number; maxFuse: number; range: number; colorHex: string }[];
   flames: { col: number; row: number; alpha: number; colorHex: string }[];
-  powerups: { id: string; col: number; row: number; kind: 'flame' | 'bomb' | 'speed' }[];
+  powerups: { id: string; col: number; row: number; kind: 'flame' | 'bomb' | 'speed' | 'shield' | 'mega' }[];
+  suddenDeath?: boolean;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: BombGridPlayerState[];
 }
 
@@ -1043,6 +1166,7 @@ export interface RedLightPlayerState {
   sprintTimer: number;
   shieldTimer: number;
   zappedTimer: number;
+  mudTimer?: number;
   finished: boolean;
   finishOrder: number;
   score: number;
@@ -1061,6 +1185,9 @@ export interface RedLightDashSnapshot {
   startX: number;
   banner: string | null;
   zapLines: { x: number; y: number; alpha: number }[];
+  puddles?: { id: string; x: number; y: number; rx: number; ry: number }[];
+  apples?: { id: string; x: number; y: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: RedLightPlayerState[];
 }
 
@@ -1077,6 +1204,7 @@ export interface ColorMatchTileState {
   symbol: 'star' | 'moon' | 'diamond' | 'bolt';
   dropped: boolean;
   warning: boolean;
+  bonus?: boolean;
 }
 
 export interface ColorMatchPlayerState {
@@ -1093,6 +1221,7 @@ export interface ColorMatchPlayerState {
   hopTimer: number;
   hopDuration: number;
   shoveTimer: number;
+  speedTimer?: number;
   score: number;
   survivedWaves: number;
   cooldownA: number;
@@ -1110,6 +1239,8 @@ export interface ColorMatchSnapshot {
   banner: string | null;
   tiles: ColorMatchTileState[];
   shoveWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  orb?: { x: number; y: number; kind: 'speed' | 'shock' } | null;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: ColorMatchPlayerState[];
 }
 
@@ -1122,6 +1253,7 @@ export interface KitchenOrderState {
   timeLeft: number;
   maxTime: number;
   points: number;
+  vip?: boolean;
 }
 
 export interface KitchenStationState {
@@ -1146,6 +1278,8 @@ export interface KitchenPlayerState {
   angle: number;
   holding: { dish: DishKind; cooked: boolean } | null;
   dashTimer: number;
+  bootsTimer?: number;
+  combo?: number;
   served: number;
   score: number;
   cooldownA: number;
@@ -1159,6 +1293,7 @@ export interface KitchenRushSnapshot {
   orders: KitchenOrderState[];
   stations: KitchenStationState[];
   flyingPlates: { id: string; dish: DishKind; x: number; y: number; colorHex: string }[];
+  boots?: { id: string; x: number; y: number }[];
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: KitchenPlayerState[];
 }
@@ -1192,6 +1327,7 @@ export interface TreasurePlayerState {
   heat: number; // 0..1 proximity to nearest buried chest
   digTimer: number;
   stunTimer: number;
+  magnetTimer?: number;
   chestsFound: number;
   score: number;
   cooldownA: number;
@@ -1204,6 +1340,7 @@ export interface TreasureDigSnapshot {
   totalTime: number;
   spots: TreasureSpotState[];
   crabs: TreasureCrabState[];
+  pickups?: { id: string; x: number; y: number; kind: 'map' | 'magnet' }[];
   dugHoles: { x: number; y: number; success: boolean; alpha: number; colorHex: string }[];
   radars: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
@@ -1213,7 +1350,7 @@ export interface TreasureDigSnapshot {
 // --- 28. Fruit Drop Frenzy ---
 export interface FallingItemState {
   id: string;
-  kind: 'pineapple' | 'watermelon' | 'berry' | 'star' | 'bomb';
+  kind: 'pineapple' | 'watermelon' | 'berry' | 'star' | 'bomb' | 'magnet';
   x: number;
   y: number;
   vx: number;
@@ -1232,6 +1369,7 @@ export interface FruitPlayerState {
   dashTimer: number;
   bounceTimer: number;
   stunTimer: number;
+  magnetTimer?: number;
   combo: number;
   caught: number;
   score: number;
@@ -1243,6 +1381,7 @@ export interface FruitDropSnapshot {
   gameId: 'fruit-drop';
   timeLeft: number;
   totalTime: number;
+  feverActive?: boolean;
   items: FallingItemState[];
   bounceWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
@@ -1281,6 +1420,7 @@ export interface LuckyAuctionSnapshot {
   highestBidderId: string | null;
   highestBidderName: string | null;
   highestBidderColor: string | null;
+  multiplier?: number;
   banner: string | null;
   players: AuctionPlayerState[];
 }
@@ -1297,6 +1437,7 @@ export interface PinballPlayerState {
   y: number;
   flipTimer: number;
   bumpTimer: number;
+  giantTimer?: number;
   goals: number;
   score: number;
   cooldownA: number;
@@ -1325,6 +1466,7 @@ export interface PinballClashSnapshot {
   multiballCharge: number; // 0..1
   bumpers: { x: number; y: number; r: number; value: number; flash: number; colorHex: string }[];
   balls: PinballBallState[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: PinballPlayerState[];
 }
 

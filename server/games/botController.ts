@@ -139,24 +139,31 @@ export function computeBotInput(
           markActed();
         }
       } else {
-        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
-        const { item: target, dist } = nearestOf(me.x, me.y, rivals);
-        if (target) {
-          const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
-          dx = s.dx;
-          dy = s.dy;
-          if (dist < 165 && me.cooldownA <= 0 && canAct() && Math.random() < 0.2) {
-            a = true;
-            markActed();
-          } else if (dist < 110 && me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
-            b = true;
-            markActed();
-          }
-        } else {
-          const s = steerToward(me.x, me.y, snapshot.ringCenterX, snapshot.ringCenterY, tuning);
-          dx = s.dx * 0.4;
-          dy = s.dy * 0.4;
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: pwr, dist: pwrDist } = nearestOf(me.x, me.y, snapshot.powerups ?? []);
+      const pwrSafe =
+        pwr && Math.hypot(pwr.x - snapshot.ringCenterX, pwr.y - snapshot.ringCenterY) < snapshot.ringRadius * 0.82;
+      const { item: target, dist } = nearestOf(me.x, me.y, rivals);
+      if (pwr && pwrSafe && pwrDist < 220) {
+        const s = steerToward(me.x, me.y, pwr.x, pwr.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else if (target) {
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
+        dx = s.dx;
+        dy = s.dy;
+        if (dist < 165 && me.cooldownA <= 0 && canAct() && Math.random() < 0.2) {
+          a = true;
+          markActed();
+        } else if (dist < 110 && me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+          b = true;
+          markActed();
         }
+      } else {
+        const s = steerToward(me.x, me.y, snapshot.ringCenterX, snapshot.ringCenterY, tuning);
+        dx = s.dx * 0.4;
+        dy = s.dy * 0.4;
+      }
       }
       break;
     }
@@ -210,7 +217,19 @@ export function computeBotInput(
       }
       const lookAhead = pts[(bestIdx + 2) % pts.length];
       const nextPt = pts[(bestIdx + 4) % pts.length];
-      const s = steerToward(me.x, me.y, lookAhead.x, lookAhead.y, tuning);
+      let aimX = lookAhead.x;
+      let aimY = lookAhead.y;
+      const { item: nearCoin, dist: cDist } = nearestOf(me.x, me.y, snapshot.coins ?? []);
+      if (nearCoin && cDist < 120) {
+        aimX = lookAhead.x * 0.65 + nearCoin.x * 0.35;
+        aimY = lookAhead.y * 0.65 + nearCoin.y * 0.35;
+      }
+      const { item: nearOil, dist: oDist } = nearestOf(me.x, me.y, snapshot.oils ?? []);
+      if (nearOil && oDist < 90) {
+        aimX += (me.x - nearOil.x) * 0.8;
+        aimY += (me.y - nearOil.y) * 0.8;
+      }
+      const s = steerToward(me.x, me.y, aimX, aimY, tuning);
       dx = s.dx;
       dy = s.dy;
 
@@ -245,12 +264,15 @@ export function computeBotInput(
           }
         }
       } else if (safeTile) {
-        // Keep moving smoothly across solid hexes toward the center cluster
-        const centerSolid = solidTiles.sort(
-          (t1, t2) =>
-            Math.hypot(t1.x - ARENA_WIDTH / 2, t1.y - ARENA_HEIGHT / 2) -
-            Math.hypot(t2.x - ARENA_WIDTH / 2, t2.y - ARENA_HEIGHT / 2)
-        )[0];
+        // Keep moving smoothly across solid hexes toward gold/spring or center cluster
+        const centerSolid = [...solidTiles].sort((t1, t2) => {
+          const bonus1 = t1.kind === 'gold' || t1.kind === 'spring' ? -120 : t1.kind === 'ice' ? 80 : 0;
+          const bonus2 = t2.kind === 'gold' || t2.kind === 'spring' ? -120 : t2.kind === 'ice' ? 80 : 0;
+          return (
+            Math.hypot(t1.x - ARENA_WIDTH / 2, t1.y - ARENA_HEIGHT / 2) + bonus1 -
+            (Math.hypot(t2.x - ARENA_WIDTH / 2, t2.y - ARENA_HEIGHT / 2) + bonus2)
+          );
+        })[0];
         if (centerSolid) {
           const s = steerToward(me.x, me.y, centerSolid.x, centerSolid.y, tuning, mem.wanderAngle);
           dx = s.dx * 0.72;
@@ -289,7 +311,12 @@ export function computeBotInput(
         }
       } else {
         const holder = snapshot.players.find((p) => p.hasBomb && p.alive);
-        if (holder) {
+        const { item: fpPick, dist: fpDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
+        if (fpPick && fpDist < 200 && (!holder || Math.hypot(me.x - holder.x, me.y - holder.y) > 150)) {
+          const s = steerToward(me.x, me.y, fpPick.x, fpPick.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        } else if (holder) {
           const d = Math.hypot(me.x - holder.x, me.y - holder.y) || 1;
           const fx = (me.x - holder.x) / d + ((ARENA_WIDTH / 2 - me.x) / 700) * 0.45;
           const fy = (me.y - holder.y) / d + ((ARENA_HEIGHT / 2 - me.y) / 450) * 0.45;
@@ -308,12 +335,17 @@ export function computeBotInput(
     case 'grid-runners': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
-      // Check ahead, left-turn, right-turn for walls & trail points
+      // Check ahead, left-turn, right-turn for walls, obstacles & trail points
       const dangerAt = (ang: number, dist: number): number => {
         const tx = me.x + Math.cos(ang) * dist;
         const ty = me.y + Math.sin(ang) * dist;
         if (tx < 58 || tx > ARENA_WIDTH - 58 || ty < 58 || ty > ARENA_HEIGHT - 58) return 1000;
         let score = 0;
+        for (const ob of snapshot.obstacles ?? []) {
+          if (tx > ob.x - 16 && tx < ob.x + ob.w + 16 && ty > ob.y - 16 && ty < ob.y + ob.h + 16) {
+            score += 600;
+          }
+        }
         for (const tr of snapshot.trails) {
           const pts = tr.points;
           const limit = tr.playerId === botId ? Math.max(0, pts.length - 12) : pts.length;
@@ -335,8 +367,14 @@ export function computeBotInput(
           b = true;
           markActed();
         }
-      } else if (Math.random() < 0.04) {
-        chosenAngle += (Math.random() - 0.5) * 0.7;
+      } else {
+        const { item: gp, dist: gpDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
+        if (gp && gpDist < 220) {
+          const toPick = Math.atan2(gp.y - me.y, gp.x - me.x);
+          if (dangerAt(toPick, 78) < 30) chosenAngle = toPick;
+        } else if (Math.random() < 0.04) {
+          chosenAngle += (Math.random() - 0.5) * 0.7;
+        }
       }
       dx = Math.cos(chosenAngle) * tuning.moveScale;
       dy = Math.sin(chosenAngle) * tuning.moveScale;
@@ -351,8 +389,13 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
       const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: tPick, dist: tPickDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       const { item: target, dist } = nearestOf(me.x, me.y, rivals);
-      if (target) {
+      if (tPick && tPickDist < 210 && dist > 160) {
+        const s = steerToward(me.x, me.y, tPick.x, tPick.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else if (target) {
         const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
         if (dist < 220) {
           dx = -s.dy * mem.strafeDir;
@@ -405,24 +448,43 @@ export function computeBotInput(
     case 'paint-rush': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me) break;
-      // Find a nearby tile NOT owned by this bot
       const cellW = ARENA_WIDTH / snapshot.cols;
       const cellH = ARENA_HEIGHT / snapshot.rows;
       let targetX = ARENA_WIDTH / 2 + Math.cos(mem.wanderAngle) * 260;
       let targetY = ARENA_HEIGHT / 2 + Math.sin(mem.wanderAngle) * 180;
-      let bestScore = Infinity;
-      for (let i = 0; i < 18; i++) {
-        const col = Math.floor(Math.random() * snapshot.cols);
-        const row = Math.floor(Math.random() * snapshot.rows);
-        const owner = snapshot.grid[row * snapshot.cols + col];
-        if (owner !== me.slotIndex) {
-          const cx = (col + 0.5) * cellW;
-          const cy = (row + 0.5) * cellH;
-          const d = Math.hypot(cx - me.x, cy - me.y);
-          if (d < bestScore) {
-            bestScore = d;
-            targetX = cx;
-            targetY = cy;
+      const { item: pPick, dist: pPickDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
+      if (pPick && pPickDist < 240) {
+        targetX = pPick.x;
+        targetY = pPick.y;
+      } else {
+        let bestScore = Infinity;
+        for (const bc of snapshot.bonusCells ?? []) {
+          if (snapshot.grid[bc] !== me.slotIndex) {
+            const col = bc % snapshot.cols;
+            const row = Math.floor(bc / snapshot.cols);
+            const cx = (col + 0.5) * cellW;
+            const cy = (row + 0.5) * cellH;
+            const d = Math.hypot(cx - me.x, cy - me.y) * 0.7;
+            if (d < bestScore) {
+              bestScore = d;
+              targetX = cx;
+              targetY = cy;
+            }
+          }
+        }
+        for (let i = 0; i < 18; i++) {
+          const col = Math.floor(Math.random() * snapshot.cols);
+          const row = Math.floor(Math.random() * snapshot.rows);
+          const owner = snapshot.grid[row * snapshot.cols + col];
+          if (owner !== me.slotIndex) {
+            const cx = (col + 0.5) * cellW;
+            const cy = (row + 0.5) * cellH;
+            const d = Math.hypot(cx - me.x, cy - me.y);
+            if (d < bestScore) {
+              bestScore = d;
+              targetX = cx;
+              targetY = cy;
+            }
           }
         }
       }
@@ -443,6 +505,7 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
       const { item: orb, dist: orbD } = nearestOf(me.x, me.y, snapshot.orbs);
+      const { item: lgPick, dist: lgDist } = nearestOf(me.x, me.y, snapshot.powerups ?? []);
       if (orb && orbD < 130) {
         const s = steerToward(orb.x, orb.y, me.x, me.y, tuning);
         dx = s.dx;
@@ -451,6 +514,10 @@ export function computeBotInput(
           a = true;
           markActed();
         }
+      } else if (lgPick && lgDist < 200) {
+        const s = steerToward(me.x, me.y, lgPick.x, lgPick.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else {
         const { item: sh } = nearestOf(me.x, me.y, snapshot.shards);
         if (sh) {
@@ -469,12 +536,18 @@ export function computeBotInput(
     case 'vault-heist': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me) break;
+      const { item: vhPick, dist: vhDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       if (me.carrying >= 2) {
         const s = steerToward(me.x, me.y, snapshot.portal.x, snapshot.portal.y, tuning);
         dx = s.dx;
         dy = s.dy;
+      } else if (vhPick && vhDist < 170) {
+        const s = steerToward(me.x, me.y, vhPick.x, vhPick.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else {
-        const { item: rel } = nearestOf(me.x, me.y, snapshot.relics);
+        const crowns = snapshot.relics.filter((r) => r.kind === 'crown');
+        const { item: rel } = nearestOf(me.x, me.y, crowns.length > 0 ? crowns : snapshot.relics);
         if (rel) {
           const s = steerToward(me.x, me.y, rel.x, rel.y, tuning);
           dx = s.dx;
@@ -525,8 +598,19 @@ export function computeBotInput(
     case 'blade-duel': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive || me.stunTimer > 0) break;
+      const dangerR = snapshot.dangerRadius ?? 500;
+      const distC = Math.hypot(me.x - ARENA_WIDTH / 2, me.y - ARENA_HEIGHT / 2);
+      const { item: scroll, dist: scDist } = nearestOf(me.x, me.y, snapshot.scrolls ?? []);
       const rival = snapshot.players.find((p) => p.id !== botId && p.alive);
-      if (rival) {
+      if (distC > dangerR * 0.82) {
+        const s = steerToward(me.x, me.y, ARENA_WIDTH / 2, ARENA_HEIGHT / 2, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else if (scroll && scDist < 180) {
+        const s = steerToward(me.x, me.y, scroll.x, scroll.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else if (rival) {
         const s = steerToward(me.x, me.y, rival.x, rival.y, tuning);
         if (s.dist > 165) {
           dx = s.dx * 0.85 - s.dy * 0.3 * mem.strafeDir;
@@ -551,7 +635,12 @@ export function computeBotInput(
     case 'cannon-siege': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me) break;
-      const targetY = ARENA_HEIGHT / 2 + Math.sin(mem.wanderAngle * 2) * 210;
+      const nearPick = (snapshot.pickups ?? []).find((pk) => Math.abs(pk.x - me.x) < 160);
+      const targetY = nearPick
+        ? nearPick.y
+        : snapshot.goldenTarget && Math.random() < 0.55
+          ? snapshot.goldenTarget.y
+          : ARENA_HEIGHT / 2 + Math.sin(mem.wanderAngle * 2) * 210;
       const diffY = targetY - me.y;
       dy = Math.abs(diffY) > 16 ? Math.sign(diffY) * tuning.moveScale * 0.75 : 0;
       a = me.cooldownA <= 0 && Math.random() < tuning.abilityChance * 0.45;
@@ -568,6 +657,7 @@ export function computeBotInput(
     case 'crown-heist': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.stunTimer > 0) break;
+      const { item: chPick, dist: chDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       if (me.hasCrown) {
         const others = snapshot.players.filter((p) => p.id !== botId);
         const { item: near, dist } = nearestOf(me.x, me.y, others);
@@ -583,6 +673,10 @@ export function computeBotInput(
             markActed();
           }
         }
+      } else if (chPick && chDist < 170) {
+        const s = steerToward(me.x, me.y, chPick.x, chPick.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else {
         const s = steerToward(me.x, me.y, snapshot.crownX, snapshot.crownY, tuning);
         dx = s.dx;
@@ -598,10 +692,15 @@ export function computeBotInput(
     case 'freeze-tag': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.frozen) break;
+      const { item: ftPick, dist: ftDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       if (me.role === 'hunter') {
         const targets = snapshot.players.filter((p) => p.role === 'runner' && !p.frozen);
         const { item: target, dist } = nearestOf(me.x, me.y, targets);
-        if (target) {
+        if (ftPick && ftDist < 160 && dist > 180) {
+          const s = steerToward(me.x, me.y, ftPick.x, ftPick.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        } else if (target) {
           const s = steerToward(me.x, me.y, target.x, target.y, tuning);
           dx = s.dx;
           dy = s.dy;
@@ -625,6 +724,10 @@ export function computeBotInput(
             a = true;
             markActed();
           }
+        } else if (ftPick && ftDist < 200) {
+          const s = steerToward(me.x, me.y, ftPick.x, ftPick.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
         } else if (frozenAlly) {
           const s = steerToward(me.x, me.y, frozenAlly.x, frozenAlly.y, tuning);
           dx = s.dx;
@@ -642,9 +745,14 @@ export function computeBotInput(
       if (!me || !me.alive) break;
       const ghost = snapshot.players.find((p) => p.role === 'ghost' && p.alive);
       const hunters = snapshot.players.filter((p) => p.role === 'hunter' && p.alive);
+      const { item: ghOrb, dist: ghOrbD } = nearestOf(me.x, me.y, snapshot.orbs ?? []);
       if (me.role === 'ghost') {
         const { item: near, dist } = nearestOf(me.x, me.y, hunters);
-        if (near) {
+        if (ghOrb && ghOrb.kind === 'ecto' && ghOrbD < 190 && (!near || dist > 150)) {
+          const s = steerToward(me.x, me.y, ghOrb.x, ghOrb.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        } else if (near) {
           if (me.visibility > 0.65 && dist < 240) {
             const s = steerToward(near.x, near.y, me.x, me.y, tuning);
             dx = s.dx;
@@ -663,6 +771,10 @@ export function computeBotInput(
             }
           }
         }
+      } else if (ghOrb && ghOrbD < 180) {
+        const s = steerToward(me.x, me.y, ghOrb.x, ghOrb.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else if (ghost) {
         const s = steerToward(me.x, me.y, ghost.x, ghost.y, tuning, mem.wanderAngle);
         dx = s.dx * 0.82;
@@ -682,8 +794,13 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.downed) break;
       const downedAlly = snapshot.players.find((p) => p.id !== botId && p.downed);
+      const { item: msPick, dist: msDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       if (downedAlly) {
         const s = steerToward(me.x, me.y, downedAlly.x, downedAlly.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else if (msPick && msDist < 200) {
+        const s = steerToward(me.x, me.y, msPick.x, msPick.y, tuning);
         dx = s.dx;
         dy = s.dy;
       } else {
@@ -717,6 +834,10 @@ export function computeBotInput(
         ) ?? snapshot.islands[0];
       const cx = home.x + home.w / 2;
       const cy = home.y + home.h / 2;
+      const safeCollectibles = [...(snapshot.coins ?? []), ...(snapshot.pickups ?? [])].filter(
+        (c) => c.x >= home.x + 14 && c.x <= home.x + home.w - 14 && c.y >= home.y + 14 && c.y <= home.y + home.h - 14
+      );
+      const { item: hsPick, dist: hsPickD } = nearestOf(me.x, me.y, safeCollectibles);
       const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive && !p.falling);
       const { item: rival, dist } = nearestOf(me.x, me.y, rivals);
       if (rival && dist < 430 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
@@ -725,6 +846,10 @@ export function computeBotInput(
         dy = aim.dy;
         a = true;
         markActed();
+      } else if (hsPick && hsPickD < 180) {
+        const s = steerToward(me.x, me.y, hsPick.x, hsPick.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else {
         const s = steerToward(me.x, me.y, cx, cy, tuning);
         if (s.dist > 36) {
@@ -755,8 +880,9 @@ export function computeBotInput(
           markActed();
         }
       } else {
-        // Flip toward upcoming coins on the opposite lane when safe
-        const nextCoin = snapshot.coins.find((c) => c.x > me.x + 40 && c.x < me.x + 260);
+        // Flip toward upcoming coins or pickups on the opposite lane when safe
+        const rewardList = [...snapshot.coins, ...(snapshot.pickups ?? [])];
+        const nextCoin = rewardList.find((c) => c.x > me.x + 40 && c.x < me.x + 260);
         if (nextCoin) {
           const coinSide: 'floor' | 'ceiling' =
             nextCoin.y > (snapshot.floorY + snapshot.ceilingY) / 2 ? 'floor' : 'ceiling';
@@ -851,6 +977,13 @@ export function computeBotInput(
           b = true;
           markActed();
         }
+      } else if (
+        snapshot.suddenDeath &&
+        (me.x < 210 || me.x > ARENA_WIDTH - 210 || me.y < 190 || me.y > ARENA_HEIGHT - 190)
+      ) {
+        const s = steerToward(me.x, me.y, ARENA_WIDTH / 2, ARENA_HEIGHT / 2, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else {
         const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
         const { item: rival, dist } = nearestOf(me.x, me.y, rivals);
@@ -879,17 +1012,27 @@ export function computeBotInput(
       if (!me || me.finished) break;
       if (snapshot.lightState === 'green') {
         dx = tuning.moveScale;
-        dy = Math.sin(mem.wanderAngle) * 0.15;
+        let steerY = Math.sin(mem.wanderAngle) * 0.15;
+        const nearApple = (snapshot.apples ?? []).find(
+          (ap) => ap.x > me.x && ap.x < me.x + 130 && Math.abs(ap.y - me.y) < 110
+        );
+        const nearPuddle = (snapshot.puddles ?? []).find(
+          (pd) => pd.x > me.x - 10 && pd.x < me.x + 85 && Math.abs(pd.y - me.y) < pd.ry + 18
+        );
+        if (nearPuddle) {
+          steerY = Math.sign(me.y - nearPuddle.y || 1) * 0.75 * tuning.moveScale;
+        } else if (nearApple) {
+          steerY = Math.sign(nearApple.y - me.y) * 0.65 * tuning.moveScale;
+        }
+        dy = steerY;
         if (me.cooldownA <= 0 && canAct() && Math.random() < 0.16) {
           a = true;
           markActed();
         }
       } else if (snapshot.lightState === 'yellow') {
-        // Chill bots sometimes brake slightly late; spicy bots stop immediately
         const brakeNow = difficulty === 'spicy' || snapshot.lightTimer < 0.45;
         dx = brakeNow ? 0 : tuning.moveScale * 0.45;
       } else {
-        // Red light: freeze completely!
         dx = 0;
         dy = 0;
       }
@@ -902,20 +1045,25 @@ export function computeBotInput(
       const safeTiles = snapshot.tiles.filter(
         (t) => !t.dropped && t.colorIndex === snapshot.targetColorIndex
       );
-      if (safeTiles.length > 0) {
+      if (snapshot.orb && snapshot.phase === 'scramble' && snapshot.phaseTimer > 1.3 && Math.hypot(snapshot.orb.x - me.x, snapshot.orb.y - me.y) < 150) {
+        const s = steerToward(me.x, me.y, snapshot.orb.x, snapshot.orb.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else if (safeTiles.length > 0) {
         let best = safeTiles[0];
-        let bestD = Infinity;
+        let bestScore = Infinity;
         for (const t of safeTiles) {
           const cx = t.x + t.w / 2;
           const cy = t.y + t.h / 2;
-          const d = Math.hypot(cx - me.x, cy - me.y);
-          if (d < bestD) {
-            bestD = d;
+          const d = Math.hypot(cx - me.x, cy - me.y) - (t.bonus ? 95 : 0);
+          if (d < bestScore) {
+            bestScore = d;
             best = t;
           }
         }
         const cx = best.x + best.w / 2;
         const cy = best.y + best.h / 2;
+        const bestD = Math.hypot(cx - me.x, cy - me.y);
         if (bestD > 26) {
           const s = steerToward(me.x, me.y, cx, cy, tuning);
           dx = s.dx;
@@ -943,15 +1091,20 @@ export function computeBotInput(
       const serveSt = snapshot.stations.find((s) => s.kind === 'serve');
       const readyGrill = snapshot.stations.find((s) => s.kind === 'grill' && s.cookingDish && s.cookProgress >= 1);
       const emptyGrill = snapshot.stations.find((s) => s.kind === 'grill' && !s.cookingDish);
-      const wantedDish = snapshot.orders[0]?.dish ?? 'burger';
+      const vipOrder = snapshot.orders.find((o) => o.vip);
+      const wantedDish = (vipOrder ?? snapshot.orders[0])?.dish ?? 'burger';
       const rawKind = wantedDish === 'burger' ? 'raw-burger' : wantedDish === 'pizza' ? 'raw-pizza' : 'raw-taco';
       const rawSt = snapshot.stations.find((s) => s.kind === rawKind);
+      const { item: nearBoots, dist: bootsD } = nearestOf(me.x, me.y, snapshot.boots ?? []);
 
       let targetX = ARENA_WIDTH / 2;
       let targetY = ARENA_HEIGHT / 2;
       let wantInteract = false;
 
-      if (me.holding && me.holding.cooked && serveSt) {
+      if (nearBoots && bootsD < 160 && (me.bootsTimer ?? 0) <= 0) {
+        targetX = nearBoots.x;
+        targetY = nearBoots.y;
+      } else if (me.holding && me.holding.cooked && serveSt) {
         targetX = serveSt.x - 32;
         targetY = Math.max(serveSt.y + 30, Math.min(serveSt.y + serveSt.h - 30, me.y));
         const dServe = Math.hypot(targetX - me.x, targetY - me.y);
@@ -969,7 +1122,6 @@ export function computeBotInput(
       } else if (!me.holding && readyGrill) {
         targetX = readyGrill.x + readyGrill.w + 34;
         targetY = readyGrill.y + readyGrill.h / 2;
-        // Prefer whichever side of the grill the bot is already closer to
         if (me.x < readyGrill.x + readyGrill.w / 2) targetX = readyGrill.x - 34;
         if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
       } else if (!me.holding && rawSt) {
@@ -978,7 +1130,6 @@ export function computeBotInput(
         if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
       }
 
-      // If crossing the grill column (x: 495..700), steer through nearest open horizontal walkway (y = 295 or 486)
       const crossingGrills = (me.x < 500 && targetX > 690) || (me.x > 690 && targetX < 500);
       if (crossingGrills) {
         const aisleY = Math.abs(me.y - 295) < Math.abs(me.y - 486) ? 295 : 486;
@@ -1001,9 +1152,9 @@ export function computeBotInput(
     case 'treasure-dig': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.stunTimer > 0) break;
-      // Avoid nearby active crabs
       const activeCrabs = snapshot.crabs.filter((c) => c.stunTimer <= 0);
       const { item: nearCrab, dist: crabDist } = nearestOf(me.x, me.y, activeCrabs);
+      const { item: digPick, dist: digPickD } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       if (nearCrab && crabDist < 95) {
         const flee = steerToward(nearCrab.x, nearCrab.y, me.x, me.y, tuning);
         dx = flee.dx;
@@ -1012,6 +1163,10 @@ export function computeBotInput(
           b = true;
           markActed();
         }
+      } else if (digPick && digPickD < 200) {
+        const s = steerToward(me.x, me.y, digPick.x, digPick.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
       } else {
         const revealed = snapshot.spots.filter((s) => s.revealedTimer > 0);
         const targetList = revealed.length > 0 ? revealed : difficulty === 'spicy' ? snapshot.spots : [];
@@ -1025,7 +1180,6 @@ export function computeBotInput(
             markActed();
           }
         } else {
-          // Follow heat + wander and dig when hot!
           dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.85;
           dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.85;
           if (me.heat > 0.8 && me.cooldownA <= 0 && canAct()) {
@@ -1058,7 +1212,7 @@ export function computeBotInput(
         let best = goodItems[0] ?? null;
         let bestScore = -Infinity;
         for (const it of goodItems) {
-          const val = it.kind === 'star' ? 220 : 90;
+          const val = it.kind === 'magnet' ? 240 : it.kind === 'star' ? 220 : 90;
           const score = val + it.y * 0.4 - Math.abs(it.x - me.x) * 0.7;
           if (score > bestScore) {
             bestScore = score;
@@ -1083,17 +1237,18 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.passed || snapshot.phase !== 'bidding') break;
       if (snapshot.highestBidderId === botId || mem.actionCooldown > 0) break;
-      // Estimate chest value from clue without cheating unfairly
       const soundsLikeDuck =
         snapshot.chestClue.toLowerCase().includes('squeak') ||
         snapshot.chestClue.toLowerCase().includes('hollow');
-      const maxWilling = soundsLikeDuck
-        ? difficulty === 'chill'
-          ? 200
-          : 100
-        : difficulty === 'spicy'
-          ? 340
-          : 280;
+      const mult = snapshot.multiplier ?? 1;
+      const maxWilling =
+        (soundsLikeDuck
+          ? difficulty === 'chill'
+            ? 200
+            : 100
+          : difficulty === 'spicy'
+            ? 340
+            : 280) * (mult > 1 ? 1.55 : 1);
       const nextBid = snapshot.highestBid + 50;
       if (nextBid <= maxWilling && me.cash >= nextBid && Math.random() < 0.14) {
         a = true;

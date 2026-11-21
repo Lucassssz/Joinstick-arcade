@@ -17,6 +17,9 @@ import type {
 
 interface InternalHexTile extends HexTileState {
   timer: number;
+  kind: 'normal' | 'gold' | 'spring' | 'ice';
+  targeted: boolean;
+  bonusClaimed?: boolean;
 }
 
 interface InternalHexPlayer extends HexPlayerState {
@@ -25,6 +28,15 @@ interface InternalHexPlayer extends HexPlayerState {
   coyoteTimer: number;
   lastShovedBy: string | null;
   lastShovedAt: number;
+  onIce: boolean;
+}
+
+interface InternalPopup {
+  x: number;
+  y: number;
+  text: string;
+  colorHex: string;
+  alpha: number;
 }
 
 interface HexDropInternalState {
@@ -32,9 +44,11 @@ interface HexDropInternalState {
   totalRounds: number;
   roundTimer: number;
   roundElapsed: number;
+  meteorTimer: number;
   betweenRoundTimer: number;
   roundBanner: string | null;
   tiles: InternalHexTile[];
+  popups: InternalPopup[];
   shoveWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
   players: InternalHexPlayer[];
   soloMode: boolean;
@@ -43,6 +57,7 @@ interface HexDropInternalState {
 
 const HEX_RADIUS = 44;
 const CRACK_DURATION = 1.35;
+const ICE_CRACK_DURATION = 0.68;
 const FALL_DURATION = 0.55;
 const START_GRACE_TIME = 1.1;
 const COYOTE_TIME = 0.16;
@@ -57,7 +72,6 @@ function buildHexGrid(): InternalHexTile[] {
   const tiles: InternalHexTile[] = [];
   const cx = ARENA_WIDTH / 2;
   const cy = ARENA_HEIGHT / 2 + 8;
-  // Exact zero-gap pointy-top honeycomb tessellation
   const dx = HEX_RADIUS * Math.sqrt(3);
   const dy = HEX_RADIUS * 1.5;
   let id = 0;
@@ -70,11 +84,16 @@ function buildHexGrid(): InternalHexTile[] {
       const y = cy + row * dy;
       const distNorm = Math.hypot((x - cx) / 535, (y - cy) / 315);
       if (distNorm <= 0.99) {
+        const roll = Math.random();
+        const kind: InternalHexTile['kind'] =
+          roll < 0.08 ? 'gold' : roll < 0.15 ? 'spring' : roll < 0.25 ? 'ice' : 'normal';
         tiles.push({
           id: id++,
           x,
           y,
           radius: HEX_RADIUS,
+          kind,
+          targeted: false,
           state: 'solid',
           progress: 0,
           timer: 0,
@@ -151,6 +170,7 @@ function spawnPlayers(
       roundsWon: prev?.roundsWon ?? 0,
       lastShovedBy: null,
       lastShovedAt: 0,
+      onIce: false,
     };
   });
 }
@@ -167,9 +187,12 @@ function toSnapshot(state: HexDropInternalState): HexDropSnapshot {
       x: t.x,
       y: t.y,
       radius: t.radius,
+      kind: t.kind,
+      targeted: t.targeted,
       state: t.state,
       progress: t.progress,
     })),
+    popups: state.popups.map((p) => ({ ...p })),
     shoveWaves: state.shoveWaves.map((s) => ({ ...s })),
     players: state.players.map((p) => ({
       id: p.id,
@@ -232,9 +255,11 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
       totalRounds,
       roundTimer: ROUND_TIME_LIMIT,
       roundElapsed: 0,
+      meteorTimer: 6.5,
       betweenRoundTimer: 0,
       roundBanner: null,
       tiles,
+      popups: [],
       shoveWaves: [],
       players: spawnPlayers(players, tiles),
       soloMode: players.length <= 1,
@@ -270,6 +295,7 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
       roundsWon: 0,
       lastShovedBy: null,
       lastShovedAt: 0,
+      onIce: false,
     });
     if (state.players.length > 1) state.soloMode = false;
   },
@@ -287,6 +313,13 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
       if (w.radius >= w.maxRadius) state.shoveWaves.splice(i, 1);
     }
 
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const pop = state.popups[i];
+      pop.y -= 34 * dt;
+      pop.alpha -= 0.9 * dt;
+      if (pop.alpha <= 0) state.popups.splice(i, 1);
+    }
+
     if (state.betweenRoundTimer > 0) {
       state.betweenRoundTimer -= dt;
       if (state.betweenRoundTimer <= 0) {
@@ -297,6 +330,7 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
           state.round += 1;
           state.roundTimer = ROUND_TIME_LIMIT;
           state.roundElapsed = 0;
+          state.meteorTimer = 6.0;
           state.roundBanner = null;
           state.tiles = buildHexGrid();
           const prevMap = new Map(
@@ -310,15 +344,36 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
       state.roundTimer = Math.max(0, state.roundTimer - dt);
       state.roundElapsed += dt;
 
+      // Periodic anti-camping meteor hex drops
+      if (state.roundElapsed > 6) {
+        state.meteorTimer -= dt;
+        if (state.meteorTimer <= 0) {
+          state.meteorTimer = Math.max(2.2, 4.4 - state.roundElapsed * 0.05);
+          const solidPool = state.tiles.filter((t) => t.state === 'solid');
+          const count = Math.min(3, solidPool.length);
+          for (let m = 0; m < count; m++) {
+            const pick = solidPool[Math.floor(Math.random() * solidPool.length)];
+            if (pick && pick.state === 'solid') {
+              pick.state = 'cracking';
+              pick.targeted = true;
+              pick.timer = 0;
+              pick.progress = 0;
+            }
+          }
+        }
+      }
+
       // Update cracking / falling tiles
       for (const tile of state.tiles) {
         if (tile.state === 'cracking') {
+          const dur = tile.kind === 'ice' ? ICE_CRACK_DURATION : CRACK_DURATION;
           tile.timer += dt;
-          tile.progress = Math.min(1, tile.timer / CRACK_DURATION);
-          if (tile.timer >= CRACK_DURATION) {
+          tile.progress = Math.min(1, tile.timer / dur);
+          if (tile.timer >= dur) {
             tile.state = 'falling';
             tile.timer = 0;
             tile.progress = 0;
+            tile.targeted = false;
           }
         } else if (tile.state === 'falling') {
           tile.timer += dt;
@@ -330,7 +385,6 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
         }
       }
 
-      // Move players
       for (const p of state.players) {
         if (!p.alive) continue;
 
@@ -344,6 +398,7 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
               const pusher = state.players.find((x) => x.id === p.lastShovedBy);
               if (pusher) {
                 pusher.score += 100;
+                state.popups.push({ x: pusher.x, y: pusher.y - 30, text: '+100 SHOVE KO!', colorHex: pusher.colorHex, alpha: 1 });
                 haptics.push({ playerId: pusher.id, pattern: [35, 25, 60], reason: 'score' });
               }
             }
@@ -363,18 +418,18 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
           if (mag > 0.08) {
             const nx = dx / Math.max(1, mag);
             const ny = dy / Math.max(1, mag);
-            const accel = p.leapTimer > 0 ? 860 : 1480;
+            const accel = p.leapTimer > 0 ? 860 : p.onIce ? 1200 : 1480;
             p.vx += nx * accel * dt;
             p.vy += ny * accel * dt;
             p.angle = Math.atan2(ny, nx);
           }
 
-          // Action A: LEAP over gaps (also works during brief coyote time!)
           if (a && !src.prevA && p.leapCd <= 0 && p.leapTimer <= 0) {
             const dirX = mag > 0.12 ? dx / mag : Math.cos(p.angle);
             const dirY = mag > 0.12 ? dy / mag : Math.sin(p.angle);
             p.vx = dirX * 355;
             p.vy = dirY * 355;
+            p.leapDuration = LEAP_DURATION;
             p.leapTimer = LEAP_DURATION;
             p.leapCd = LEAP_COOLDOWN;
             p.coyoteTimer = COYOTE_TIME;
@@ -382,7 +437,6 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
             haptics.push({ playerId: p.id, pattern: 38, reason: 'leap' });
           }
 
-          // Action B: SHOVE rivals
           if (b && !src.prevB && p.shoveCd <= 0) {
             p.shoveCd = SHOVE_COOLDOWN;
             p.shoveTimer = 0.22;
@@ -415,12 +469,16 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
           }
         }
 
-        // Tighter stopping grip when grounded so players don't skate off hex edges
-        const damping = p.leapTimer > 0 ? Math.pow(0.5, dt) : Math.pow(0.015, dt);
+        const damping =
+          p.leapTimer > 0
+            ? Math.pow(0.5, dt)
+            : p.onIce
+              ? Math.pow(0.28, dt)
+              : Math.pow(0.015, dt);
         p.vx *= damping;
         p.vy *= damping;
 
-        const maxSpeed = p.leapTimer > 0 ? 375 : 275;
+        const maxSpeed = p.leapTimer > 0 ? 395 : p.onIce ? 320 : 275;
         const speed = Math.hypot(p.vx, p.vy);
         if (speed > maxSpeed) {
           p.vx = (p.vx / speed) * maxSpeed;
@@ -429,8 +487,8 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
 
         p.x += p.vx * dt;
         p.y += p.vy * dt;
+        p.onIce = false;
 
-        // Check tile under feet (only if grounded)
         if (p.leapTimer <= 0) {
           let standingTile: InternalHexTile | null = null;
           let bestDist = Infinity;
@@ -453,6 +511,29 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
             }
           } else {
             p.coyoteTimer = COYOTE_TIME;
+            if (standingTile.kind === 'ice') p.onIce = true;
+
+            if (standingTile.kind === 'gold' && !standingTile.bonusClaimed) {
+              standingTile.bonusClaimed = true;
+              p.score += 45;
+              state.popups.push({ x: standingTile.x, y: standingTile.y - 22, text: '+45 GOLD!', colorHex: '#FFB800', alpha: 1 });
+              sounds.push({ type: 'pickup', playerId: p.id });
+              haptics.push({ playerId: p.id, pattern: 30, reason: 'gold' });
+            } else if (standingTile.kind === 'spring' && !standingTile.bonusClaimed && state.roundElapsed >= 0.6) {
+              standingTile.bonusClaimed = true;
+              const spd = Math.hypot(p.vx, p.vy);
+              const dirX = spd > 20 ? p.vx / spd : Math.cos(p.angle);
+              const dirY = spd > 20 ? p.vy / spd : Math.sin(p.angle);
+              p.vx = dirX * 390;
+              p.vy = dirY * 390;
+              p.leapDuration = 0.78;
+              p.leapTimer = 0.78;
+              p.score += 20;
+              state.popups.push({ x: standingTile.x, y: standingTile.y - 24, text: 'SPRING JUMP!', colorHex: '#10D98B', alpha: 1 });
+              sounds.push({ type: 'boost', playerId: p.id });
+              haptics.push({ playerId: p.id, pattern: [25, 20, 40], reason: 'spring' });
+            }
+
             if (standingTile.state === 'solid' && state.roundElapsed >= START_GRACE_TIME) {
               standingTile.state = 'cracking';
               standingTile.timer = 0;
@@ -463,7 +544,6 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
         }
       }
 
-      // Soft player-to-player collisions
       for (let i = 0; i < state.players.length; i++) {
         const a = state.players[i];
         if (!a.alive || a.falling || a.leapTimer > 0) continue;
@@ -493,7 +573,6 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
         }
       }
 
-      // Check round end
       const standing = state.players.filter((p) => p.alive && !p.falling);
       const anyFalling = state.players.some((p) => p.alive && p.falling);
 
