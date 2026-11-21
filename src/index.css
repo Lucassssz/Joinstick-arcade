@@ -7,12 +7,57 @@
 }
 
 @layer base {
+  :root,
+  html {
+    color-scheme: dark;
+  }
+
   html,
   body {
     font-family: var(--font-sans);
     background-color: #121419;
     color: #f4f6fa;
     overscroll-behavior: none;
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  #root {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #364054 #101319;
+  }
+
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #101319;
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #2f3748;
+    border-radius: 9999px;
+    border: 2px solid #101319;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #ff4d2e;
+  }
+
+  *::-webkit-scrollbar-thumb:active {
+    background: #ff6145;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: #101319;
   }
 
   h1,
@@ -22,6 +67,37 @@
     font-family: var(--font-display);
     text-wrap: balance;
   }
+}
+
+.arcade-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #3a4559 #101319;
+  scrollbar-gutter: stable;
+}
+
+.arcade-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.arcade-scrollbar::-webkit-scrollbar-track {
+  background: #101319;
+  border-radius: 9999px;
+  border: 1px solid #1e2430;
+}
+
+.arcade-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #384357 0%, #2a3242 100%);
+  border-radius: 9999px;
+  border: 2px solid #101319;
+}
+
+.arcade-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #ff5d40 0%, #ff4d2e 100%);
+}
+
+.arcade-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #00c2ff;
 }
 
 .tactile-btn {

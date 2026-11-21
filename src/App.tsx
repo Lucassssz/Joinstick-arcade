@@ -5,6 +5,7 @@ import { LandingView } from './components/LandingView';
 import { HostMonitor } from './components/HostMonitor';
 import { PhoneController } from './components/PhoneController';
 import { LanguageProvider } from './lib/i18n';
+import { arcadeAudio } from './lib/audio';
 
 type AppMode = 'landing' | 'host' | 'controller';
 
@@ -65,6 +66,7 @@ export default function App() {
   };
 
   const handleHostRoom = (gameId?: GameId) => {
+    arcadeAudio.unlock();
     if (gameId) setPreferredGameId(gameId);
     const url = new URL(window.location.href);
     url.search = '?mode=host';

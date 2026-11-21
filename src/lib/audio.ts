@@ -1,27 +1,391 @@
 import { SoundEvent } from '../shared/types';
 
+export type BgmMode = 'lobby' | 'battle' | null;
+
+// MIDI helper -> frequency in Hz
+function midiToFreq(midi: number): number {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+// 64-step (4 bars x 16 sixteenth-notes) Playful Party BGM in C Major (116 BPM)
+const LOBBY_MELODY: (number | null)[] = [
+  // Bar 1 (C)
+  72, null, 76, null, 79, null, 76, 79, 81, null, 79, null, 76, null, 72, null,
+  // Bar 2 (G)
+  74, null, 79, null, 74, null, 71, 74, 76, null, 74, null, 71, null, 67, null,
+  // Bar 3 (Am)
+  72, null, 76, null, 81, null, 79, null, 76, null, 72, 74, 76, null, 79, null,
+  // Bar 4 (F -> G)
+  77, null, 76, null, 74, null, 72, null, 74, null, 76, null, 79, null, null, null,
+];
+
+const LOBBY_BASS: (number | null)[] = [
+  // Bar 1 (C3 -> G3)
+  48, null, null, null, 60, null, 48, null, 55, null, null, null, 48, null, 55, null,
+  // Bar 2 (G2 -> D3)
+  43, null, null, null, 55, null, 43, null, 50, null, null, null, 43, null, 47, null,
+  // Bar 3 (A2 -> E3)
+  45, null, null, null, 57, null, 45, null, 52, null, null, null, 45, null, 52, null,
+  // Bar 4 (F2 -> G2)
+  41, null, null, null, 53, null, 41, null, 43, null, null, null, 55, null, 43, 47,
+];
+
+const LOBBY_CHORDS: Record<number, number[]> = {
+  0: [60, 64, 67],
+  8: [60, 64, 67],
+  16: [59, 62, 67],
+  24: [59, 62, 67],
+  32: [57, 60, 64],
+  40: [57, 60, 64],
+  48: [57, 60, 65],
+  56: [59, 62, 67],
+};
+
+// 64-step (4 bars x 16 sixteenth-notes) Competitive Fire Battle BGM in D Minor (144 BPM)
+const BATTLE_LEAD: (number | null)[] = [
+  // Bar 1 (Dm)
+  74, null, 77, null, 81, null, 77, 81, 82, null, 81, null, 77, null, 74, null,
+  // Bar 2 (Bb -> C)
+  70, null, 74, null, 77, null, 74, 77, 79, null, 77, null, 76, null, 72, null,
+  // Bar 3 (Gm -> Am)
+  79, null, 77, 74, 79, null, 82, null, 81, null, 79, 76, 81, null, 84, null,
+  // Bar 4 (A7 / Dm tension turnaround)
+  86, null, 81, null, 77, null, 81, null, 85, null, 81, 79, 76, null, 73, null,
+];
+
+const BATTLE_ARP: (number | null)[] = [
+  62, 69, 74, 69, 62, 69, 74, 69, 62, 69, 74, 69, 62, 69, 74, 69,
+  58, 65, 70, 65, 58, 65, 70, 65, 60, 67, 72, 67, 60, 67, 72, 67,
+  55, 62, 67, 62, 55, 62, 67, 62, 57, 64, 69, 64, 57, 64, 69, 64,
+  57, 64, 69, 73, 57, 64, 69, 73, 57, 64, 69, 73, 69, 64, 61, 57,
+];
+
+const BATTLE_BASS: (number | null)[] = [
+  // Bar 1 (D2 gallop)
+  38, 38, null, 38, 50, null, 38, 38, 38, 38, null, 38, 50, null, 38, 41,
+  // Bar 2 (Bb1 -> C2)
+  34, 34, null, 34, 46, null, 34, 34, 36, 36, null, 36, 48, null, 36, 40,
+  // Bar 3 (G1 -> A1)
+  31, 31, null, 31, 43, null, 31, 31, 33, 33, null, 33, 45, null, 33, 36,
+  // Bar 4 (A1 turnaround)
+  33, 33, 45, 33, 33, 33, 45, 33, 33, 45, 33, 45, 49, 45, 40, 33,
+];
+
 class ArcadeAudioEngine {
   private ctx: AudioContext | null = null;
   private muted = false;
 
+  // BGM sequencer state
+  private bgmMode: BgmMode = null;
+  private bgmGain: GainNode | null = null;
+  private noiseBuffer: AudioBuffer | null = null;
+  private bgmTimer: number | null = null;
+  private nextNoteTime = 0;
+  private stepIndex = 0;
+  private gestureListenerBound = false;
+
   public setMuted(muted: boolean): void {
     this.muted = muted;
+    if (this.ctx && this.bgmGain) {
+      const now = this.ctx.currentTime;
+      this.bgmGain.gain.cancelScheduledValues(now);
+      this.bgmGain.gain.setTargetAtTime(muted ? 0 : 0.9, now, 0.04);
+    }
+    if (!muted && this.bgmMode) {
+      this.unlock();
+      this.ensureSchedulerRunning();
+    }
   }
 
   public isMuted(): boolean {
     return this.muted;
   }
 
+  public getBgmMode(): BgmMode {
+    return this.bgmMode;
+  }
+
+  public setBgm(mode: BgmMode): void {
+    if (this.bgmMode === mode) {
+      if (mode) this.ensureSchedulerRunning();
+      return;
+    }
+    this.bgmMode = mode;
+    this.stepIndex = 0;
+
+    if (!mode) {
+      this.stopScheduler();
+      return;
+    }
+
+    this.unlock();
+    if (this.ctx) {
+      this.nextNoteTime = this.ctx.currentTime + 0.05;
+      this.ensureSchedulerRunning();
+    }
+    this.bindGestureWakeup();
+  }
+
+  private bindGestureWakeup(): void {
+    if (this.gestureListenerBound || typeof window === 'undefined') return;
+    this.gestureListenerBound = true;
+    const wakeup = () => {
+      this.unlock();
+      if (this.ctx && this.ctx.state === 'running') {
+        if (this.bgmMode) {
+          this.nextNoteTime = Math.max(this.nextNoteTime, this.ctx.currentTime + 0.03);
+          this.ensureSchedulerRunning();
+        }
+        window.removeEventListener('pointerdown', wakeup);
+        window.removeEventListener('keydown', wakeup);
+        this.gestureListenerBound = false;
+      }
+    };
+    window.addEventListener('pointerdown', wakeup, { passive: true });
+    window.addEventListener('keydown', wakeup, { passive: true });
+  }
+
   public unlock(): void {
     if (typeof window === 'undefined') return;
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
+        this.bgmGain = this.ctx.createGain();
+        this.bgmGain.gain.value = this.muted ? 0 : 0.9;
+        this.bgmGain.connect(this.ctx.destination);
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.bgmMode) {
+            this.nextNoteTime = (this.ctx?.currentTime ?? 0) + 0.04;
+            this.ensureSchedulerRunning();
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
+  private ensureSchedulerRunning(): void {
+    if (!this.bgmMode || typeof window === 'undefined') return;
+    this.unlock();
+    if (!this.ctx) return;
+    if (this.bgmTimer !== null) return;
+
+    this.nextNoteTime = Math.max(this.nextNoteTime, this.ctx.currentTime + 0.04);
+    this.bgmTimer = window.setInterval(() => this.pumpBgmScheduler(), 35);
+  }
+
+  private stopScheduler(): void {
+    if (this.bgmTimer !== null && typeof window !== 'undefined') {
+      window.clearInterval(this.bgmTimer);
+      this.bgmTimer = null;
+    }
+  }
+
+  private getNoiseBuffer(): AudioBuffer | null {
+    if (!this.ctx) return null;
+    if (this.noiseBuffer) return this.noiseBuffer;
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 0.25);
+    const buffer = this.ctx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    this.noiseBuffer = buffer;
+    return buffer;
+  }
+
+  private pumpBgmScheduler(): void {
+    if (!this.ctx || !this.bgmMode || this.muted) return;
+    if (this.ctx.state !== 'running') return;
+
+    const lookAhead = 0.14;
+    const bpm = this.bgmMode === 'battle' ? 144 : 116;
+    const stepDuration = 60 / bpm / 4; // 16th note
+
+    // Prevent catch-up burst if tab throttled
+    if (this.nextNoteTime < this.ctx.currentTime - 0.3) {
+      this.nextNoteTime = this.ctx.currentTime + 0.04;
+    }
+
+    while (this.nextNoteTime < this.ctx.currentTime + lookAhead) {
+      if (this.bgmMode === 'battle') {
+        this.scheduleBattleStep(this.stepIndex, this.nextNoteTime, stepDuration);
+      } else {
+        this.scheduleLobbyStep(this.stepIndex, this.nextNoteTime, stepDuration);
+      }
+      this.nextNoteTime += stepDuration;
+      this.stepIndex = (this.stepIndex + 1) % 64;
+    }
+  }
+
+  private scheduleBgmTone(
+    freq: number,
+    time: number,
+    duration: number,
+    type: OscillatorType,
+    peakGain: number,
+    options?: { filterFreqStart?: number; filterFreqEnd?: number; freqEnd?: number }
+  ): void {
+    if (!this.ctx || !this.bgmGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, time);
+    if (options?.freqEnd !== undefined) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(24, options.freqEnd), time + duration);
+    }
+
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(peakGain, time + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+
+    if (options?.filterFreqStart !== undefined) {
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 2.4;
+      filter.frequency.setValueAtTime(options.filterFreqStart, time);
+      if (options.filterFreqEnd !== undefined) {
+        filter.frequency.exponentialRampToValueAtTime(
+          Math.max(80, options.filterFreqEnd),
+          time + duration
+        );
+      }
+      osc.connect(filter);
+      filter.connect(gain);
+    } else {
+      osc.connect(gain);
+    }
+
+    gain.connect(this.bgmGain);
+    osc.start(time);
+    osc.stop(time + duration + 0.02);
+  }
+
+  private scheduleNoiseHit(
+    time: number,
+    duration: number,
+    filterType: BiquadFilterType,
+    filterFreq: number,
+    peakGain: number
+  ): void {
+    if (!this.ctx || !this.bgmGain) return;
+    const buf = this.getNoiseBuffer();
+    if (!buf) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(filterFreq, time);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(peakGain, time + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.bgmGain);
+    src.start(time);
+    src.stop(time + duration + 0.01);
+  }
+
+  private scheduleLobbyStep(step: number, time: number, stepDur: number): void {
+    // 1. Playful marimba-like melody
+    const melodyMidi = LOBBY_MELODY[step];
+    if (melodyMidi !== null) {
+      const freq = midiToFreq(melodyMidi);
+      this.scheduleBgmTone(freq, time, stepDur * 1.45, 'triangle', 0.068);
+      this.scheduleBgmTone(freq * 2, time, stepDur * 0.65, 'sine', 0.02);
+    }
+
+    // 2. Bouncy bassline
+    const bassMidi = LOBBY_BASS[step];
+    if (bassMidi !== null) {
+      this.scheduleBgmTone(midiToFreq(bassMidi), time, stepDur * 1.6, 'triangle', 0.085);
+    }
+
+    // 3. Light warm chord pad stabs
+    const chord = LOBBY_CHORDS[step];
+    if (chord) {
+      for (const note of chord) {
+        this.scheduleBgmTone(midiToFreq(note), time, stepDur * 3.8, 'sine', 0.026);
+      }
+    }
+
+    // 4. Playful party percussion
+    const barStep = step % 16;
+    if (barStep === 0 || barStep === 8 || barStep === 10) {
+      // Soft kick
+      this.scheduleBgmTone(125, time, 0.11, 'sine', 0.09, { freqEnd: 45 });
+    }
+    if (barStep === 4 || barStep === 12) {
+      // Woodblock / light snap
+      this.scheduleBgmTone(680, time, 0.055, 'triangle', 0.032, { freqEnd: 460 });
+      this.scheduleNoiseHit(time, 0.06, 'bandpass', 2400, 0.022);
+    }
+    if (barStep % 2 === 1) {
+      // Light offbeat shaker
+      this.scheduleNoiseHit(time, 0.03, 'highpass', 5800, 0.014);
+    }
+  }
+
+  private scheduleBattleStep(step: number, time: number, stepDur: number): void {
+    // 1. Driving filtered saw bass
+    const bassMidi = BATTLE_BASS[step];
+    if (bassMidi !== null) {
+      this.scheduleBgmTone(midiToFreq(bassMidi), time, stepDur * 0.92, 'sawtooth', 0.095, {
+        filterFreqStart: 880,
+        filterFreqEnd: 200,
+      });
+    }
+
+    // 2. High-energy 16th-note synth arp
+    const arpMidi = BATTLE_ARP[step];
+    if (arpMidi !== null) {
+      this.scheduleBgmTone(midiToFreq(arpMidi), time, stepDur * 0.72, 'triangle', 0.036);
+    }
+
+    // 3. Competitive soaring lead riff
+    const leadMidi = BATTLE_LEAD[step];
+    if (leadMidi !== null) {
+      const freq = midiToFreq(leadMidi);
+      this.scheduleBgmTone(freq, time, stepDur * 1.65, 'square', 0.048, {
+        filterFreqStart: 2800,
+        filterFreqEnd: 1100,
+      });
+      this.scheduleBgmTone(freq * 1.004, time, stepDur * 1.5, 'sawtooth', 0.026, {
+        filterFreqStart: 2600,
+        filterFreqEnd: 1000,
+      });
+    }
+
+    // 4. Punchy four-on-the-floor arcade drums
+    const barStep = step % 16;
+    if (barStep % 4 === 0) {
+      // Driving kick
+      this.scheduleBgmTone(150, time, 0.12, 'sine', 0.14, { freqEnd: 42 });
+    }
+    if (barStep === 4 || barStep === 12) {
+      // Snappy snare
+      this.scheduleBgmTone(210, time, 0.09, 'triangle', 0.075, { freqEnd: 95 });
+      this.scheduleNoiseHit(time, 0.11, 'bandpass', 1900, 0.065);
+    }
+    if (barStep % 2 === 1) {
+      // Crisp hi-hat
+      this.scheduleNoiseHit(time, 0.038, 'highpass', 6500, 0.028);
+    }
+    if (step === 0 || step === 32) {
+      // Subtle bar-turn crash cymbal accent
+      this.scheduleNoiseHit(time, 0.24, 'highpass', 4200, 0.038);
     }
   }
 

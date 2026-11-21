@@ -92,25 +92,34 @@ const BOT_CALLSIGNS = [
 const VALID_DIFFICULTIES = new Set<BotDifficulty>(['chill', 'arcade', 'spicy']);
 const ALLOWED_EMOTES = new Set(['🔥', '😂', '⚡', '👑', '🎉', '🤖', '👏', '😎']);
 const TICK_MS = 33; // ~30Hz authoritative server tick
-const PLAYER_RECONNECT_GRACE_MS = 30_000;
+const PLAYER_RECONNECT_GRACE_MS = 90_000;
 const HOST_RECONNECT_GRACE_MS = 120_000;
 const IDLE_ROOM_TTL_MS = 30 * 60_000;
+const WS_HEARTBEAT_INTERVAL_MS = 2_500;
+const WS_HEARTBEAT_TIMEOUT_MS = 4_800;
 
 export class RoomManager {
   private rooms = new Map<string, RoomRecord>();
   private bindings = new Map<WebSocket, SocketBinding>();
+  private socketAlive = new Map<WebSocket, boolean>();
+  private socketLastSeen = new Map<WebSocket, number>();
   private cleanupInterval: ReturnType<typeof setInterval>;
+  private heartbeatInterval: ReturnType<typeof setInterval>;
 
   constructor() {
     this.cleanupInterval = setInterval(() => this.pruneExpired(), 5_000);
+    this.heartbeatInterval = setInterval(() => this.checkHeartbeats(), WS_HEARTBEAT_INTERVAL_MS);
   }
 
   public dispose(): void {
     clearInterval(this.cleanupInterval);
+    clearInterval(this.heartbeatInterval);
     for (const room of this.rooms.values()) {
       if (room.tickInterval) clearInterval(room.tickInterval);
     }
     this.rooms.clear();
+    this.socketAlive.clear();
+    this.socketLastSeen.clear();
   }
 
   public getRoomSummary(code: string): { exists: boolean; playerCount: number; maxPlayers: number; status: RoomStatus; gameName: string } | null {
@@ -126,7 +135,17 @@ export class RoomManager {
   }
 
   public handleConnection(ws: WebSocket): void {
+    this.socketAlive.set(ws, true);
+    this.socketLastSeen.set(ws, Date.now());
+
+    ws.on('pong', () => {
+      this.socketAlive.set(ws, true);
+      this.socketLastSeen.set(ws, Date.now());
+    });
+
     ws.on('message', (raw) => {
+      this.socketAlive.set(ws, true);
+      this.socketLastSeen.set(ws, Date.now());
       try {
         const msg = JSON.parse(raw.toString()) as ClientMessage;
         this.handleMessage(ws, msg);
@@ -136,8 +155,55 @@ export class RoomManager {
     });
 
     ws.on('close', () => {
+      this.cleanupSocketTracking(ws);
       this.handleDisconnect(ws);
     });
+
+    ws.on('error', () => {
+      this.cleanupSocketTracking(ws);
+      this.handleDisconnect(ws);
+    });
+  }
+
+  private cleanupSocketTracking(ws: WebSocket): void {
+    this.socketAlive.delete(ws);
+    this.socketLastSeen.delete(ws);
+  }
+
+  private checkHeartbeats(): void {
+    const now = Date.now();
+    for (const [ws, alive] of this.socketAlive.entries()) {
+      if (ws.readyState !== 1) {
+        if (ws.readyState >= 2) {
+          this.cleanupSocketTracking(ws);
+          this.handleDisconnect(ws);
+        }
+        continue;
+      }
+      const lastSeen = this.socketLastSeen.get(ws) ?? now;
+      if (!alive && now - lastSeen > WS_HEARTBEAT_TIMEOUT_MS) {
+        this.cleanupSocketTracking(ws);
+        this.handleDisconnect(ws);
+        try {
+          if (typeof ws.terminate === 'function') {
+            ws.terminate();
+          } else {
+            ws.close();
+          }
+        } catch {
+          // Ignore terminate errors on already-closed sockets
+        }
+        continue;
+      }
+      this.socketAlive.set(ws, false);
+      try {
+        if (typeof ws.ping === 'function') {
+          ws.ping();
+        }
+      } catch {
+        // Ignore ping errors; next sweep or close event cleans up
+      }
+    }
   }
 
   private generateRoomCode(): string {
@@ -165,10 +231,26 @@ export class RoomManager {
       const current = room.players.get(room.hostPlayerId);
       if (current && !current.isBot && current.connected) return;
     }
-    const nextHuman = [...room.players.values()]
-      .filter((p) => !p.isBot && p.connected)
-      .sort((a, b) => a.slotIndex - b.slotIndex)[0];
-    room.hostPlayerId = nextHuman ? nextHuman.id : null;
+    const candidates = [...room.players.values()].filter((p) => !p.isBot && p.connected);
+    if (candidates.length === 0) {
+      room.hostPlayerId = null;
+      return;
+    }
+    const picked = candidates[Math.floor(Math.random() * candidates.length)];
+    room.hostPlayerId = picked.id;
+    if (picked.ws) {
+      this.send(picked.ws, { type: 'player:haptic', pattern: [45, 30, 85], reason: 'host' });
+    }
+  }
+
+  private checkBriefingReadyAdvance(room: RoomRecord): boolean {
+    if (room.status !== 'BRIEFING') return false;
+    const connectedHumans = [...room.players.values()].filter((p) => !p.isBot && p.connected);
+    if (connectedHumans.length > 0 && connectedHumans.every((p) => p.ready)) {
+      this.beginCountdown(room);
+      return true;
+    }
+    return false;
   }
 
   private buildRoomSnapshot(room: RoomRecord): RoomSnapshot {
@@ -555,6 +637,38 @@ export class RoomManager {
         return;
       }
 
+      case 'room:close': {
+        const binding = this.bindings.get(ws);
+        if (!binding) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room) return;
+        const isMonitor = binding.role === 'host';
+        const isRoomHostPlayer =
+          binding.role === 'player' && binding.playerId && room.hostPlayerId === binding.playerId;
+        if (!isMonitor && !isRoomHostPlayer) return;
+
+        this.closeRoom(room, 'The room was closed by the host.');
+        return;
+      }
+
+      case 'lobby:filter': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room || room.status !== 'LOBBY') return;
+        const filterIdx = PLAYER_FILTER_OPTIONS.findIndex((o) => o.id === msg.filter);
+        if (filterIdx === -1) return;
+        room.lobbyFilter = msg.filter;
+        room.remoteFocus = { ...room.remoteFocus, zone: 'filter', index: filterIdx };
+        const nextGames = filterGamesByPlayerMode(room.lobbyFilter);
+        if (nextGames.length > 0 && !nextGames.some((g) => g.id === room.selectedGameId)) {
+          room.selectedGameId = nextGames[0].id;
+          room.gameSettingValue = nextGames[0].defaultSetting;
+        }
+        room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'confirm');
+        this.broadcastRoom(room);
+        return;
+      }
+
       case 'remote:action': {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
@@ -582,13 +696,7 @@ export class RoomManager {
         }
 
         // During Rules Briefing: as soon as EVERY connected human presses Ready, start immediately (no auto-countdown!)
-        if (room.status === 'BRIEFING') {
-          const connectedHumans = [...room.players.values()].filter((p) => !p.isBot && p.connected);
-          if (connectedHumans.length > 0 && connectedHumans.every((p) => p.ready)) {
-            this.beginCountdown(room);
-            return;
-          }
-        }
+        if (this.checkBriefingReadyAdvance(room)) return;
 
         this.broadcastRoom(room);
         return;
@@ -628,6 +736,7 @@ export class RoomManager {
         this.bindings.delete(ws);
         this.ensureHostPlayer(room);
         room.lastActivityAt = Date.now();
+        if (this.checkBriefingReadyAdvance(room)) return;
         this.broadcastRoom(room);
         return;
       }
@@ -1370,9 +1479,32 @@ export class RoomManager {
         player.disconnectedAt = Date.now();
         player.input = { dx: 0, dy: 0, a: false, b: false };
         this.ensureHostPlayer(room);
+        if (this.checkBriefingReadyAdvance(room)) return;
         this.broadcastRoom(room);
       }
     }
+  }
+
+  private closeRoom(room: RoomRecord, reason: string): void {
+    this.stopGameLoop(room);
+    const closedMsg: ServerMessage = { type: 'room:closed', reason };
+
+    if (room.hostWs) {
+      this.send(room.hostWs, closedMsg);
+      this.bindings.delete(room.hostWs);
+      room.hostWs = null;
+    }
+
+    for (const p of room.players.values()) {
+      if (!p.isBot && p.ws) {
+        this.send(p.ws, closedMsg);
+        this.bindings.delete(p.ws);
+        p.ws = null;
+      }
+    }
+
+    room.players.clear();
+    this.rooms.delete(room.code);
   }
 
   private pruneExpired(): void {
@@ -1400,16 +1532,7 @@ export class RoomManager {
       const idleExpired = now - room.lastActivityAt > IDLE_ROOM_TTL_MS;
 
       if (hostGone || idleExpired) {
-        this.stopGameLoop(room);
-        for (const p of room.players.values()) {
-          if (!p.isBot && p.ws) {
-            this.send(p.ws, {
-              type: 'room:closed',
-              reason: 'The host monitor session ended.',
-            });
-          }
-        }
-        this.rooms.delete(code);
+        this.closeRoom(room, 'The host monitor session ended.');
       }
     }
   }

@@ -1383,6 +1383,8 @@ export type ClientMessage =
   | { type: 'room:set-host-player'; playerId: string }
   | { type: 'room:enter-game-room' }
   | { type: 'room:return-setup' }
+  | { type: 'room:close' }
+  | { type: 'lobby:filter'; filter: PlayerFilterMode }
   | { type: 'remote:action'; action: RemoteDirection }
   | { type: 'player:ready'; ready: boolean }
   | { type: 'player:emote'; emoji: string }

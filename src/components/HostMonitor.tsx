@@ -16,6 +16,7 @@ import {
   Pause,
   Play,
   Plus,
+  Power,
   QrCode,
   RotateCcw,
   Smartphone,
@@ -24,6 +25,7 @@ import {
   Users,
   Volume2,
   VolumeX,
+  WifiOff,
   X,
 } from 'lucide-react';
 import {
@@ -103,6 +105,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [floatingEmotes, setFloatingEmotes] = useState<FloatingEmote[]>([]);
   const [isMonitorFullscreen, setIsMonitorFullscreen] = useState(false);
   const [bannerToast, setBannerToast] = useState<string | null>(null);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [isClosingRoom, setIsClosingRoom] = useState(false);
 
   const wsRef = useRef<ManagedWebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -110,7 +114,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const fxRef = useRef(createRenderFxState());
   const prevStatusRef = useRef<string | null>(null);
   const prevHostIdRef = useRef<string | null>(null);
+  const prevPlayersRef = useRef<RoomSnapshot['players']>([]);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedGameBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // Manage Host WebSocket Connection
@@ -182,6 +188,14 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               }
             }
             break;
+          case 'room:closed':
+            if (closeFallbackTimerRef.current) {
+              clearTimeout(closeFallbackTimerRef.current);
+              closeFallbackTimerRef.current = null;
+            }
+            sessionStorage.removeItem(HOST_SESSION_KEY);
+            onExit();
+            break;
           case 'error':
             if (msg.code === 'ROOM_NOT_FOUND') {
               sessionStorage.removeItem(HOST_SESSION_KEY);
@@ -196,10 +210,33 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     wsRef.current = socket;
 
     return () => {
+      if (closeFallbackTimerRef.current) {
+        clearTimeout(closeFallbackTimerRef.current);
+        closeFallbackTimerRef.current = null;
+      }
       socket.close();
       wsRef.current = null;
     };
   }, [initialGameId]);
+
+  // Playful BGM across the entire room (SETUP/LOBBY/BRIEFING/RESULTS), switching to competitive fire BGM during gameplay
+  useEffect(() => {
+    if (!room) {
+      arcadeAudio.setBgm(null);
+      return;
+    }
+    if (room.status === 'PLAYING') {
+      arcadeAudio.setBgm('battle');
+    } else {
+      arcadeAudio.setBgm('lobby');
+    }
+  }, [room?.status]);
+
+  useEffect(() => {
+    return () => {
+      arcadeAudio.setBgm(null);
+    };
+  }, []);
 
   // Keep free-tier HTTP hosts (e.g., Render's 15-min idle timer) awake only while a Host screen is open
   useEffect(() => {
@@ -311,18 +348,43 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     }
   }, [room?.status]);
 
-  // Announce whenever the Host transfers control to another player
+  // Announce whenever Host transfers control or falls back to Mouse control
   useEffect(() => {
     if (!room) return;
     const prevHost = prevHostIdRef.current;
+    const prevPlayers = prevPlayersRef.current;
     prevHostIdRef.current = room.hostPlayerId;
-    if (prevHost && room.hostPlayerId && prevHost !== room.hostPlayerId && room.status !== 'SETUP') {
+    prevPlayersRef.current = room.players;
+
+    if (prevHost && room.hostPlayerId && prevHost !== room.hostPlayerId) {
+      const nextHost = room.players.find((p) => p.id === room.hostPlayerId);
+      const prevHostNow = room.players.find((p) => p.id === prevHost);
+      const prevHostWasPresent = prevPlayers.some((p) => p.id === prevHost);
+      const wasDisconnect = prevHostWasPresent && (!prevHostNow || !prevHostNow.connected);
+      if (nextHost) {
+        showBannerToast(
+          wasDisconnect
+            ? lang === 'zh'
+              ? `原房主已断线 — 遥控权已随机移交给 ${nextHost.name}！`
+              : `Host disconnected — remote control randomly passed to ${nextHost.name}!`
+            : lang === 'zh'
+            ? `房主遥控权限已移交给 ${nextHost.name}！现在由 TA 的手机遥控大屏。`
+            : `Host control passed to ${nextHost.name}! Their phone is now the TV Remote.`
+        );
+      }
+    } else if (prevHost && !room.hostPlayerId) {
+      showBannerToast(
+        lang === 'zh'
+          ? '手机控制器已全部断开 — 已解锁鼠标直接控制大屏！'
+          : 'All human controllers disconnected — Mouse control enabled!'
+      );
+    } else if (!prevHost && room.hostPlayerId && room.status !== 'SETUP' && prevPlayers.length > 0) {
       const nextHost = room.players.find((p) => p.id === room.hostPlayerId);
       if (nextHost) {
         showBannerToast(
           lang === 'zh'
-            ? `房主遥控权限已移交给 ${nextHost.name}！现在由 TA 的手机遥控大屏。`
-            : `Host control passed to ${nextHost.name}! Their phone is now the TV Remote.`
+            ? `${nextHost.name} 已连接 — 已切换为手机遥控大屏！`
+            : `${nextHost.name} connected — Phone Remote control active!`
         );
       }
     }
@@ -401,6 +463,29 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const handleLeaveHost = () => {
     sessionStorage.removeItem(HOST_SESSION_KEY);
     onExit();
+  };
+
+  const confirmCloseRoom = () => {
+    if (isClosingRoom) return;
+    setIsClosingRoom(true);
+    setCloseConfirmOpen(false);
+    sessionStorage.removeItem(HOST_SESSION_KEY);
+    if (wsRef.current && wsConnected) {
+      wsRef.current.send({ type: 'room:close' });
+      closeFallbackTimerRef.current = setTimeout(() => {
+        onExit();
+      }, 350);
+    } else {
+      onExit();
+    }
+  };
+
+  const handleRequestCloseRoom = () => {
+    if (room && room.players.length > 0) {
+      setCloseConfirmOpen(true);
+    } else {
+      confirmCloseRoom();
+    }
   };
 
   if (!room) {
@@ -485,6 +570,51 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {closeConfirmOpen && (
+          <div className="fixed inset-0 z-[80] bg-[#0B0D12]/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={{ duration: 0.16 }}
+              className="max-w-md w-full rounded-2xl bg-[#1A1E26] border-2 border-[#FF4D2E]/60 p-6 shadow-2xl text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-[#FF4D2E] flex items-center justify-center mx-auto">
+                <Power className="w-6 h-6" />
+              </div>
+              <h3 className="mt-3 font-display text-xl font-extrabold text-white">
+                {t('Close Entire Game Room?', '确定彻底关闭游戏房间？')}
+              </h3>
+              <p className="mt-1.5 text-sm text-[#A5AEBD] leading-relaxed">
+                {t(
+                  `This will permanently end Room ${room.code} and disconnect all connected players.`,
+                  `房间 ${room.code} 将立即永久关闭，所有已连接玩家的会话都会结束。`
+                )}
+              </p>
+              <div className="mt-5 flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCloseConfirmOpen(false)}
+                  className="h-11 px-5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-sm font-bold text-white cursor-pointer"
+                >
+                  {t('Cancel', '取消')}
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmCloseRoom}
+                  disabled={isClosingRoom}
+                  className="tactile-btn h-11 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-sm font-extrabold text-white shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <Power className="w-4 h-4" />
+                  <span>{t('Close Room', '关闭房间')}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 
@@ -495,7 +625,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     const activeDifficultyMeta = getLocalizedDifficulty(room.botDifficulty, lang);
 
     return (
-      <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col relative overflow-hidden">
+      <div className="min-h-screen w-full max-w-full overflow-x-clip bg-[#121419] text-[#F4F6FA] flex flex-col relative">
         {/* Subtle homepage-accent ambient spotlight backdrop */}
         <div
           aria-hidden="true"
@@ -513,20 +643,20 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
         {/* Top Bar */}
         <header className="relative z-10 border-b border-[#242934] bg-[#121419]/95 backdrop-blur-md">
-          <div className="max-w-[1380px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4 min-w-0">
+          <div className="max-w-[1380px] mx-auto px-3 sm:px-6 min-h-16 py-2 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
               <button
                 type="button"
                 onClick={handleLeaveHost}
-                className="min-h-[40px] px-3 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#2F3747] text-sm font-semibold text-white inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                className="min-h-[38px] sm:min-h-[40px] px-2.5 sm:px-3 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#2F3747] text-xs sm:text-sm font-semibold text-white inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
                 {t('Home', '首页')}
               </button>
-              <span className="font-display text-lg font-extrabold text-white whitespace-nowrap shrink-0">
+              <span className="font-display text-sm sm:text-lg font-extrabold text-white truncate">
                 {t('JoinStick Party Stage', 'JoinStick 派对舞台')}
               </span>
-              <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF]">
+              <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF] shrink-0">
                 <span
                   className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
                 />
@@ -534,36 +664,46 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               </span>
             </div>
 
-            <div className="flex items-center gap-2.5 shrink-0">
-              <LanguageToggle className="h-10 px-3" />
+            <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
+              <LanguageToggle compact className="h-9 sm:h-10 sm:px-3" />
 
               <button
                 type="button"
                 onClick={() => setTestDrawerOpen((v) => !v)}
-                className={`tactile-btn h-10 px-4 rounded-xl text-sm font-bold inline-flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`tactile-btn h-9 sm:h-10 px-2.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
                   testDrawerOpen
                     ? 'bg-[#00C2FF] text-[#0B1219]'
                     : 'bg-[#1E232D] hover:bg-[#242A36] text-white border border-[#2F3747]'
                 }`}
               >
                 <Smartphone className="w-4 h-4" />
-                {t('Test Controller', '测试手柄')}
+                <span className="hidden sm:inline">{t('Test Controller', '测试手柄')}</span>
+                <span className="sm:hidden">{t('Test', '测试')}</span>
               </button>
 
               <button
                 type="button"
                 onClick={toggleMute}
                 aria-label={muted ? t('Unmute audio', '取消静音') : t('Mute audio', '静音')}
-                className="h-10 w-10 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#2F3747] text-white flex items-center justify-center cursor-pointer"
+                className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#2F3747] text-white flex items-center justify-center cursor-pointer"
               >
                 {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRequestCloseRoom}
+                className="h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs sm:text-sm font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+              >
+                <Power className="w-4 h-4" />
+                <span>{t('Close Room', '关闭房间')}</span>
               </button>
             </div>
           </div>
         </header>
 
         {/* Main Kahoot-Style Party Stage */}
-        <main className="relative z-10 flex-1 max-w-[1380px] w-full mx-auto px-6 py-7 flex flex-col gap-6">
+        <main className="relative z-10 flex-1 max-w-[1380px] w-full mx-auto px-4 sm:px-6 py-5 sm:py-7 flex flex-col gap-5 sm:gap-6">
           {/* HERO JOIN PIN + QR BANNER */}
           <section className="rounded-3xl bg-[#1A1E26] border-2 border-[#2A303D] shadow-2xl p-5 sm:p-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
@@ -868,6 +1008,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                             <div className="text-xs text-[#A5AEBD] mt-0.5">
                               {player.isBot
                                 ? t('AI Robot · Always Ready', 'AI 机器人 · 自动准备')
+                                : !player.connected
+                                ? t('Disconnected · Reconnecting...', '已断开 · 等待重连中...')
                                 : isHost
                                 ? t('Room Host · Can start games', '房主 · 可遥控选游并开始')
                                 : t('Phone Controller Connected', '手机手柄已连接')}
@@ -925,7 +1067,14 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
           {/* Center Host Remote Lock Indicator */}
           <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#1A1E26] border border-[#FFB800]/55 text-xs font-bold text-[#FFB800] whitespace-nowrap">
-            {activeHostPlayer ? (
+            {!wsConnected ? (
+              <>
+                <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" />
+                <span className="text-[#FF9B8A]">
+                  {t('Server Reconnecting...', '服务器重连中...')}
+                </span>
+              </>
+            ) : activeHostPlayer ? (
               <>
                 <Crown className="w-3.5 h-3.5 text-[#FFB800] shrink-0" />
                 <span>
@@ -939,10 +1088,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               <>
                 <Gamepad2 className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />
                 <span className="text-[#D1D5DB]">
-                  {t(
-                    'Bot-Only Spectator Mode · Mouse Control Active',
-                    '纯机器人观战模式 · 可直接用鼠标控制'
-                  )}
+                  {humans.length > 0 && connectedHumans.length === 0
+                    ? t(
+                        'Controller Disconnected · Mouse Control Active',
+                        '手机手柄已断开 · 已开启鼠标控制'
+                      )
+                    : t(
+                        'Bot-Only Spectator Mode · Mouse Control Active',
+                        '纯机器人观战模式 · 可直接用鼠标控制'
+                      )}
                 </span>
               </>
             )}
@@ -996,6 +1150,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             >
               {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
+
+            <button
+              type="button"
+              onClick={handleRequestCloseRoom}
+              title={t('Close Entire Room', '关闭整个房间')}
+              className="h-9 px-3 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>{t('Close Room', '关闭房间')}</span>
+            </button>
           </div>
         </header>
 
@@ -1023,8 +1187,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       onClick={() =>
                         guardHostOnlyClick(() =>
                           wsRef.current?.send({
-                            type: 'remote:action',
-                            action: 'ok',
+                            type: 'lobby:filter',
+                            filter: opt.id,
                           })
                         )
                       }
@@ -1051,7 +1215,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             </div>
 
             {/* Row 1..N: 4-Column TV Cartridge Grid (zone === 'games') */}
-            <div className="flex-1 min-h-0 overflow-y-auto pr-1.5 py-1">
+            <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar pr-2 py-1">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {visibleGames.map((game, idx) => {
                   const isSelected = room.selectedGameId === game.id;
@@ -1172,7 +1336,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 </span>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-0.5">
+              <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar space-y-1.5 pr-1">
                 {room.players.map((player) => {
                   const isHost = !player.isBot && room.hostPlayerId === player.id;
                   const botDiff = player.botDifficulty ?? room.botDifficulty;
@@ -1396,6 +1560,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 />
                 {p.isBot && <Bot className="w-3 h-3 text-[#00C2FF] shrink-0" />}
                 <span className="font-semibold text-white">{p.name}</span>
+                {!p.isBot && !p.connected && (
+                  <span className="text-[10px] font-bold text-[#FFB800]">
+                    ({t('Offline', '离线')})
+                  </span>
+                )}
                 <span className="font-mono text-[#9CA3AF] tabular-nums">
                   {translateGameText(p.statText, lang)}
                 </span>
@@ -1405,6 +1574,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {!wsConnected && (
+            <span className="h-9 px-2.5 rounded-lg bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF9B8A] text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap">
+              <WifiOff className="w-3.5 h-3.5" />
+              <span>{t('Reconnecting...', '重连中...')}</span>
+            </span>
+          )}
+          {wsConnected && !activeHostPlayer && (
+            <span className="hidden sm:inline-flex h-9 px-2.5 rounded-lg bg-[#00C2FF]/15 border border-[#00C2FF]/40 text-[#00C2FF] text-xs font-bold items-center gap-1.5 whitespace-nowrap">
+              <Gamepad2 className="w-3.5 h-3.5" />
+              <span>{t('Mouse Control', '鼠标控制')}</span>
+            </span>
+          )}
           <LanguageToggle compact className="h-9" />
 
           <button
@@ -1466,6 +1647,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           >
             {t('Game Room', '游戏厅')}
           </button>
+
+          <button
+            type="button"
+            onClick={handleRequestCloseRoom}
+            title={t('Close Entire Room', '关闭整个房间')}
+            className="h-9 px-3 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
+          >
+            <Power className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{t('Close Room', '关闭房间')}</span>
+          </button>
         </div>
       </header>
 
@@ -1486,7 +1677,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 initial={{ opacity: 0, scale: 0.94, y: 12 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
-                className="max-w-3xl w-full rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl overflow-hidden"
+                className="max-w-3xl w-full max-h-[90vh] overflow-y-auto arcade-scrollbar rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl"
               >
                 {/* Header strip with game artwork thumbnail */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6 border-b border-[#262C38] bg-[#151820]">
@@ -1812,7 +2003,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   {selectedGame.name} · {t('Final Standings', '最终排名')}
                 </p>
 
-                <div className="mt-5 space-y-2 text-left max-h-[280px] overflow-y-auto pr-1">
+                <div className="mt-5 space-y-2 text-left max-h-[280px] overflow-y-auto arcade-scrollbar pr-1.5">
                   {room.rankings.map((entry) => {
                     const isBotEntry = room.players.find((p) => p.id === entry.playerId)?.isBot;
                     return (

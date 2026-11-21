@@ -21,11 +21,13 @@ import {
   Minimize2,
   Paintbrush,
   Pause,
+  RefreshCw,
   RotateCcw,
   Shield,
   Target,
   Vibrate,
   Waves,
+  WifiOff,
   Wind,
   X,
   Zap,
@@ -205,7 +207,11 @@ export function PhoneController({
   const [hapticNotice, setHapticNotice] = useState<string | null>(null);
   const [impactPulse, setImpactPulse] = useState<'none' | 'light' | 'heavy'>('none');
   const [passHostOpen, setPassHostOpen] = useState(false);
+  const [hostToast, setHostToast] = useState<string | null>(null);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasDisconnectedRef = useRef<boolean>(false);
+  const prevIsHostRef = useRef<boolean>(false);
+  const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Viewport tracking for automatic CSS landscape rotation on portrait phones
   const [viewport, setViewport] = useState(() => ({
@@ -407,6 +413,67 @@ export function PhoneController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-acquire Screen Wake Lock when returning to the phone browser tab
+  useEffect(() => {
+    if (embedded || !joinedPlayerId) return;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const nav = navigator as Navigator & {
+          wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
+        };
+        if (nav.wakeLock) {
+          nav.wakeLock
+            .request('screen')
+            .then((lock) => {
+              wakeLockRef.current = lock;
+            })
+            .catch(() => {});
+        }
+      } catch {
+        // Wake lock optional
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [embedded, joinedPlayerId]);
+
+  // Alert player immediately with a warning haptic if connection drops mid-session
+  useEffect(() => {
+    const selfPlayer = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
+    const isLost = Boolean(joinedPlayerId && room && (!wsConnected || (selfPlayer && !selfPlayer.connected)));
+    if (isLost && !wasDisconnectedRef.current) {
+      wasDisconnectedRef.current = true;
+      resetControlsState();
+      if (!embedded) {
+        vibrate([110, 55, 110], { fromUserGesture: false, intensity: 'heavy', force: true });
+      }
+    } else if (!isLost && wasDisconnectedRef.current) {
+      wasDisconnectedRef.current = false;
+      if (!embedded) {
+        vibrate(45, { fromUserGesture: false, intensity: 'light' });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsConnected, joinedPlayerId, room, embedded]);
+
+  // Notify the player if they inherit Host Remote Control mid-session
+  useEffect(() => {
+    const isHostNow = Boolean(room && joinedPlayerId && room.hostPlayerId === joinedPlayerId);
+    const wasHost = prevIsHostRef.current;
+    prevIsHostRef.current = isHostNow;
+
+    if (!wasHost && isHostNow && room && room.status !== 'SETUP') {
+      setHostToast(
+        lang === 'zh'
+          ? '你已成为新房主！现在由你使用遥控器控制大屏。'
+          : 'You are now the Room Host! Use this remote to control the TV.'
+      );
+      if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
+      hostToastTimerRef.current = setTimeout(() => setHostToast(null), 4200);
+    }
+  }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang]);
+
   // Manage WebSocket connection
   useEffect(() => {
     const socket = new ManagedWebSocket({
@@ -472,12 +539,21 @@ export function PhoneController({
             }
             break;
           case 'room:closed':
+            storedPlayerIdRef.current = undefined;
+            joinedPlayerIdRef.current = null;
+            if (!embedded) sessionStorage.removeItem(sessionKey);
             setClosedReason(msg.reason);
             setRoom(null);
             setJoinedPlayerId(null);
-            joinedPlayerIdRef.current = null;
             break;
           case 'error':
+            if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
+              storedPlayerIdRef.current = undefined;
+              joinedPlayerIdRef.current = null;
+              if (!embedded) sessionStorage.removeItem(sessionKey);
+              setJoinedPlayerId(null);
+              setRoom(null);
+            }
             setErrorMsg(msg.message);
             break;
         }
@@ -488,6 +564,7 @@ export function PhoneController({
     return () => {
       socket.close();
       wsRef.current = null;
+      if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
       if (wakeLockRef.current) {
         wakeLockRef.current.release().catch(() => {});
         wakeLockRef.current = null;
@@ -741,12 +818,81 @@ export function PhoneController({
     sendCurrentInput(true);
   };
 
+  const handleManualReconnect = () => {
+    setErrorMsg(null);
+    if (!embedded) {
+      controllerHaptics.unlock();
+      vibrate(45, { fromUserGesture: true, intensity: 'light', force: true });
+    }
+    if (wsRef.current) {
+      wsRef.current.reconnectNow();
+    }
+  };
+
   // Wrapper that renders full-screen & landscape-rotated on connected phones
   const renderConnectedShell = (children: ReactNode) => {
+    const selfPlayer = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
+    const isConnectionLost = Boolean(
+      joinedPlayerId && room && (!wsConnected || (selfPlayer && !selfPlayer.connected))
+    );
+
+    const statusOverlays = (
+      <>
+        {hostToast && !isConnectionLost && (
+          <div className="pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-[65] px-4 py-2 rounded-xl bg-[#FFB800] text-[#14120B] font-display font-extrabold text-xs sm:text-sm shadow-xl inline-flex items-center gap-1.5 whitespace-nowrap">
+            <Crown className="w-4 h-4 shrink-0" />
+            <span>{hostToast}</span>
+          </div>
+        )}
+
+        {isConnectionLost && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="absolute inset-0 z-[70] bg-[#0B0D12]/92 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div className="max-w-sm w-full rounded-2xl bg-[#1A1E26] border-2 border-[#FF4D2E] p-5 text-center shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF4D2E] flex items-center justify-center mx-auto animate-pulse">
+                <WifiOff className="w-6 h-6" />
+              </div>
+              <h3 className="mt-3 font-display text-xl font-extrabold text-white">
+                {t('Controller Disconnected!', '手柄连接已断开！')}
+              </h3>
+              <p className="mt-1.5 text-xs text-[#D1D5DB] leading-relaxed">
+                {t(
+                  'Signal dropped — your button taps are paused while we reconnect.',
+                  '网络信号中断 — 正在自动重连，重连前按键暂不生效。'
+                )}
+              </p>
+              <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleManualReconnect}
+                  className="tactile-btn w-full sm:w-auto h-11 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>{t('Reconnect Now', '立即重连')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLeave}
+                  className="h-11 px-4 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-[#D1D5DB] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>{t('Leave Room', '退出房间')}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+
     if (embedded) {
       return (
-        <div className="gamepad-surface rounded-2xl border border-[#2A303D] bg-[#121419] text-[#F4F6FA] p-3.5 overflow-hidden">
+        <div className="relative gamepad-surface rounded-2xl border border-[#2A303D] bg-[#121419] text-[#F4F6FA] p-3.5 overflow-hidden">
           {children}
+          {statusOverlays}
         </div>
       );
     }
@@ -764,6 +910,7 @@ export function PhoneController({
             }}
           >
             {children}
+            {statusOverlays}
           </div>
         </div>
       );
@@ -777,6 +924,7 @@ export function PhoneController({
         }}
       >
         {children}
+        {statusOverlays}
       </div>
     );
   };
@@ -810,7 +958,7 @@ export function PhoneController({
     return (
       <div
         className={`${
-          embedded ? 'p-4' : 'min-h-screen p-5 flex flex-col justify-between'
+          embedded ? 'p-4' : 'min-h-screen w-full max-w-full overflow-x-clip p-4 sm:p-5 flex flex-col justify-between'
         } bg-[#121419] text-white`}
       >
         {!embedded && (
@@ -918,6 +1066,22 @@ export function PhoneController({
               </div>
             </div>
 
+            {!wsConnected && (
+              <div className="p-3 rounded-xl bg-[#FFB800]/15 border border-[#FFB800]/45 flex items-center justify-between gap-3 text-xs text-[#FDE68A]">
+                <span className="inline-flex items-center gap-2 font-semibold">
+                  <WifiOff className="w-4 h-4 text-[#FFB800] shrink-0" />
+                  {t('Disconnected from server — reconnecting...', '未连接到服务器 — 正在尝试重连...')}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleManualReconnect}
+                  className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-bold shrink-0 cursor-pointer"
+                >
+                  {t('Retry', '重试')}
+                </button>
+              </div>
+            )}
+
             {errorMsg && (
               <div className="p-3 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-sm text-[#FF9B8A]">
                 {translateServerMessage(errorMsg, lang)}
@@ -929,7 +1093,9 @@ export function PhoneController({
               disabled={!wsConnected}
               className="tactile-btn w-full h-13 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-50 text-white font-bold text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
             >
-              {t('Join Room & Open Gamepad', '加入房间并打开手柄')}
+              {wsConnected
+                ? t('Join Room & Open Gamepad', '加入房间并打开手柄')
+                : t('Reconnecting to Server...', '正在连接服务器...')}
             </button>
           </form>
         </div>
@@ -1032,7 +1198,7 @@ export function PhoneController({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto my-3">
+      <div className="flex-1 overflow-y-auto arcade-scrollbar my-3 pr-1">
         {otherConnectedHumans.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-sm text-[#9CA3AF]">
             {t('No other human players are connected right now.', '目前没有其他在线玩家。')}
@@ -2037,7 +2203,7 @@ export function PhoneController({
 
   return renderConnectedShell(
     <div
-      className="flex flex-col justify-between h-full w-full max-w-4xl mx-auto transition-transform duration-75"
+      className="flex flex-col justify-between h-full w-full max-w-6xl mx-auto transition-transform duration-75"
       style={{
         transform:
           impactPulse === 'heavy'
@@ -2139,9 +2305,9 @@ export function PhoneController({
         </div>
       </div>
 
-      {/* Main Tactile Gamepad Deck: Dedicated Left & Right Halves (Zero Overlap!) */}
-      <div className="flex-1 grid grid-cols-2 items-center gap-4 min-h-0">
-        {/* Left Half: Generous Touch Zone for 360° Analog Virtual Joystick */}
+      {/* Main Tactile Gamepad Deck: Joystick Anchored Left, Stacked Up-Down A/B Anchored Right */}
+      <div className="flex-1 grid grid-cols-2 items-center gap-2 min-h-0">
+        {/* Left Half: Generous Touch Zone with Joystick Positioned Comfortably Left */}
         <div
           onPointerDown={onStickPointerDown}
           onPointerMove={onStickPointerMove}
@@ -2149,88 +2315,57 @@ export function PhoneController({
           onPointerCancel={releaseStick}
           onLostPointerCapture={releaseStick}
           onContextMenu={(e) => e.preventDefault()}
-          className="h-full flex flex-col items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
+          className={`h-full flex flex-col justify-center touch-none select-none cursor-grab active:cursor-grabbing ${
+            embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'
+          }`}
         >
-          <div
-            ref={stickZoneRef}
-            className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center pointer-events-none ${
-              embedded ? 'w-32 h-32' : 'w-44 h-44 sm:w-48 sm:h-48'
-            }`}
-            style={{
-              borderColor: stickActive ? me.color.hex : '#2A303D',
-              boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
-            }}
-          >
-            {/* Subtle directional crosshairs */}
-            <div className="absolute inset-4 rounded-full border border-dashed border-white/10" />
-            <div className="absolute w-px h-3/4 bg-white/5" />
-            <div className="absolute h-px w-3/4 bg-white/5" />
-
-            {/* Movable tactile thumbstick knob */}
+          <div className="flex flex-col items-center pointer-events-none">
             <div
-              className={`rounded-full flex items-center justify-center ${
-                embedded ? 'w-14 h-14' : 'w-20 h-20'
+              ref={stickZoneRef}
+              className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center ${
+                embedded ? 'w-32 h-32' : 'w-40 h-40 sm:w-44 sm:h-44'
               }`}
               style={{
-                transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
-                backgroundColor: me.color.hex,
-                boxShadow: `0 6px 0 ${me.color.dark}, 0 10px 20px rgba(0,0,0,0.5)`,
+                borderColor: stickActive ? me.color.hex : '#2A303D',
+                boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
               }}
             >
-              <div className="w-1/2 h-1/2 rounded-full bg-black/20 border border-white/25" />
-            </div>
-          </div>
+              {/* Subtle directional crosshairs */}
+              <div className="absolute inset-4 rounded-full border border-dashed border-white/10" />
+              <div className="absolute w-px h-3/4 bg-white/5" />
+              <div className="absolute h-px w-3/4 bg-white/5" />
 
-          <span className="mt-2 text-[11px] font-semibold text-[#8B95A7] tracking-wide pointer-events-none">
-            {schema.joystickLabel}
-          </span>
-        </div>
-
-        {/* Right Half: Game-Adaptive Action Buttons A & B */}
-        <div
-          onContextMenu={(e) => e.preventDefault()}
-          className="h-full flex items-center justify-center touch-none select-none"
-        >
-          <div className={`flex items-center justify-center ${embedded ? 'gap-3' : 'gap-6'}`}>
-            {/* Secondary Action B */}
-            <div className="flex flex-col items-center mt-4">
-              <label
-                role="button"
-                tabIndex={0}
-                onPointerDown={(e) => onActionDown('b', e)}
-                onPointerUp={(e) => onActionUp('b', e)}
-                onPointerCancel={(e) => onActionUp('b', e)}
-                onLostPointerCapture={(e) => onActionUp('b', e)}
-                onContextMenu={(e) => e.preventDefault()}
-                className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${
-                  embedded ? 'w-20 h-20 text-xs' : 'w-26 h-26 sm:w-28 sm:h-28 text-sm'
+              {/* Movable tactile thumbstick knob */}
+              <div
+                className={`rounded-full flex items-center justify-center ${
+                  embedded ? 'w-14 h-14' : 'w-[74px] h-[74px] sm:w-20 sm:h-20'
                 }`}
                 style={{
-                  backgroundColor: schema.actionB.colorHex,
-                  color: schema.actionB.textColor,
-                  transform: pressedB ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
-                  boxShadow: pressedB
-                    ? `0 2px 0 ${schema.actionB.darkHex}`
-                    : `0 6px 0 ${schema.actionB.darkHex}, 0 10px 20px rgba(0,0,0,0.45)`,
-                  opacity: cdB > 0.05 ? 0.65 : 1,
+                  transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
+                  backgroundColor: me.color.hex,
+                  boxShadow: `0 6px 0 ${me.color.dark}, 0 10px 20px rgba(0,0,0,0.5)`,
                 }}
               >
-                <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
-                <ActionIcon icon={schema.actionB.icon} className="w-5 h-5 mb-0.5 pointer-events-none" />
-                <span className="pointer-events-none">{schema.actionB.label}</span>
-                {cdB > 0.05 && (
-                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none">
-                    {Math.round((1 - cdB) * 100)}%
-                  </span>
-                )}
-              </label>
-              <span className="mt-2 text-[11px] font-medium text-[#8B95A7]">
-                {schema.actionB.sublabel}
-              </span>
+                <div className="w-1/2 h-1/2 rounded-full bg-black/20 border border-white/25" />
+              </div>
             </div>
 
-            {/* Primary Action A */}
-            <div className="flex flex-col items-center -mt-4">
+            <span className="mt-1.5 text-[11px] font-semibold text-[#8B95A7] tracking-wide">
+              {schema.joystickLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* Right Half: Vertical Up-Down Action Buttons (A Above B) Anchored Right */}
+        <div
+          onContextMenu={(e) => e.preventDefault()}
+          className={`h-full flex items-center touch-none select-none ${
+            embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
+          }`}
+        >
+          <div className={`flex flex-col items-center justify-center ${embedded ? 'gap-2.5' : 'gap-2.5 sm:gap-3.5'}`}>
+            {/* Primary Action A (Top) */}
+            <div className="flex flex-col items-center">
               <label
                 role="button"
                 tabIndex={0}
@@ -2240,7 +2375,7 @@ export function PhoneController({
                 onLostPointerCapture={(e) => onActionUp('a', e)}
                 onContextMenu={(e) => e.preventDefault()}
                 className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${
-                  embedded ? 'w-22 h-22 text-xs' : 'w-30 h-30 sm:w-32 sm:h-32 text-base'
+                  embedded ? 'w-[74px] h-[74px] text-xs' : 'w-[92px] h-[92px] sm:w-[106px] sm:h-[106px] text-sm sm:text-base'
                 }`}
                 style={{
                   backgroundColor: schema.actionA.colorHex,
@@ -2248,25 +2383,62 @@ export function PhoneController({
                   transform: pressedA ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
                   boxShadow: pressedA
                     ? `0 2px 0 ${schema.actionA.darkHex}`
-                    : `0 7px 0 ${schema.actionA.darkHex}, 0 12px 24px rgba(0,0,0,0.48)`,
+                    : `0 6px 0 ${schema.actionA.darkHex}, 0 10px 20px rgba(0,0,0,0.48)`,
                   opacity: cdA > 0.05 && room.selectedGameId !== 'turbo-drift' ? 0.72 : 1,
                 }}
               >
                 <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
-                <ActionIcon icon={schema.actionA.icon} className="w-6 h-6 mb-0.5 pointer-events-none" />
-                <span className="pointer-events-none">{schema.actionA.label}</span>
+                <ActionIcon icon={schema.actionA.icon} className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 pointer-events-none" />
+                <span className="pointer-events-none leading-none">{schema.actionA.label}</span>
                 {room.selectedGameId === 'turbo-drift' ? (
-                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none">
+                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
                     {Math.round((1 - cdA) * 100)}%
                   </span>
                 ) : cdA > 0.05 ? (
-                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none">
+                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
                     {Math.round((1 - cdA) * 100)}%
                   </span>
                 ) : null}
               </label>
-              <span className="mt-2 text-[11px] font-medium text-[#8B95A7]">
+              <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
                 {schema.actionA.sublabel}
+              </span>
+            </div>
+
+            {/* Secondary Action B (Bottom) */}
+            <div className="flex flex-col items-center">
+              <label
+                role="button"
+                tabIndex={0}
+                onPointerDown={(e) => onActionDown('b', e)}
+                onPointerUp={(e) => onActionUp('b', e)}
+                onPointerCancel={(e) => onActionUp('b', e)}
+                onLostPointerCapture={(e) => onActionUp('b', e)}
+                onContextMenu={(e) => e.preventDefault()}
+                className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${
+                  embedded ? 'w-[66px] h-[66px] text-[11px]' : 'w-[80px] h-[80px] sm:w-[92px] sm:h-[92px] text-xs sm:text-sm'
+                }`}
+                style={{
+                  backgroundColor: schema.actionB.colorHex,
+                  color: schema.actionB.textColor,
+                  transform: pressedB ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
+                  boxShadow: pressedB
+                    ? `0 2px 0 ${schema.actionB.darkHex}`
+                    : `0 5px 0 ${schema.actionB.darkHex}, 0 9px 18px rgba(0,0,0,0.45)`,
+                  opacity: cdB > 0.05 ? 0.65 : 1,
+                }}
+              >
+                <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
+                <ActionIcon icon={schema.actionB.icon} className="w-4 h-4 sm:w-5 sm:h-5 mb-0.5 pointer-events-none" />
+                <span className="pointer-events-none leading-none">{schema.actionB.label}</span>
+                {cdB > 0.05 && (
+                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
+                    {Math.round((1 - cdB) * 100)}%
+                  </span>
+                )}
+              </label>
+              <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
+                {schema.actionB.sublabel}
               </span>
             </div>
           </div>

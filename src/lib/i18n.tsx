@@ -882,10 +882,11 @@ export function translateServerMessage(msg: string, lang: Language): string {
   if (msg.includes('Only the Room Host')) return '仅房主可以控制大屏或开始游戏。';
   if (
     msg.includes('The host monitor session ended') ||
+    msg.includes('The room was closed') ||
     msg.includes('Host closed') ||
     msg.includes('Room closed')
   ) {
-    return '大屏房主已结束本次游戏房间。';
+    return '房主已关闭本次游戏房间。';
   }
 
   // Haptics test notices

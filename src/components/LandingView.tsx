@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Gamepad2, Monitor, QrCode, Smartphone, Users, ArrowRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Gamepad2, Info, Monitor, Play, QrCode, Smartphone, Users, ArrowRight, X } from 'lucide-react';
 import {
   filterGamesByPlayerMode,
   GAME_CATALOG,
+  getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
 import { GameId, PlayerFilterMode } from '../shared/types';
@@ -23,9 +25,24 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
   const [quickCode, setQuickCode] = useState('');
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
+  const [previewGameId, setPreviewGameId] = useState<GameId | null>(null);
   const filteredGames = filterGamesByPlayerMode(playerFilter).map((g) =>
     getLocalizedGameMeta(g, lang)
   );
+  const previewGame = previewGameId
+    ? getLocalizedGameMeta(getGameMeta(previewGameId), lang)
+    : null;
+
+  useEffect(() => {
+    if (!previewGameId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPreviewGameId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewGameId]);
 
   const handleQuickJoin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,13 +51,13 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
   };
 
   return (
-    <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-[#121419] text-[#F4F6FA] flex flex-col">
       {/* 3-Zone Top Bar Contract */}
       <header className="w-full border-b border-[#242934] bg-[#121419]/95 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-6">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-6">
           <a
             href="#top"
-            className="font-display text-xl font-extrabold tracking-tight text-white whitespace-nowrap shrink-0"
+            className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0"
           >
             {t('JoinStick Arcade', 'JoinStick 街机派对')}
           </a>
@@ -61,12 +78,12 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             </button>
           </nav>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <LanguageToggle />
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            <LanguageToggle compact className="sm:h-9 sm:px-2.5 sm:text-xs" />
             <button
               type="button"
               onClick={() => onHostRoom()}
-              className="tactile-btn px-4 py-2 rounded-lg bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-sm font-semibold whitespace-nowrap shrink-0 shadow-[0_3px_0_#B82E17] cursor-pointer"
+              className="tactile-btn px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 shadow-[0_3px_0_#B82E17] cursor-pointer"
             >
               {t('Host Monitor', '开启大屏房间')}
             </button>
@@ -74,9 +91,9 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
         </div>
       </header>
 
-      <main id="top" className="flex-1">
+      <main id="top" className="flex-1 w-full min-w-0">
         {/* Hero Split */}
-        <section className="max-w-7xl mx-auto px-6 pt-12 pb-16 lg:pt-20 lg:pb-20">
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-12 sm:pt-12 sm:pb-16 lg:pt-20 lg:pb-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-stretch">
             {/* Left Dominant Anchor */}
             <div className="lg:col-span-7 flex flex-col justify-center">
@@ -123,11 +140,11 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             </div>
 
             {/* Right Quick-Join Hardware Console Panel */}
-            <div className="lg:col-span-5 flex flex-col justify-between rounded-2xl bg-[#1A1E26] border border-[#2A303D] p-7">
+            <div className="lg:col-span-5 flex flex-col justify-between rounded-2xl bg-[#1A1E26] border border-[#2A303D] p-5 sm:p-7 min-w-0">
               <div>
-                <div className="flex items-center justify-between text-xs font-medium text-[#9CA3AF] mb-4">
+                <div className="flex items-center justify-between gap-2 text-xs font-medium text-[#9CA3AF] mb-4">
                   <span>{t('Quick Controller Connect', '快速连接手柄')}</span>
-                  <span className="font-mono text-[#FFB800] tabular-nums">
+                  <span className="font-mono text-[#FFB800] tabular-nums shrink-0">
                     {t('1–8 Players', '1–8 名玩家')}
                   </span>
                 </div>
@@ -142,7 +159,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   )}
                 </p>
 
-                <form onSubmit={handleQuickJoin} className="mt-6 flex gap-3">
+                <form onSubmit={handleQuickJoin} className="mt-6 flex gap-2.5 sm:gap-3">
                   <input
                     type="text"
                     maxLength={4}
@@ -150,11 +167,11 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                     onChange={(e) => setQuickCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                     placeholder={t('CODE', '房间码')}
                     aria-label={t('4-letter room code', '4位房间码')}
-                    className="flex-1 min-w-0 h-12 px-4 rounded-xl bg-[#101217] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none font-mono text-xl font-bold tracking-[0.28em] text-center text-white placeholder:text-[#4B5563] uppercase"
+                    className="flex-1 min-w-0 h-12 px-3 sm:px-4 rounded-xl bg-[#101217] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none font-mono text-lg sm:text-xl font-bold tracking-[0.18em] sm:tracking-[0.28em] text-center text-white placeholder:text-[#4B5563] uppercase"
                   />
                   <button
                     type="submit"
-                    className="tactile-btn h-12 px-5 rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-bold text-sm shadow-[0_3px_0_#007FA8] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                    className="tactile-btn h-12 px-4 sm:px-5 rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-bold text-sm shadow-[0_3px_0_#007FA8] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     {t('Connect', '连接')}
                     <ArrowRight className="w-4 h-4" />
@@ -183,8 +200,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
         </section>
 
         {/* Games Cartridge Showcase */}
-        <section id="games" className="border-t border-[#1F242E] bg-[#151820]/70 py-16">
-          <div className="max-w-7xl mx-auto px-6">
+        <section id="games" className="border-t border-[#1F242E] bg-[#151820]/70 py-12 sm:py-16">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 mb-8">
               <div>
                 <h2 className="font-display text-3xl font-extrabold text-white">
@@ -235,9 +252,24 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
               {filteredGames.map((game) => (
                 <article
                   key={game.id}
-                  className="group rounded-2xl bg-[#1A1E26] border border-[#282E3B] overflow-hidden flex flex-col justify-between transition-colors hover:border-[#3A4356]"
+                  className="group rounded-2xl bg-[#1A1E26] border border-[#282E3B] overflow-hidden flex flex-col justify-between transition-colors hover:border-[#00C2FF]/55"
                 >
-                  <div>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setPreviewGameId(game.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setPreviewGameId(game.id);
+                      }
+                    }}
+                    aria-label={t(
+                      `View introduction and rules for ${game.name}`,
+                      `查看「${game.name}」游戏介绍与玩法`
+                    )}
+                    className="cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2FF]"
+                  >
                     <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
                       {!failedImages[game.id] ? (
                         <img
@@ -265,7 +297,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                         <span className="text-[#D1D5DB] tabular-nums">{game.playerModeLabel}</span>
                       </div>
 
-                      <h3 className="mt-1.5 font-display text-2xl font-bold text-white">
+                      <h3 className="mt-1.5 font-display text-2xl font-bold text-white group-hover:text-[#00C2FF] transition-colors">
                         {game.name}
                       </h3>
 
@@ -273,8 +305,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                         {game.description}
                       </p>
 
-                      <div className="mt-4 pt-4 border-t border-[#262C38] flex items-center justify-between text-xs text-[#9CA3AF]">
-                        <span>
+                      <div className="mt-4 pt-4 border-t border-[#262C38] flex items-center justify-between gap-2 text-xs text-[#9CA3AF]">
+                        <span className="truncate">
                           {t('Buttons:', '按键：')}{' '}
                           <strong className="text-white font-semibold">
                             {game.controllerSchema.actionA.label}
@@ -284,6 +316,10 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                             {game.controllerSchema.actionB.label}
                           </strong>
                         </span>
+                        <span className="inline-flex items-center gap-1 text-[#00C2FF] font-semibold shrink-0">
+                          <Info className="w-3.5 h-3.5" />
+                          <span>{t('Details', '玩法介绍')}</span>
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -291,11 +327,14 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   <div className="px-6 pb-6">
                     <button
                       type="button"
-                      onClick={() => onHostRoom(game.id)}
-                      className="tactile-btn w-full h-11 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white font-semibold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onHostRoom(game.id);
+                      }}
+                      className="tactile-btn w-full h-11 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-extrabold text-sm shadow-[0_3px_0_#0A915D] inline-flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      {t(`Host ${game.name}`, `开房玩「${game.name}」`)}
-                      <ArrowRight className="w-4 h-4" />
+                      <Play className="w-4 h-4 fill-current" />
+                      <span>{t('Play', '开始游玩')}</span>
                     </button>
                   </div>
                 </article>
@@ -305,7 +344,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
         </section>
 
         {/* How It Works */}
-        <section id="how-it-works" className="max-w-7xl mx-auto px-6 py-16">
+        <section id="how-it-works" className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
           <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white mb-8">
             {t(
               'From browser to 8-player match in three steps',
@@ -357,7 +396,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
       </main>
 
       <footer className="border-t border-[#1F242E] py-6">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#6B7280]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#6B7280]">
           <span>
             {t(
               'JoinStick Arcade · Multi-Device Browser Party Console',
@@ -382,6 +421,216 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
           </div>
         </div>
       </footer>
+
+      {/* Game Description & Introduction Modal */}
+      <AnimatePresence>
+        {previewGame && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="game-intro-title"
+            onClick={() => setPreviewGameId(null)}
+            className="fixed inset-0 z-50 bg-[#0B0D12]/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 12 }}
+              transition={{ duration: 0.18 }}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-3xl w-full rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl overflow-hidden my-auto"
+            >
+              {/* Modal Header */}
+              <div className="relative flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6 border-b border-[#262C38] bg-[#151820]">
+                <div className="w-full sm:w-44 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
+                  {!failedImages[previewGame.id] ? (
+                    <img
+                      src={previewGame.coverImage}
+                      alt={t(`${previewGame.name} arcade game preview`, `${previewGame.name} 游戏预览`)}
+                      referrerPolicy="no-referrer"
+                      onError={() =>
+                        setFailedImages((prev) => ({ ...prev, [previewGame.id]: true }))
+                      }
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Gamepad2 className="w-8 h-8" style={{ color: previewGame.accentHex }} />
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1 pr-8">
+                  <div className="text-xs font-bold uppercase tracking-wider text-[#00C2FF]">
+                    {previewGame.category} · {previewGame.playerModeLabel}
+                  </div>
+                  <h2
+                    id="game-intro-title"
+                    className="font-display text-2xl sm:text-3xl font-extrabold text-white mt-0.5 truncate"
+                  >
+                    {previewGame.name}
+                  </h2>
+                  <p className="text-sm text-[#D1D5DB] mt-1">{previewGame.tagline}</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewGameId(null)}
+                  aria-label={t('Close game introduction', '关闭游戏介绍')}
+                  className="absolute top-4 right-4 h-9 w-9 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-5 sm:p-6 space-y-5 max-h-[68vh] overflow-y-auto arcade-scrollbar">
+                {/* Game Description */}
+                <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4">
+                  <div className="text-xs font-bold uppercase tracking-wider text-[#FFB800] mb-1.5">
+                    {t('Game Introduction', '游戏简介')}
+                  </div>
+                  <p className="text-sm sm:text-[15px] text-[#E5E7EB] leading-relaxed">
+                    {previewGame.description}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  {/* How to Play Rules */}
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF] mb-3">
+                      {t('How to Play', '玩法规则')}
+                    </h3>
+                    <ul className="space-y-2.5 text-sm text-white">
+                      {previewGame.rules.map((rule, idx) => (
+                        <li key={idx} className="flex items-start gap-2.5 leading-snug">
+                          <span
+                            className="w-6 h-6 rounded-md font-mono text-xs font-black flex items-center justify-center shrink-0 mt-0.5"
+                            style={{
+                              backgroundColor: `${previewGame.accentHex}24`,
+                              color: previewGame.accentHex,
+                            }}
+                          >
+                            {idx + 1}
+                          </span>
+                          <span>{rule}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Phone Controls Preview */}
+                  <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4 flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF] mb-3">
+                        {t('Phone Controls', '手机手柄按键')}
+                      </h3>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-[#1E232D] border-2 border-[#2F3747] flex items-center justify-center shrink-0">
+                            <div className="w-3.5 h-3.5 rounded-full bg-white/90" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[11px] text-[#9CA3AF]">
+                              {t('Left Joystick', '左侧摇杆')}
+                            </div>
+                            <div className="text-sm font-bold text-white truncate">
+                              {previewGame.controllerSchema.joystickLabel}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-full font-display font-extrabold text-xs flex items-center justify-center shrink-0"
+                            style={{
+                              backgroundColor: previewGame.controllerSchema.actionA.colorHex,
+                              color: previewGame.controllerSchema.actionA.textColor,
+                            }}
+                          >
+                            A
+                          </div>
+                          <div className="min-w-0">
+                            <div
+                              className="text-sm font-extrabold leading-tight"
+                              style={{ color: previewGame.controllerSchema.actionA.colorHex }}
+                            >
+                              {previewGame.controllerSchema.actionA.label}
+                            </div>
+                            <div className="text-xs text-[#A5AEBD] truncate">
+                              {previewGame.controllerSchema.actionA.sublabel}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-full font-display font-extrabold text-xs flex items-center justify-center shrink-0"
+                            style={{
+                              backgroundColor: previewGame.controllerSchema.actionB.colorHex,
+                              color: previewGame.controllerSchema.actionB.textColor,
+                            }}
+                          >
+                            B
+                          </div>
+                          <div className="min-w-0">
+                            <div
+                              className="text-sm font-extrabold leading-tight"
+                              style={{ color: previewGame.controllerSchema.actionB.colorHex }}
+                            >
+                              {previewGame.controllerSchema.actionB.label}
+                            </div>
+                            <div className="text-xs text-[#A5AEBD] truncate">
+                              {previewGame.controllerSchema.actionB.sublabel}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="mt-4 pt-3 border-t border-[#242934] text-xs text-[#A5AEBD] leading-relaxed">
+                      <strong className="text-white">{t('Tip:', '小提示：')}</strong>{' '}
+                      {previewGame.controllerSchema.controlTip}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-5 sm:px-6 py-4 bg-[#151820] border-t border-[#262C38] flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-[#9CA3AF]">
+                  <span>{previewGame.settingLabel}: </span>
+                  <strong className="text-white font-mono">
+                    {previewGame.settingOptions.map((o) => o.label).join(' / ')}
+                  </strong>
+                </div>
+
+                <div className="flex items-center gap-2.5 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewGameId(null)}
+                    className="h-11 px-5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-sm font-bold text-white cursor-pointer"
+                  >
+                    {t('Close', '关闭')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetId = previewGame.id;
+                      setPreviewGameId(null);
+                      onHostRoom(targetId);
+                    }}
+                    className="tactile-btn h-11 px-6 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-extrabold text-sm shadow-[0_3px_0_#0A915D] inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>{t('Play', '开始游玩')}</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
