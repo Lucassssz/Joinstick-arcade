@@ -73,6 +73,7 @@ const BATTLE_BASS: (number | null)[] = [
 
 class ArcadeAudioEngine {
   private ctx: AudioContext | null = null;
+  private masterNode: AudioNode | null = null;
   private muted = false;
 
   // BGM sequencer state
@@ -83,18 +84,43 @@ class ArcadeAudioEngine {
   private nextNoteTime = 0;
   private stepIndex = 0;
   private gestureListenerBound = false;
+  private visibilityListenerBound = false;
+  private stateListeners = new Set<() => void>();
+
+  private notifyStateListeners(): void {
+    for (const cb of this.stateListeners) {
+      try {
+        cb();
+      } catch {
+        // Ignore subscriber errors
+      }
+    }
+  }
+
+  public isAudioBlocked(): boolean {
+    if (this.muted || !this.bgmMode) return false;
+    return !this.ctx || this.ctx.state !== 'running';
+  }
+
+  public subscribeAudioState(cb: () => void): () => void {
+    this.stateListeners.add(cb);
+    return () => {
+      this.stateListeners.delete(cb);
+    };
+  }
 
   public setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.ctx && this.bgmGain) {
       const now = this.ctx.currentTime;
       this.bgmGain.gain.cancelScheduledValues(now);
-      this.bgmGain.gain.setTargetAtTime(muted ? 0 : 0.9, now, 0.04);
+      this.bgmGain.gain.setTargetAtTime(muted ? 0 : 1.15, now, 0.04);
     }
     if (!muted && this.bgmMode) {
       this.unlock();
       this.ensureSchedulerRunning();
     }
+    this.notifyStateListeners();
   }
 
   public isMuted(): boolean {
@@ -107,7 +133,11 @@ class ArcadeAudioEngine {
 
   public setBgm(mode: BgmMode): void {
     if (this.bgmMode === mode) {
-      if (mode) this.ensureSchedulerRunning();
+      if (mode) {
+        this.unlock();
+        this.ensureSchedulerRunning();
+        if (this.isAudioBlocked()) this.bindGestureWakeup();
+      }
       return;
     }
     this.bgmMode = mode;
@@ -115,6 +145,7 @@ class ArcadeAudioEngine {
 
     if (!mode) {
       this.stopScheduler();
+      this.notifyStateListeners();
       return;
     }
 
@@ -124,11 +155,36 @@ class ArcadeAudioEngine {
       this.ensureSchedulerRunning();
     }
     this.bindGestureWakeup();
+    this.bindVisibilityWakeup();
+    this.notifyStateListeners();
+  }
+
+  private bindVisibilityWakeup(): void {
+    if (this.visibilityListenerBound || typeof document === 'undefined') return;
+    this.visibilityListenerBound = true;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && this.bgmMode && !this.muted) {
+        this.unlock();
+        this.ensureSchedulerRunning();
+        if (this.isAudioBlocked()) {
+          this.bindGestureWakeup();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
   }
 
   private bindGestureWakeup(): void {
     if (this.gestureListenerBound || typeof window === 'undefined') return;
     this.gestureListenerBound = true;
+    const events = ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown'] as const;
+    const detach = () => {
+      for (const evt of events) {
+        window.removeEventListener(evt, wakeup, true);
+      }
+      this.gestureListenerBound = false;
+    };
     const wakeup = () => {
       this.unlock();
       if (this.ctx && this.ctx.state === 'running') {
@@ -136,13 +192,13 @@ class ArcadeAudioEngine {
           this.nextNoteTime = Math.max(this.nextNoteTime, this.ctx.currentTime + 0.03);
           this.ensureSchedulerRunning();
         }
-        window.removeEventListener('pointerdown', wakeup);
-        window.removeEventListener('keydown', wakeup);
-        this.gestureListenerBound = false;
+        detach();
+        this.notifyStateListeners();
       }
     };
-    window.addEventListener('pointerdown', wakeup, { passive: true });
-    window.addEventListener('keydown', wakeup, { passive: true });
+    for (const evt of events) {
+      window.addEventListener(evt, wakeup, { capture: true, passive: true });
+    }
   }
 
   public unlock(): void {
@@ -153,27 +209,66 @@ class ArcadeAudioEngine {
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
+        // Gentle master limiter/compressor keeps BGM audible & punchy on tablet speakers without clipping
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.value = -16;
+        comp.knee.value = 18;
+        comp.ratio.value = 4;
+        comp.attack.value = 0.004;
+        comp.release.value = 0.14;
+        comp.connect(this.ctx.destination);
+        this.masterNode = comp;
+
         this.bgmGain = this.ctx.createGain();
-        this.bgmGain.gain.value = this.muted ? 0 : 0.9;
-        this.bgmGain.connect(this.ctx.destination);
+        this.bgmGain.gain.value = this.muted ? 0 : 1.15;
+        this.bgmGain.connect(this.masterNode);
+
+        this.ctx.onstatechange = () => {
+          if (this.ctx?.state === 'running') {
+            if (this.bgmMode) {
+              this.nextNoteTime = Math.max(this.nextNoteTime, this.ctx.currentTime + 0.03);
+              this.ensureSchedulerRunning();
+            }
+          } else if (this.bgmMode && !this.muted) {
+            this.bindGestureWakeup();
+          }
+          this.notifyStateListeners();
+        };
       }
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx
-        .resume()
-        .then(() => {
-          if (this.bgmMode) {
-            this.nextNoteTime = (this.ctx?.currentTime ?? 0) + 0.04;
-            this.ensureSchedulerRunning();
-          }
-        })
-        .catch(() => {});
+
+    if (this.ctx) {
+      // Prime iOS/iPadOS WebKit hardware audio channel synchronously inside gesture
+      try {
+        const silentBuf = this.ctx.createBuffer(1, 1, 22050);
+        const src = this.ctx.createBufferSource();
+        src.buffer = silentBuf;
+        src.connect(this.ctx.destination);
+        src.start(0);
+      } catch {
+        // Ignore if context forbids buffer start before resume
+      }
+
+      if (this.ctx.state !== 'running') {
+        this.ctx
+          .resume()
+          .then(() => {
+            if (this.bgmMode) {
+              this.nextNoteTime = (this.ctx?.currentTime ?? 0) + 0.04;
+              this.ensureSchedulerRunning();
+            }
+            this.notifyStateListeners();
+          })
+          .catch(() => {
+            this.notifyStateListeners();
+          });
+      }
     }
   }
 
   private ensureSchedulerRunning(): void {
     if (!this.bgmMode || typeof window === 'undefined') return;
-    this.unlock();
+    if (!this.ctx) this.unlock();
     if (!this.ctx) return;
     if (this.bgmTimer !== null) return;
 
@@ -303,14 +398,14 @@ class ArcadeAudioEngine {
     const melodyMidi = LOBBY_MELODY[step];
     if (melodyMidi !== null) {
       const freq = midiToFreq(melodyMidi);
-      this.scheduleBgmTone(freq, time, stepDur * 1.45, 'triangle', 0.068);
-      this.scheduleBgmTone(freq * 2, time, stepDur * 0.65, 'sine', 0.02);
+      this.scheduleBgmTone(freq, time, stepDur * 1.45, 'triangle', 0.085);
+      this.scheduleBgmTone(freq * 2, time, stepDur * 0.65, 'sine', 0.025);
     }
 
     // 2. Bouncy bassline
     const bassMidi = LOBBY_BASS[step];
     if (bassMidi !== null) {
-      this.scheduleBgmTone(midiToFreq(bassMidi), time, stepDur * 1.6, 'triangle', 0.085);
+      this.scheduleBgmTone(midiToFreq(bassMidi), time, stepDur * 1.6, 'triangle', 0.105);
     }
 
     // 3. Light warm chord pad stabs
@@ -415,7 +510,7 @@ class ArcadeAudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
     osc.connect(gain);
-    gain.connect(this.ctx.destination);
+    gain.connect(this.masterNode ?? this.ctx.destination);
     osc.start(now);
     osc.stop(now + duration + 0.02);
   }
