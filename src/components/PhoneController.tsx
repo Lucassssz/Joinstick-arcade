@@ -19,11 +19,13 @@ import {
   LogOut,
   Maximize2,
   Minimize2,
+  Move,
   Paintbrush,
   Pause,
   RefreshCw,
   RotateCcw,
   Shield,
+  SlidersHorizontal,
   Target,
   Vibrate,
   Waves,
@@ -32,6 +34,14 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import {
+  clampControllerPrefs,
+  ControllerPrefs,
+  ControllerSettingsOverlay,
+  DEFAULT_CONTROLLER_PREFS,
+  loadControllerPrefs,
+  saveControllerPrefs,
+} from './ControllerSettingsOverlay';
 import {
   filterGamesByPlayerMode,
   getGameMeta,
@@ -208,10 +218,26 @@ export function PhoneController({
   const [impactPulse, setImpactPulse] = useState<'none' | 'light' | 'heavy'>('none');
   const [passHostOpen, setPassHostOpen] = useState(false);
   const [hostToast, setHostToast] = useState<string | null>(null);
+  const [controllerPrefs, setControllerPrefs] = useState<ControllerPrefs>(() => loadControllerPrefs());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [repositionMode, setRepositionMode] = useState(false);
+  const [floatingOriginOffset, setFloatingOriginOffset] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDisconnectedRef = useRef<boolean>(false);
   const prevIsHostRef = useRef<boolean>(false);
   const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
+  const dragTargetRef = useRef<{
+    target: 'stick' | 'buttons';
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+  } | null>(null);
 
   // Viewport tracking for automatic CSS landscape rotation on portrait phones
   const [viewport, setViewport] = useState(() => ({
@@ -262,6 +288,24 @@ export function PhoneController({
   useEffect(() => {
     isCssRotatedRef.current = isCssRotated;
   }, [isCssRotated]);
+  useEffect(() => {
+    controllerPrefsRef.current = controllerPrefs;
+  }, [controllerPrefs]);
+
+  const updateControllerPrefs = (next: ControllerPrefs) => {
+    const clamped = clampControllerPrefs(next);
+    controllerPrefsRef.current = clamped;
+    setControllerPrefs(clamped);
+    saveControllerPrefs(clamped);
+  };
+
+  const handleResetControllerPrefs = () => {
+    updateControllerPrefs(DEFAULT_CONTROLLER_PREFS);
+    if (!embedded) {
+      controllerHaptics.unlock();
+      vibrate(35, { fromUserGesture: true, intensity: 'light', force: true });
+    }
+  };
 
   // Listen to resize, orientationchange, and fullscreen changes
   useEffect(() => {
@@ -394,6 +438,7 @@ export function PhoneController({
     lastSentRef.current = '';
     setStickActive(false);
     setKnobOffset({ x: 0, y: 0 });
+    setFloatingOriginOffset({ x: 0, y: 0 });
     setPressedA(false);
     setPressedB(false);
     sendCurrentInput(true);
@@ -402,6 +447,7 @@ export function PhoneController({
   useEffect(() => {
     resetControlsState();
     setPassHostOpen(false);
+    setRepositionMode(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.status, room?.selectedGameId, room?.hostPlayerId]);
 
@@ -706,10 +752,10 @@ export function PhoneController({
   const me = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
   const gameMeta = room ? getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang) : null;
 
-  // --- Multi-touch Analog Joystick Pointer Handlers (Rotation-Aware!) ---
-  const maxStickRadius = embedded ? 38 : 54;
-
+  // --- Multi-touch Analog Joystick Pointer Handlers (Rotation-Aware + Calibrated!) ---
   const updateStickFromPointer = (clientX: number, clientY: number) => {
+    const activePrefs = controllerPrefsRef.current;
+    const maxStickRadius = embedded ? 38 : activePrefs.stickRadius;
     const dxScreen = clientX - stickCenterRef.current.x;
     const dyScreen = clientY - stickCenterRef.current.y;
 
@@ -726,7 +772,7 @@ export function PhoneController({
     const oy = Math.sin(angle) * clamped;
 
     const normMag = clamped / maxStickRadius;
-    const deadzone = 0.08;
+    const deadzone = embedded ? 0.08 : activePrefs.deadzone;
     const adjMag = normMag < deadzone ? 0 : (normMag - deadzone) / (1 - deadzone);
 
     inputRef.current.dx = Math.cos(angle) * adjMag;
@@ -736,6 +782,7 @@ export function PhoneController({
   };
 
   const onStickPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (repositionMode || settingsOpen) return;
     if (stickPointerId.current !== null && stickPointerId.current !== e.pointerId) return;
     // Do NOT call e.preventDefault() here — `.gamepad-surface` uses CSS `touch-action: none`,
     // and keeping pointerdown non-cancelled allows Android Chrome & iOS Safari to grant sticky
@@ -752,10 +799,23 @@ export function PhoneController({
     stickPointerId.current = e.pointerId;
     const rect = stickZoneRef.current?.getBoundingClientRect();
     if (rect) {
-      stickCenterRef.current = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      };
+      const baseCx = rect.left + rect.width / 2;
+      const baseCy = rect.top + rect.height / 2;
+      if (!embedded && controllerPrefsRef.current.floatingStick) {
+        const dxScreen = e.clientX - baseCx;
+        const dyScreen = e.clientY - baseCy;
+        const localDx = isCssRotatedRef.current ? dyScreen : dxScreen;
+        const localDy = isCssRotatedRef.current ? -dxScreen : dyScreen;
+        const clampedOx = Math.max(-44, Math.min(84, localDx));
+        const clampedOy = Math.max(-44, Math.min(44, localDy));
+        setFloatingOriginOffset({ x: clampedOx, y: clampedOy });
+        const screenDx = isCssRotatedRef.current ? -clampedOy : clampedOx;
+        const screenDy = isCssRotatedRef.current ? clampedOx : clampedOy;
+        stickCenterRef.current = { x: baseCx + screenDx, y: baseCy + screenDy };
+      } else {
+        setFloatingOriginOffset({ x: 0, y: 0 });
+        stickCenterRef.current = { x: baseCx, y: baseCy };
+      }
     } else {
       stickCenterRef.current = { x: e.clientX, y: e.clientY };
     }
@@ -764,6 +824,7 @@ export function PhoneController({
   };
 
   const onStickPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (repositionMode || settingsOpen) return;
     if (stickPointerId.current !== e.pointerId) return;
     updateStickFromPointer(e.clientX, e.clientY);
   };
@@ -773,13 +834,66 @@ export function PhoneController({
     stickPointerId.current = null;
     setStickActive(false);
     setKnobOffset({ x: 0, y: 0 });
+    setFloatingOriginOffset({ x: 0, y: 0 });
     inputRef.current.dx = 0;
     inputRef.current.dy = 0;
     sendCurrentInput(true);
   };
 
+  // --- Direct Drag-to-Reposition Calibration Handlers ---
+  const startRepositionDrag = (
+    target: 'stick' | 'buttons',
+    e: React.PointerEvent<HTMLElement>
+  ) => {
+    if (!repositionMode) return;
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    const cur = controllerPrefsRef.current;
+    dragTargetRef.current = {
+      target,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: target === 'stick' ? cur.stickOffsetX : cur.buttonsOffsetX,
+      origY: target === 'stick' ? cur.stickOffsetY : cur.buttonsOffsetY,
+    };
+  };
+
+  const moveRepositionDrag = (e: React.PointerEvent<HTMLElement>) => {
+    const drag = dragTargetRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    e.stopPropagation();
+    const dxScreen = e.clientX - drag.startX;
+    const dyScreen = e.clientY - drag.startY;
+    const localDx = isCssRotatedRef.current ? dyScreen : dxScreen;
+    const localDy = isCssRotatedRef.current ? -dxScreen : dyScreen;
+    const cur = controllerPrefsRef.current;
+    if (drag.target === 'stick') {
+      updateControllerPrefs({
+        ...cur,
+        stickOffsetX: drag.origX + localDx,
+        stickOffsetY: drag.origY + localDy,
+      });
+    } else {
+      updateControllerPrefs({
+        ...cur,
+        buttonsOffsetX: drag.origX + localDx,
+        buttonsOffsetY: drag.origY + localDy,
+      });
+    }
+  };
+
+  const endRepositionDrag = (e: React.PointerEvent<HTMLElement>) => {
+    if (dragTargetRef.current?.pointerId === e.pointerId) {
+      dragTargetRef.current = null;
+    }
+  };
+
   // --- Multi-touch Action Button Handlers ---
   const onActionDown = (which: 'a' | 'b', e: React.PointerEvent<HTMLElement>) => {
+    if (repositionMode || settingsOpen) return;
     // Do NOT call e.preventDefault() — lets `<label><input switch /></label>` natively trigger
     // iOS 18 Taptic Engine AND lets Android Chrome grant trusted user activation for navigator.vibrate().
     try {
@@ -885,6 +999,27 @@ export function PhoneController({
             </div>
           </div>
         )}
+        <ControllerSettingsOverlay
+          open={settingsOpen && !embedded}
+          prefs={controllerPrefs}
+          onChange={updateControllerPrefs}
+          onReset={handleResetControllerPrefs}
+          onEnterDragMode={
+            room && (room.status === 'PLAYING' || room.status === 'COUNTDOWN')
+              ? () => {
+                  resetControlsState();
+                  setSettingsOpen(false);
+                  setRepositionMode(true);
+                }
+              : undefined
+          }
+          onClose={() => setSettingsOpen(false)}
+          accentHex={selfPlayer?.color.hex ?? '#00C2FF'}
+          actionALabel={gameMeta?.controllerSchema.actionA.label ?? 'A'}
+          actionBLabel={gameMeta?.controllerSchema.actionB.label ?? 'B'}
+          actionAHex={gameMeta?.controllerSchema.actionA.colorHex ?? '#FF4D2E'}
+          actionBHex={gameMeta?.controllerSchema.actionB.colorHex ?? '#00C2FF'}
+        />
       </>
     );
 
@@ -1480,6 +1615,20 @@ export function PhoneController({
 
             <div className="flex items-center gap-1.5 shrink-0">
               {!embedded && <LanguageToggle compact />}
+              {!embedded && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetControlsState();
+                    setSettingsOpen(true);
+                  }}
+                  aria-label={t('Controller settings', '手柄设置')}
+                  title={t('Joystick & Button Calibration', '摇杆与按键位置校准')}
+                  className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#00C2FF] flex items-center justify-center cursor-pointer"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </button>
+              )}
               {otherConnectedHumans.length > 0 && (
                 <button
                   type="button"
@@ -1721,6 +1870,20 @@ export function PhoneController({
 
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact className="h-9" />}
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => {
+                  resetControlsState();
+                  setSettingsOpen(true);
+                }}
+                aria-label={t('Controller settings', '手柄设置')}
+                title={t('Joystick & Button Calibration', '摇杆与按键位置校准')}
+                className="h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#00C2FF] flex items-center justify-center cursor-pointer"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+              </button>
+            )}
             {!embedded && (
               <button
                 type="button"
@@ -2073,6 +2236,20 @@ export function PhoneController({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact />}
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => {
+                  resetControlsState();
+                  setSettingsOpen(true);
+                }}
+                aria-label={t('Controller settings', '手柄设置')}
+                title={t('Joystick & Button Calibration', '摇杆与按键位置校准')}
+                className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#00C2FF] flex items-center justify-center cursor-pointer"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+            )}
             <span className="font-mono text-xs font-bold text-[#10D98B] shrink-0 tabular-nums">
               {readyHumans.length}/{connectedHumans.length} {t('Ready', '已准备')}
             </span>
@@ -2201,9 +2378,75 @@ export function PhoneController({
   const cdA = Math.max(0, Math.min(1, me.cooldownA));
   const cdB = Math.max(0, Math.min(1, me.cooldownB));
 
+  const firstAction: 'a' | 'b' = !embedded && controllerPrefs.swapAB ? 'b' : 'a';
+  const secondAction: 'a' | 'b' = firstAction === 'a' ? 'b' : 'a';
+
+  const renderActionButton = (which: 'a' | 'b', extraClass = '') => {
+    const isA = which === 'a';
+    const spec = isA ? schema.actionA : schema.actionB;
+    const pressed = isA ? pressedA : pressedB;
+    const cd = isA ? cdA : cdB;
+    const sizeClass = embedded
+      ? isA
+        ? 'w-[74px] h-[74px] text-xs'
+        : 'w-[66px] h-[66px] text-[11px]'
+      : isA
+      ? 'w-[92px] h-[92px] sm:w-[106px] sm:h-[106px] text-sm sm:text-base'
+      : 'w-[80px] h-[80px] sm:w-[92px] sm:h-[92px] text-xs sm:text-sm';
+
+    const showCharge = isA
+      ? room.selectedGameId === 'turbo-drift' || cd > 0.05
+      : cd > 0.05;
+
+    return (
+      <div key={which} className={`flex flex-col items-center ${extraClass}`}>
+        <label
+          role="button"
+          tabIndex={0}
+          onPointerDown={(e) => onActionDown(which, e)}
+          onPointerUp={(e) => onActionUp(which, e)}
+          onPointerCancel={(e) => onActionUp(which, e)}
+          onLostPointerCapture={(e) => onActionUp(which, e)}
+          onContextMenu={(e) => e.preventDefault()}
+          className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${sizeClass}`}
+          style={{
+            backgroundColor: spec.colorHex,
+            color: spec.textColor,
+            transform: pressed ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
+            boxShadow: pressed
+              ? `0 2px 0 ${spec.darkHex}`
+              : `0 ${isA ? 6 : 5}px 0 ${spec.darkHex}, 0 ${isA ? 10 : 9}px 18px rgba(0,0,0,0.46)`,
+            opacity: isA
+              ? cd > 0.05 && room.selectedGameId !== 'turbo-drift'
+                ? 0.72
+                : 1
+              : cd > 0.05
+              ? 0.65
+              : 1,
+          }}
+        >
+          <IosHapticSwitch enabled={!embedded && hapticsEnabled && !repositionMode} />
+          <ActionIcon
+            icon={spec.icon}
+            className={`${isA ? 'w-5 h-5 sm:w-6 sm:h-6' : 'w-4 h-4 sm:w-5 sm:h-5'} mb-0.5 pointer-events-none`}
+          />
+          <span className="pointer-events-none leading-none">{spec.label}</span>
+          {showCharge && (
+            <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
+              {Math.round((1 - cd) * 100)}%
+            </span>
+          )}
+        </label>
+        <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
+          {spec.sublabel}
+        </span>
+      </div>
+    );
+  };
+
   return renderConnectedShell(
     <div
-      className="flex flex-col justify-between h-full w-full max-w-6xl mx-auto transition-transform duration-75"
+      className="relative flex flex-col justify-between h-full w-full max-w-6xl mx-auto transition-transform duration-75"
       style={{
         transform:
           impactPulse === 'heavy'
@@ -2220,94 +2463,153 @@ export function PhoneController({
         borderRadius: '14px',
       }}
     >
-      {/* Compact Top Status Bar */}
-      <div className="flex items-center justify-between gap-3 h-10 shrink-0 px-1">
-        <div className="flex items-center gap-2 min-w-0">
-          <span
-            className="w-7 h-7 rounded-md font-mono font-bold text-xs flex items-center justify-center shrink-0"
-            style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
-          >
-            P{me.slotIndex + 1}
-          </span>
-          <div className="min-w-0 leading-tight">
-            <div className="text-xs font-bold text-white truncate">{me.name}</div>
-            <div className="text-[11px] font-mono text-[#9CA3AF] truncate tabular-nums">
-              {translateGameText(me.statText, lang)}
-            </div>
+      {/* Compact Top Status Bar OR Live Drag-Reposition Toolbar */}
+      {repositionMode && !embedded ? (
+        <div className="flex items-center justify-between gap-2 h-10 shrink-0 px-2 rounded-xl bg-[#1A1E26] border border-[#00C2FF]/60 z-30">
+          <div className="flex items-center gap-2 min-w-0">
+            <Move className="w-4 h-4 text-[#00C2FF] shrink-0" />
+            <span className="text-xs font-bold text-white truncate">
+              {t(
+                'Drag the joystick or A/B buttons to fit your thumbs',
+                '直接拖动摇杆或 A/B 按键到最顺手的位置'
+              )}
+            </span>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] font-semibold text-[#9CA3AF]">{gameMeta.name}</span>
-          {!embedded && <LanguageToggle compact />}
-          {isRoomHost && room.status === 'PLAYING' && (
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={() => wsRef.current?.send({ type: 'game:pause', paused: true })}
-              aria-label={t('Pause game', '暂停游戏')}
-              title={t('Pause Game (Host)', '暂停游戏（房主）')}
-              className="min-h-[34px] px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#FFB800] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+              onClick={handleResetControllerPrefs}
+              className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
             >
-              <Pause className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('Pause', '暂停')}</span>
+              <RotateCcw className="w-3 h-3" />
+              <span>{t('Reset', '重置')}</span>
             </button>
-          )}
-          {!wsConnected && (
-            <span className="text-[11px] font-semibold text-[#FFB800]">
-              {t('Reconnecting...', '正在重连...')}
-            </span>
-          )}
-          {!embedded && (
             <button
               type="button"
               onClick={() => {
-                const next = !hapticsEnabled;
-                setHapticsEnabled(next);
-                controllerHaptics.setEnabled(next);
-                if (next) {
-                  controllerHaptics.unlock();
-                  vibrate([90, 45, 120], {
-                    fromUserGesture: true,
-                    intensity: 'heavy',
-                    force: true,
-                  });
-                }
+                setRepositionMode(false);
+                setSettingsOpen(true);
               }}
-              aria-label={hapticsEnabled ? t('Disable haptics', '关闭震动') : t('Enable haptics', '开启震动')}
-              title={hapticsEnabled ? t('Haptics On', '震动已开启') : t('Haptics Off', '震动已关闭')}
-              className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer ${
-                hapticsEnabled
-                  ? 'bg-[#1E232D] hover:bg-[#242A36] text-[#10D98B]'
-                  : 'bg-[#1E232D] hover:bg-[#242A36] text-[#6B7280]'
-              }`}
+              className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#00C2FF] inline-flex items-center gap-1 cursor-pointer"
             >
-              <Vibrate className="w-4 h-4" />
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>{t('Sliders', '详细设置')}</span>
             </button>
-          )}
-          {!embedded && (
             <button
               type="button"
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+              onClick={() => setRepositionMode(false)}
+              className="h-7 px-3 rounded-lg bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>{t('Done', '完成')}</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3 h-10 shrink-0 px-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className="w-7 h-7 rounded-md font-mono font-bold text-xs flex items-center justify-center shrink-0"
+              style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+            >
+              P{me.slotIndex + 1}
+            </span>
+            <div className="min-w-0 leading-tight">
+              <div className="text-xs font-bold text-white truncate">{me.name}</div>
+              <div className="text-[11px] font-mono text-[#9CA3AF] truncate tabular-nums">
+                {translateGameText(me.statText, lang)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden sm:inline">
+              {gameMeta.name}
+            </span>
+            {!embedded && <LanguageToggle compact />}
+            {isRoomHost && room.status === 'PLAYING' && (
+              <button
+                type="button"
+                onClick={() => wsRef.current?.send({ type: 'game:pause', paused: true })}
+                aria-label={t('Pause game', '暂停游戏')}
+                title={t('Pause Game (Host)', '暂停游戏（房主）')}
+                className="min-h-[34px] px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#FFB800] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Pause className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{t('Pause', '暂停')}</span>
+              </button>
+            )}
+            {!wsConnected && (
+              <span className="text-[11px] font-semibold text-[#FFB800]">
+                {t('Reconnecting...', '正在重连...')}
+              </span>
+            )}
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => {
+                  resetControlsState();
+                  setSettingsOpen(true);
+                }}
+                aria-label={t('Controller settings & calibration', '手柄位置与按键校准')}
+                title={t('Calibrate Joystick & Buttons', '校准摇杆与按键位置')}
+                className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#00C2FF] flex items-center justify-center cursor-pointer"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+              </button>
+            )}
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !hapticsEnabled;
+                  setHapticsEnabled(next);
+                  controllerHaptics.setEnabled(next);
+                  if (next) {
+                    controllerHaptics.unlock();
+                    vibrate([90, 45, 120], {
+                      fromUserGesture: true,
+                      intensity: 'heavy',
+                      force: true,
+                    });
+                  }
+                }}
+                aria-label={hapticsEnabled ? t('Disable haptics', '关闭震动') : t('Enable haptics', '开启震动')}
+                title={hapticsEnabled ? t('Haptics On', '震动已开启') : t('Haptics Off', '震动已关闭')}
+                className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer ${
+                  hapticsEnabled
+                    ? 'bg-[#1E232D] hover:bg-[#242A36] text-[#10D98B]'
+                    : 'bg-[#1E232D] hover:bg-[#242A36] text-[#6B7280]'
+                }`}
+              >
+                <Vibrate className="w-4 h-4" />
+              </button>
+            )}
+            {!embedded && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+                className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleLeave}
+              aria-label={t('Leave room', '退出房间')}
               className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
             >
-              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              <LogOut className="w-4 h-4" />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleLeave}
-            aria-label={t('Leave room', '退出房间')}
-            className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Main Tactile Gamepad Deck: Joystick Anchored Left, Stacked Up-Down A/B Anchored Right */}
+      {/* Main Tactile Gamepad Deck: Joystick Anchored Left, Customizable Up-Down/Angled/Horizontal A/B Anchored Right */}
       <div className="flex-1 grid grid-cols-2 items-center gap-2 min-h-0">
-        {/* Left Half: Generous Touch Zone with Joystick Positioned Comfortably Left */}
+        {/* Left Half: Generous Touch Zone with Calibrated Virtual Joystick */}
         <div
           onPointerDown={onStickPointerDown}
           onPointerMove={onStickPointerMove}
@@ -2315,11 +2617,30 @@ export function PhoneController({
           onPointerCancel={releaseStick}
           onLostPointerCapture={releaseStick}
           onContextMenu={(e) => e.preventDefault()}
-          className={`h-full flex flex-col justify-center touch-none select-none cursor-grab active:cursor-grabbing ${
-            embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'
-          }`}
+          className={`h-full flex flex-col justify-center touch-none select-none ${
+            repositionMode ? '' : 'cursor-grab active:cursor-grabbing'
+          } ${embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'}`}
         >
-          <div className="flex flex-col items-center pointer-events-none">
+          <div
+            onPointerDown={(e) => startRepositionDrag('stick', e)}
+            onPointerMove={moveRepositionDrag}
+            onPointerUp={endRepositionDrag}
+            onPointerCancel={endRepositionDrag}
+            onLostPointerCapture={endRepositionDrag}
+            className={`relative flex flex-col items-center ${
+              repositionMode
+                ? 'pointer-events-auto cursor-move rounded-3xl p-2 border-2 border-dashed border-[#00C2FF] bg-[#00C2FF]/10'
+                : 'pointer-events-none'
+            }`}
+            style={{
+              transform: `translate3d(${(embedded ? 0 : controllerPrefs.stickOffsetX) + floatingOriginOffset.x}px, ${(embedded ? 0 : controllerPrefs.stickOffsetY) + floatingOriginOffset.y}px, 0) scale(${embedded ? 1 : controllerPrefs.stickScale})`,
+            }}
+          >
+            {repositionMode && (
+              <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#00C2FF] text-[#0B1219] font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
+                {t('Drag Stick', '拖动摇杆')}
+              </span>
+            )}
             <div
               ref={stickZoneRef}
               className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center ${
@@ -2356,91 +2677,52 @@ export function PhoneController({
           </div>
         </div>
 
-        {/* Right Half: Vertical Up-Down Action Buttons (A Above B) Anchored Right */}
+        {/* Right Half: Calibrated Action Buttons A & B */}
         <div
           onContextMenu={(e) => e.preventDefault()}
           className={`h-full flex items-center touch-none select-none ${
             embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
           }`}
         >
-          <div className={`flex flex-col items-center justify-center ${embedded ? 'gap-2.5' : 'gap-2.5 sm:gap-3.5'}`}>
-            {/* Primary Action A (Top) */}
-            <div className="flex flex-col items-center">
-              <label
-                role="button"
-                tabIndex={0}
-                onPointerDown={(e) => onActionDown('a', e)}
-                onPointerUp={(e) => onActionUp('a', e)}
-                onPointerCancel={(e) => onActionUp('a', e)}
-                onLostPointerCapture={(e) => onActionUp('a', e)}
-                onContextMenu={(e) => e.preventDefault()}
-                className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${
-                  embedded ? 'w-[74px] h-[74px] text-xs' : 'w-[92px] h-[92px] sm:w-[106px] sm:h-[106px] text-sm sm:text-base'
-                }`}
-                style={{
-                  backgroundColor: schema.actionA.colorHex,
-                  color: schema.actionA.textColor,
-                  transform: pressedA ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
-                  boxShadow: pressedA
-                    ? `0 2px 0 ${schema.actionA.darkHex}`
-                    : `0 6px 0 ${schema.actionA.darkHex}, 0 10px 20px rgba(0,0,0,0.48)`,
-                  opacity: cdA > 0.05 && room.selectedGameId !== 'turbo-drift' ? 0.72 : 1,
-                }}
-              >
-                <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
-                <ActionIcon icon={schema.actionA.icon} className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 pointer-events-none" />
-                <span className="pointer-events-none leading-none">{schema.actionA.label}</span>
-                {room.selectedGameId === 'turbo-drift' ? (
-                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
-                    {Math.round((1 - cdA) * 100)}%
-                  </span>
-                ) : cdA > 0.05 ? (
-                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
-                    {Math.round((1 - cdA) * 100)}%
-                  </span>
-                ) : null}
-              </label>
-              <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
-                {schema.actionA.sublabel}
+          <div
+            onPointerDown={(e) => startRepositionDrag('buttons', e)}
+            onPointerMove={moveRepositionDrag}
+            onPointerUp={endRepositionDrag}
+            onPointerCancel={endRepositionDrag}
+            onLostPointerCapture={endRepositionDrag}
+            className={`relative flex items-center justify-center ${
+              !embedded && controllerPrefs.buttonLayout === 'horizontal' ? 'flex-row' : 'flex-col'
+            } ${
+              repositionMode
+                ? 'cursor-move rounded-3xl p-2.5 border-2 border-dashed border-[#FF4D2E] bg-[#FF4D2E]/10'
+                : ''
+            }`}
+            style={{
+              gap: embedded ? '10px' : `${controllerPrefs.buttonGap}px`,
+              transform: `translate3d(${embedded ? 0 : controllerPrefs.buttonsOffsetX}px, ${embedded ? 0 : controllerPrefs.buttonsOffsetY}px, 0) scale(${embedded ? 1 : controllerPrefs.buttonsScale})`,
+            }}
+          >
+            {repositionMode && (
+              <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#FF4D2E] text-white font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
+                {t('Drag Buttons', '拖动按键')}
               </span>
-            </div>
-
-            {/* Secondary Action B (Bottom) */}
-            <div className="flex flex-col items-center">
-              <label
-                role="button"
-                tabIndex={0}
-                onPointerDown={(e) => onActionDown('b', e)}
-                onPointerUp={(e) => onActionUp('b', e)}
-                onPointerCancel={(e) => onActionUp('b', e)}
-                onLostPointerCapture={(e) => onActionUp('b', e)}
-                onContextMenu={(e) => e.preventDefault()}
-                className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${
-                  embedded ? 'w-[66px] h-[66px] text-[11px]' : 'w-[80px] h-[80px] sm:w-[92px] sm:h-[92px] text-xs sm:text-sm'
-                }`}
-                style={{
-                  backgroundColor: schema.actionB.colorHex,
-                  color: schema.actionB.textColor,
-                  transform: pressedB ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
-                  boxShadow: pressedB
-                    ? `0 2px 0 ${schema.actionB.darkHex}`
-                    : `0 5px 0 ${schema.actionB.darkHex}, 0 9px 18px rgba(0,0,0,0.45)`,
-                  opacity: cdB > 0.05 ? 0.65 : 1,
-                }}
-              >
-                <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
-                <ActionIcon icon={schema.actionB.icon} className="w-4 h-4 sm:w-5 sm:h-5 mb-0.5 pointer-events-none" />
-                <span className="pointer-events-none leading-none">{schema.actionB.label}</span>
-                {cdB > 0.05 && (
-                  <span className="text-[10px] font-mono opacity-90 tabular-nums pointer-events-none mt-0.5">
-                    {Math.round((1 - cdB) * 100)}%
-                  </span>
-                )}
-              </label>
-              <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
-                {schema.actionB.sublabel}
-              </span>
-            </div>
+            )}
+            {renderActionButton(
+              firstAction,
+              !embedded && controllerPrefs.buttonLayout === 'angled'
+                ? '-translate-x-3.5'
+                : !embedded && controllerPrefs.buttonLayout === 'horizontal'
+                ? 'mt-3'
+                : ''
+            )}
+            {renderActionButton(
+              secondAction,
+              !embedded && controllerPrefs.buttonLayout === 'angled'
+                ? 'translate-x-3.5'
+                : !embedded && controllerPrefs.buttonLayout === 'horizontal'
+                ? '-mt-3'
+                : ''
+            )}
           </div>
         </div>
       </div>
