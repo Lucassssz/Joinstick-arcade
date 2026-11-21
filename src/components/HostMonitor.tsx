@@ -2,17 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   ArrowLeft,
+  ArrowRight,
+  Bot,
   Check,
   Copy,
+  Crown,
   ExternalLink,
   Gamepad2,
   Pause,
   Play,
+  Plus,
+  QrCode,
   RotateCcw,
+  Settings2,
   Smartphone,
   Trophy,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
 import {
   filterGamesByPlayerMode,
@@ -22,6 +29,7 @@ import {
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
+  BotDifficulty,
   GameId,
   GameSnapshot,
   MAX_PLAYERS_PER_ROOM,
@@ -40,6 +48,30 @@ interface HostMonitorProps {
 }
 
 const HOST_SESSION_KEY = 'joinstick_host_session';
+
+const DIFFICULTY_OPTIONS: { id: BotDifficulty; label: string; color: string; hint: string }[] = [
+  { id: 'chill', label: 'Chill', color: '#10D98B', hint: 'Relaxed pace & forgiving timing' },
+  { id: 'arcade', label: 'Arcade', color: '#00C2FF', hint: 'Balanced intermediate challenge' },
+  { id: 'spicy', label: 'Spicy', color: '#FF4D2E', hint: 'Fast reactions & sharp abilities' },
+];
+
+const NEXT_DIFFICULTY: Record<BotDifficulty, BotDifficulty> = {
+  chill: 'arcade',
+  arcade: 'spicy',
+  spicy: 'chill',
+};
+
+function difficultyColor(d?: BotDifficulty): string {
+  if (d === 'chill') return '#10D98B';
+  if (d === 'spicy') return '#FF4D2E';
+  return '#00C2FF';
+}
+
+function difficultyLabel(d?: BotDifficulty): string {
+  if (d === 'chill') return 'Chill';
+  if (d === 'spicy') return 'Spicy';
+  return 'Arcade';
+}
 
 export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMonitorProps) {
   const [wsConnected, setWsConnected] = useState(false);
@@ -95,6 +127,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             break;
           case 'room:snapshot':
             setRoom(msg.room);
+            setErrorMsg(null);
             break;
           case 'game:tick':
             if (msg.snapshot) {
@@ -146,7 +179,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     if (!room?.code) return;
     const url = getJoinUrl(room.code);
     QRCode.toDataURL(url, {
-      width: 240,
+      width: 280,
       margin: 2,
       color: { dark: '#121419', light: '#F8FAFC' },
     })
@@ -154,9 +187,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       .catch(() => setQrDataUrl(''));
   }, [room?.code]);
 
-  // 60fps Canvas Render Loop when in active match / countdown / paused / results
+  // 60fps Canvas Render Loop when in active match / briefing / countdown / paused / results
   useEffect(() => {
-    if (!room || room.status === 'LOBBY') return;
+    if (!room || room.status === 'SETUP' || room.status === 'LOBBY') return;
     let rafId = 0;
 
     const renderLoop = () => {
@@ -208,6 +241,38 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     }
   };
 
+  const handleAddBot = () => {
+    arcadeAudio.unlock();
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:add-bot', difficulty: room?.botDifficulty });
+  };
+
+  const handleRemoveBot = (botId: string) => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:remove-bot', botId });
+  };
+
+  const handleSetBotDifficulty = (difficulty: BotDifficulty, botId?: string) => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:set-bot-difficulty', difficulty, botId });
+  };
+
+  const handleSetHostPlayer = (playerId: string) => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:set-host-player', playerId });
+  };
+
+  const handleEnterGameRoom = () => {
+    arcadeAudio.unlock();
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:enter-game-room' });
+  };
+
+  const handleReturnSetup = () => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:return-setup' });
+  };
+
   const handleStartMatch = () => {
     arcadeAudio.unlock();
     setErrorMsg(null);
@@ -237,17 +302,26 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
   const selectedGame = getGameMeta(room.selectedGameId);
   const joinUrl = getJoinUrl(room.code);
-  const connectedCount = room.players.filter((p) => p.connected).length;
+  const humans = room.players.filter((p) => !p.isBot);
+  const connectedHumans = humans.filter((p) => p.connected);
+  const bots = room.players.filter((p) => p.isBot);
+  const readyHumans = connectedHumans.filter((p) => p.ready);
+  const unreadyHumans = connectedHumans.filter((p) => !p.ready);
+  const canStartMatch = room.players.length > 0 && unreadyHumans.length === 0;
+  const isRoomFull = room.players.length >= MAX_PLAYERS_PER_ROOM;
 
   // =========================================================================
-  // VIEW A: HOST LOBBY (QR Code + 3 Game Cartridges + 8-Player Roster)
+  // VIEW A1: ROOM SETUP STAGE (QR / Join Code + Assign Bots + Choose Host)
   // =========================================================================
-  if (room.status === 'LOBBY') {
+  if (room.status === 'SETUP') {
+    const activeDifficultyMeta =
+      DIFFICULTY_OPTIONS.find((d) => d.id === room.botDifficulty) ?? DIFFICULTY_OPTIONS[1];
+
     return (
       <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col">
-        {/* Compact Lobby Header */}
+        {/* Setup Header */}
         <header className="border-b border-[#232833] bg-[#151820]">
-          <div className="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between gap-6">
+          <div className="max-w-[1360px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
               <button
                 type="button"
@@ -260,9 +334,341 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               <span className="font-display text-lg font-extrabold text-white whitespace-nowrap shrink-0">
                 JoinStick Monitor
               </span>
-              <span className="hidden sm:inline text-xs font-medium text-[#9CA3AF] whitespace-nowrap">
+              <div className="hidden md:flex items-center gap-2 text-xs font-medium text-[#9CA3AF]">
+                <span className="text-white font-semibold">1. Room Setup</span>
+                <span className="text-[#4B5563]">→</span>
+                <span>2. Game Room</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setTestDrawerOpen((v) => !v)}
+                className={`tactile-btn h-10 px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+                  testDrawerOpen
+                    ? 'bg-[#00C2FF] text-[#0B1219]'
+                    : 'bg-[#212633] hover:bg-[#2B3242] text-white border border-[#323A4C]'
+                }`}
+              >
+                <Smartphone className="w-4 h-4" />
+                Test Controller
+              </button>
+
+              <button
+                type="button"
+                onClick={toggleMute}
+                aria-label={muted ? 'Unmute audio' : 'Mute audio'}
+                className="h-10 w-10 rounded-xl bg-[#212633] hover:bg-[#2B3242] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
+              >
+                {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Main 2-Column Setup Workspace */}
+        <main className="flex-1 max-w-[1360px] w-full mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
+          {/* LEFT COLUMN (5 cols): QR Code & 4-Letter Room Code */}
+          <section className="lg:col-span-5 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-7 flex flex-col">
+            <div className="flex items-center justify-between text-xs font-medium text-[#9CA3AF]">
+              <span className="inline-flex items-center gap-1.5 text-white font-semibold">
+                <QrCode className="w-4 h-4 text-[#00C2FF]" />
+                Scan or Enter Code to Join
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
+                />
+                {wsConnected ? 'Live Server' : 'Reconnecting'}
+              </span>
+            </div>
+
+            <div className="mt-5 bg-[#F8FAFC] rounded-2xl p-4 flex items-center justify-center aspect-square max-w-[290px] w-full mx-auto">
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt={`QR code to join room ${room.code}`}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="text-xs text-[#6B7280]">Generating QR...</div>
+              )}
+            </div>
+
+            <div className="mt-6 text-center">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#9CA3AF]">
+                Room Code
+              </div>
+              <div className="mt-1.5 font-mono text-5xl font-extrabold tracking-[0.26em] text-white tabular-nums pl-[0.26em]">
+                {room.code}
+              </div>
+              <p className="mt-2 text-xs text-[#9CA3AF]">
+                Open this site on any phone, tap <strong className="text-white">Join Room</strong>,
+                or scan the QR code above.
+              </p>
+            </div>
+
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={handleCopyJoinLink}
+                className="h-11 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-white inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {copied ? <Check className="w-4 h-4 text-[#10D98B]" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'Link Copied!' : 'Copy Join Link'}
+              </button>
+              <a
+                href={joinUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-11 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-[#00C2FF] inline-flex items-center justify-center gap-1.5"
+              >
+                Open Controller Tab
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </div>
+          </section>
+
+          {/* RIGHT COLUMN (7 cols): Players, Robot Assignment, Difficulty & Host Selection */}
+          <section className="lg:col-span-7 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-7 flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-5 border-b border-[#262D3B]">
+              <div>
+                <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
+                  Assemble Your Room
+                </h1>
+                <p className="mt-1 text-sm text-[#9CA3AF]">
+                  Wait for players to connect, assign optional AI robots, and choose who leads as
+                  Room Host.
+                </p>
+              </div>
+              <div className="font-mono text-xs font-semibold text-[#9CA3AF] whitespace-nowrap tabular-nums">
+                <strong className="text-white">{room.players.length}</strong> / {MAX_PLAYERS_PER_ROOM}{' '}
+                Seats · {humans.length} Human{humans.length === 1 ? '' : 's'} · {bots.length} Bot
+                {bots.length === 1 ? '' : 's'}
+              </div>
+            </div>
+
+            {/* Robot Controls Bar: + Add Robot & Chill / Arcade / Spicy Difficulty */}
+            <div className="mt-5 p-4 rounded-xl bg-[#13161D] border border-[#262C39] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleAddBot}
+                  disabled={isRoomFull}
+                  className="tactile-btn h-11 px-4 rounded-xl bg-[#222938] hover:bg-[#2C3548] disabled:opacity-40 disabled:cursor-not-allowed border border-[#384359] text-sm font-bold text-white inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 text-[#00C2FF]" />
+                  <Bot className="w-4 h-4 text-[#00C2FF]" />
+                  <span>Add Robot</span>
+                </button>
+                <div className="text-xs text-[#9CA3AF] leading-snug">
+                  <div className="text-white font-semibold">Manual AI Bots</div>
+                  <div>Each press adds 1 robot ({bots.length} assigned)</div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:items-end gap-1">
+                <div
+                  role="radiogroup"
+                  aria-label="Robot difficulty"
+                  className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#0D1016] border border-[#242B38]"
+                >
+                  {DIFFICULTY_OPTIONS.map((opt) => {
+                    const active = room.botDifficulty === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        onClick={() => handleSetBotDifficulty(opt.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+                          active
+                            ? 'text-[#0B1016]'
+                            : 'text-[#9CA3AF] hover:text-white'
+                        }`}
+                        style={active ? { backgroundColor: opt.color } : undefined}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="text-[11px] text-[#8B95A7]">{activeDifficultyMeta.hint}</span>
+              </div>
+            </div>
+
+            {/* 8-Slot Roster Grid */}
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {Array.from({ length: MAX_PLAYERS_PER_ROOM }, (_, slotIdx) => {
+                const player = room.players.find((p) => p.slotIndex === slotIdx);
+                if (!player) {
+                  return (
+                    <div
+                      key={slotIdx}
+                      className="h-14 px-3.5 rounded-xl bg-[#13161D] border border-dashed border-[#262C39] flex items-center justify-between text-xs text-[#566073]"
+                    >
+                      <span className="font-mono font-semibold">P{slotIdx + 1}</span>
+                      <span>Empty seat</span>
+                    </div>
+                  );
+                }
+
+                const isHost = !player.isBot && room.hostPlayerId === player.id;
+
+                return (
+                  <div
+                    key={player.id}
+                    className={`h-14 px-3.5 rounded-xl border flex items-center justify-between gap-2 ${
+                      isHost
+                        ? 'bg-[#232631] border-[#FFB800]/60'
+                        : 'bg-[#212734] border-[#30384A]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className="w-7 h-7 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0"
+                        style={{
+                          backgroundColor: player.color.hex,
+                          color: player.color.textOnColor,
+                        }}
+                      >
+                        P{player.slotIndex + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {player.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
+                          <span className="text-sm font-semibold text-white truncate">
+                            {player.name}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#9CA3AF]">
+                          {player.isBot
+                            ? 'AI Robot · Auto-Ready'
+                            : !player.connected
+                            ? 'Reconnecting...'
+                            : isHost
+                            ? 'Room Host'
+                            : 'Phone Connected'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {player.isBot ? (
+                        <>
+                          <button
+                            type="button"
+                            title="Cycle robot difficulty"
+                            onClick={() =>
+                              handleSetBotDifficulty(
+                                NEXT_DIFFICULTY[player.botDifficulty ?? room.botDifficulty],
+                                player.id
+                              )
+                            }
+                            className="h-7 px-2 rounded-md bg-[#141821] hover:bg-[#1C2230] border border-[#2C3445] text-[11px] font-bold cursor-pointer"
+                            style={{ color: difficultyColor(player.botDifficulty ?? room.botDifficulty) }}
+                          >
+                            {difficultyLabel(player.botDifficulty ?? room.botDifficulty)}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${player.name}`}
+                            title={`Remove ${player.name}`}
+                            onClick={() => handleRemoveBot(player.id)}
+                            className="h-7 w-7 rounded-md bg-[#181C26] hover:bg-[#FF4D2E]/20 text-[#9CA3AF] hover:text-[#FF7A63] flex items-center justify-center cursor-pointer"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : isHost ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#FFB800]/15 text-[#FFB800] text-xs font-bold">
+                          <Crown className="w-3.5 h-3.5" />
+                          Host
+                        </span>
+                      ) : player.connected ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSetHostPlayer(player.id)}
+                          className="h-7 px-2.5 rounded-md bg-[#161B24] hover:bg-[#2A3244] border border-[#30384A] text-[11px] font-semibold text-[#D1D5DB] hover:text-white cursor-pointer"
+                        >
+                          Make Host
+                        </button>
+                      ) : (
+                        <span className="text-xs font-semibold text-[#FFB800]">Offline</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {errorMsg && (
+              <div className="mt-4 p-3 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-xs text-[#FF9B8A]">
+                {errorMsg}
+              </div>
+            )}
+
+            {/* Primary CTA to advance into the real Game Room */}
+            <div className="mt-6 pt-5 border-t border-[#262D3B] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <p className="text-xs text-[#9CA3AF] leading-relaxed max-w-md">
+                Everything settled? Enter the Game Room to choose from all 20 games. Matches start
+                once every player taps <strong className="text-white">Ready</strong> on their phone.
+              </p>
+
+              <button
+                type="button"
+                onClick={handleEnterGameRoom}
+                disabled={room.players.length === 0}
+                className="tactile-btn min-h-[52px] px-7 py-3.5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-base shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <span>Enter Game Room</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
+              </button>
+            </div>
+          </section>
+        </main>
+
+        <TestControllerDrawer
+          roomCode={room.code}
+          open={testDrawerOpen}
+          onClose={() => setTestDrawerOpen(false)}
+        />
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // VIEW A2: REAL GAME ROOM (20 Game Cartridges + Ready Check + Robot Controls)
+  // =========================================================================
+  if (room.status === 'LOBBY') {
+    return (
+      <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col">
+        {/* Game Room Header */}
+        <header className="border-b border-[#232833] bg-[#151820]">
+          <div className="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={handleReturnSetup}
+                className="min-h-[40px] px-3.5 rounded-lg bg-[#1F2430] hover:bg-[#293040] text-sm font-semibold text-white inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Settings2 className="w-4 h-4 text-[#00C2FF]" />
+                Room Setup
+              </button>
+              <button
+                type="button"
+                onClick={handleLeaveHost}
+                className="min-h-[40px] px-3 rounded-lg bg-[#1A1E28] hover:bg-[#262C3A] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Home
+              </button>
+              <span className="hidden md:inline text-xs font-medium text-[#9CA3AF] whitespace-nowrap pl-1">
                 Room <strong className="font-mono text-white">{room.code}</strong> ·{' '}
-                {connectedCount}/{MAX_PLAYERS_PER_ROOM} Players
+                {room.players.length}/{MAX_PLAYERS_PER_ROOM} Players
+                {bots.length > 0 ? ` (${bots.length} Bot${bots.length === 1 ? '' : 's'})` : ''}
               </span>
             </div>
 
@@ -292,69 +698,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           </div>
         </header>
 
-        {/* Main 12-Column Lobby Grid */}
+        {/* Main 12-Column Game Room Grid */}
         <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-7 grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
-          {/* LEFT COLUMN (3 cols): QR Code & Room Pairing Hardware Card */}
-          <section className="lg:col-span-3 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-6 flex flex-col">
-            <div className="flex items-center justify-between text-xs font-medium text-[#9CA3AF]">
-              <span>Scan to Join</span>
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
-                />
-                {wsConnected ? 'Live' : 'Reconnecting'}
-              </span>
-            </div>
-
-            <div className="mt-4 bg-[#F8FAFC] rounded-xl p-3.5 flex items-center justify-center aspect-square">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`QR code to join room ${room.code}`}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="text-xs text-[#6B7280]">Generating QR...</div>
-              )}
-            </div>
-
-            <div className="mt-5 text-center">
-              <div className="text-xs font-medium text-[#9CA3AF]">Room Code</div>
-              <div className="mt-1 font-mono text-4xl font-extrabold tracking-[0.22em] text-white tabular-nums">
-                {room.code}
-              </div>
-            </div>
-
-            <div className="mt-5 grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={handleCopyJoinLink}
-                className="h-10 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-white inline-flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-[#10D98B]" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? 'Copied!' : 'Copy Link'}
-              </button>
-              <a
-                href={joinUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-10 rounded-xl bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-[#00C2FF] inline-flex items-center justify-center gap-1.5"
-              >
-                Open Tab
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            </div>
-          </section>
-
-          {/* CENTER COLUMN (6 cols): Game Cartridge Selector & Rules */}
-          <section className="lg:col-span-6 space-y-5">
+          {/* LEFT/CENTER COLUMN (8 cols): 20-Game Cartridge Selector & Rules */}
+          <section className="lg:col-span-8 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
                 <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
-                  Select an Arcade Game
+                  Game Room · Choose a Game
                 </h1>
                 <p className="mt-1 text-sm text-[#9CA3AF]">
-                  Filter by player count — all connected phones adapt automatically.
+                  Pick any of the 20 arcade titles — connected phones adapt automatically once
+                  everyone readies up.
                 </p>
               </div>
               <span className="font-mono text-xs font-semibold text-[#9CA3AF] whitespace-nowrap tabular-nums">
@@ -412,12 +767,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   }
                   className="text-xs font-medium text-[#00C2FF] hover:text-white transition-colors whitespace-nowrap cursor-pointer"
                 >
-                  Match lobby ({room.players.length}P)
+                  Match room ({room.players.length}P)
                 </button>
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[415px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[425px] overflow-y-auto pr-1">
               {filterGamesByPlayerMode(playerFilter).map((game) => {
                 const isSelected = room.selectedGameId === game.id;
                 return (
@@ -557,12 +912,83 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             </div>
           </section>
 
-          {/* RIGHT COLUMN (3 cols): 8-Slot Player Roster & Start CTA */}
-          <section className="lg:col-span-3 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-6 flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-lg font-bold text-white">Players</h2>
+          {/* RIGHT COLUMN (4 cols): Ready Check Roster, Robot Controls & Strict Start CTA */}
+          <section className="lg:col-span-4 rounded-2xl bg-[#1A1E26] border border-[#282F3D] p-6 flex flex-col">
+            {/* Compact Join Code Bar */}
+            <div className="flex items-center justify-between gap-2 pb-4 mb-4 border-b border-[#262D3B]">
+              <div>
+                <div className="text-[11px] font-medium text-[#9CA3AF]">Room Code</div>
+                <div className="font-mono text-2xl font-extrabold tracking-[0.2em] text-white tabular-nums">
+                  {room.code}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyJoinLink}
+                  className="h-9 px-3 rounded-lg bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-[#10D98B]" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? 'Copied' : 'Link'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReturnSetup}
+                  className="h-9 px-3 rounded-lg bg-[#242A36] hover:bg-[#2F3747] text-xs font-semibold text-[#00C2FF] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  QR / Host
+                </button>
+              </div>
+            </div>
+
+            {/* + Add Robot & Chill / Arcade / Spicy Difficulty right in Lobby Roster */}
+            <div className="p-3 rounded-xl bg-[#13161D] border border-[#262C39] mb-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={handleAddBot}
+                  disabled={isRoomFull}
+                  className="tactile-btn h-9 px-3 rounded-lg bg-[#222938] hover:bg-[#2C3548] disabled:opacity-40 disabled:cursor-not-allowed border border-[#384359] text-xs font-bold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-[#00C2FF]" />
+                  <Bot className="w-3.5 h-3.5 text-[#00C2FF]" />
+                  <span>Add Robot</span>
+                </button>
+
+                <div
+                  role="radiogroup"
+                  aria-label="Lobby robot difficulty"
+                  className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#0D1016] border border-[#242B38]"
+                >
+                  {DIFFICULTY_OPTIONS.map((opt) => {
+                    const active = room.botDifficulty === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        onClick={() => handleSetBotDifficulty(opt.id)}
+                        className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                          active ? 'text-[#0B1016]' : 'text-[#9CA3AF] hover:text-white'
+                        }`}
+                        style={active ? { backgroundColor: opt.color } : undefined}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-base font-bold text-white">Ready Check</h2>
               <span className="font-mono text-xs font-semibold text-[#9CA3AF] tabular-nums">
-                {room.players.length} / {MAX_PLAYERS_PER_ROOM}
+                {connectedHumans.length > 0
+                  ? `${readyHumans.length}/${connectedHumans.length} Phones Ready`
+                  : `${bots.length} Bot${bots.length === 1 ? '' : 's'} Ready`}
               </span>
             </div>
 
@@ -576,17 +1002,23 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       className="h-11 px-3 rounded-xl bg-[#13161D] border border-dashed border-[#262C39] flex items-center justify-between text-xs text-[#566073]"
                     >
                       <span className="font-mono">P{slotIdx + 1}</span>
-                      <span>Waiting for phone...</span>
+                      <span>Empty slot</span>
                     </div>
                   );
                 }
 
+                const isHost = !player.isBot && room.hostPlayerId === player.id;
+
                 return (
                   <div
                     key={player.id}
-                    className="h-11 px-3 rounded-xl bg-[#212734] border border-[#30384A] flex items-center justify-between gap-2"
+                    className={`h-11 px-3 rounded-xl border flex items-center justify-between gap-2 ${
+                      player.ready && player.connected
+                        ? 'bg-[#1D2828] border-[#10D98B]/40'
+                        : 'bg-[#212734] border-[#30384A]'
+                    }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span
                         className="w-6 h-6 rounded-md font-mono text-[11px] font-bold flex items-center justify-center shrink-0"
                         style={{
@@ -596,28 +1028,76 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       >
                         P{player.slotIndex + 1}
                       </span>
+                      {player.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
+                      {isHost && <Crown className="w-3.5 h-3.5 text-[#FFB800] shrink-0" />}
                       <span className="text-sm font-semibold text-white truncate">
                         {player.name}
                       </span>
                     </div>
-                    <span
-                      className={`text-xs font-semibold shrink-0 ${
-                        !player.connected
-                          ? 'text-[#FFB800]'
-                          : player.ready
-                          ? 'text-[#10D98B]'
-                          : 'text-[#9CA3AF]'
-                      }`}
-                    >
-                      {!player.connected ? 'Offline' : player.ready ? 'Ready' : 'Joined'}
-                    </span>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {player.isBot ? (
+                        <>
+                          <button
+                            type="button"
+                            title="Cycle robot difficulty"
+                            onClick={() =>
+                              handleSetBotDifficulty(
+                                NEXT_DIFFICULTY[player.botDifficulty ?? room.botDifficulty],
+                                player.id
+                              )
+                            }
+                            className="h-6 px-1.5 rounded bg-[#141821] hover:bg-[#1C2230] border border-[#2C3445] text-[10px] font-bold cursor-pointer"
+                            style={{ color: difficultyColor(player.botDifficulty ?? room.botDifficulty) }}
+                          >
+                            {difficultyLabel(player.botDifficulty ?? room.botDifficulty)}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${player.name}`}
+                            title={`Remove ${player.name}`}
+                            onClick={() => handleRemoveBot(player.id)}
+                            className="h-6 w-6 rounded bg-[#181C26] hover:bg-[#FF4D2E]/20 text-[#9CA3AF] hover:text-[#FF7A63] flex items-center justify-center cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <span
+                          className={`text-xs font-semibold inline-flex items-center gap-1 ${
+                            !player.connected
+                              ? 'text-[#FFB800]'
+                              : player.ready
+                              ? 'text-[#10D98B]'
+                              : 'text-[#FFB800]'
+                          }`}
+                        >
+                          {player.connected && player.ready && <Check className="w-3.5 h-3.5" />}
+                          {!player.connected
+                            ? 'Offline'
+                            : player.ready
+                            ? 'Ready'
+                            : 'Not Ready'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
+            {unreadyHumans.length > 0 && (
+              <div className="mt-4 p-3 rounded-xl bg-[#FFB800]/10 border border-[#FFB800]/30 text-xs text-[#FCD34D] leading-snug">
+                Waiting for{' '}
+                <strong className="text-white">
+                  {unreadyHumans.map((p) => p.name).join(', ')}
+                </strong>{' '}
+                to tap <strong>Ready</strong> on their phone controller.
+              </div>
+            )}
+
             {errorMsg && (
-              <div className="mt-4 p-3 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-xs text-[#FF9B8A]">
+              <div className="mt-3 p-3 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-xs text-[#FF9B8A]">
                 {errorMsg}
               </div>
             )}
@@ -625,11 +1105,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             <button
               type="button"
               onClick={handleStartMatch}
-              disabled={room.players.length === 0}
-              className="tactile-btn mt-5 w-full min-h-[52px] px-5 py-3.5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-sm xl:text-base shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2.5 cursor-pointer"
+              disabled={!canStartMatch}
+              className="tactile-btn mt-4 w-full min-h-[52px] px-5 py-3.5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-sm xl:text-base shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2.5 cursor-pointer"
             >
               <Play className="w-4 h-4 fill-current shrink-0" />
-              <span className="truncate">Start {selectedGame.name}</span>
+              <span className="truncate">
+                {canStartMatch
+                  ? `Start ${selectedGame.name}`
+                  : room.players.length === 0
+                  ? 'Add Players or Robots'
+                  : 'Waiting for All Ready...'}
+              </span>
             </button>
 
             {room.players.length === 0 && (
@@ -654,7 +1140,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   }
 
   // =========================================================================
-  // VIEW B: ACTIVE 60FPS GAME MONITOR STAGE (COUNTDOWN / PLAYING / PAUSED / RESULTS)
+  // VIEW B: ACTIVE 60FPS GAME MONITOR STAGE (BRIEFING / COUNTDOWN / PLAYING / PAUSED / RESULTS)
   // =========================================================================
   return (
     <div className="h-screen bg-[#0D0F14] text-white flex flex-col overflow-hidden">
@@ -681,6 +1167,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   className="w-2.5 h-2.5 rounded-sm shrink-0"
                   style={{ backgroundColor: p.color.hex }}
                 />
+                {p.isBot && <Bot className="w-3 h-3 text-[#00C2FF] shrink-0" />}
                 <span className="font-semibold text-white">{p.name}</span>
                 <span className="font-mono text-[#9CA3AF] tabular-nums">{p.statText}</span>
               </div>
@@ -731,7 +1218,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
             className="h-9 px-3 rounded-lg bg-[#212633] hover:bg-[#2C3344] text-xs font-semibold text-[#D1D5DB] whitespace-nowrap cursor-pointer"
           >
-            Lobby
+            Game Room
           </button>
         </div>
       </header>
@@ -892,7 +1379,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
                       className="h-11 px-4 rounded-xl bg-[#222734] hover:bg-[#2C3344] text-xs font-semibold text-[#D1D5DB] cursor-pointer"
                     >
-                      Back to Lobby
+                      Back to Game Room
                     </button>
                     <button
                       type="button"
@@ -965,36 +1452,40 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   {selectedGame.name} · Final Standings
                 </p>
 
-                <div className="mt-5 space-y-2 text-left">
-                  {room.rankings.map((entry) => (
-                    <div
-                      key={entry.playerId}
-                      className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#12151C] border border-[#262C39]"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="font-mono text-sm font-bold text-[#FFB800] w-6 tabular-nums">
-                          #{entry.rank}
-                        </span>
-                        <span
-                          className="w-7 h-7 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0"
-                          style={{
-                            backgroundColor: entry.color.hex,
-                            color: entry.color.textOnColor,
-                          }}
-                        >
-                          P{entry.slotIndex + 1}
-                        </span>
-                        <span className="font-semibold text-white truncate">{entry.name}</span>
-                      </div>
+                <div className="mt-5 space-y-2 text-left max-h-[280px] overflow-y-auto pr-1">
+                  {room.rankings.map((entry) => {
+                    const isBotEntry = room.players.find((p) => p.id === entry.playerId)?.isBot;
+                    return (
+                      <div
+                        key={entry.playerId}
+                        className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#12151C] border border-[#262C39]"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="font-mono text-sm font-bold text-[#FFB800] w-6 tabular-nums">
+                            #{entry.rank}
+                          </span>
+                          <span
+                            className="w-7 h-7 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0"
+                            style={{
+                              backgroundColor: entry.color.hex,
+                              color: entry.color.textOnColor,
+                            }}
+                          >
+                            P{entry.slotIndex + 1}
+                          </span>
+                          {isBotEntry && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
+                          <span className="font-semibold text-white truncate">{entry.name}</span>
+                        </div>
 
-                      <div className="text-right shrink-0">
-                        <span className="font-mono text-sm font-bold text-white tabular-nums">
-                          {entry.score} pts
-                        </span>
-                        <span className="text-xs text-[#9CA3AF] ml-2">· {entry.highlight}</span>
+                        <div className="text-right shrink-0">
+                          <span className="font-mono text-sm font-bold text-white tabular-nums">
+                            {entry.score} pts
+                          </span>
+                          <span className="text-xs text-[#9CA3AF] ml-2">· {entry.highlight}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="mt-6 flex items-center justify-center gap-3">

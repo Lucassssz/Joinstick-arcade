@@ -15,6 +15,17 @@ import { gridRunnersModule } from './gridRunners.ts';
 import { ricochetTanksModule } from './ricochetTanks.ts';
 import { turboStrikerModule } from './turboStriker.ts';
 import { paintRushModule } from './paintRush.ts';
+import { laserGauntletModule } from './laserGauntlet.ts';
+import { vaultHeistModule } from './vaultHeist.ts';
+import { hyperPongModule } from './hyperPong.ts';
+import { bladeDuelModule } from './bladeDuel.ts';
+import { cannonSiegeModule } from './cannonSiege.ts';
+import { crownHeistModule } from './crownHeist.ts';
+import { freezeTagModule } from './freezeTag.ts';
+import { ghostHuntModule } from './ghostHunt.ts';
+import { meteorSwarmModule } from './meteorSwarm.ts';
+import { hookShotModule } from './hookShot.ts';
+import { gravityFlipModule } from './gravityFlip.ts';
 
 export interface ServerPlayerInputState {
   id: string;
@@ -22,6 +33,7 @@ export interface ServerPlayerInputState {
   name: string;
   color: PlayerColorSpec;
   connected: boolean;
+  isBot?: boolean;
   input: ControllerInput;
   prevA: boolean;
   prevB: boolean;
@@ -69,4 +81,15 @@ export const SERVER_GAMES: Record<GameId, ServerGameModule<any>> = {
   'ricochet-tanks': ricochetTanksModule,
   'turbo-striker': turboStrikerModule,
   'paint-rush': paintRushModule,
+  'laser-gauntlet': laserGauntletModule,
+  'vault-heist': vaultHeistModule,
+  'hyper-pong': hyperPongModule,
+  'blade-duel': bladeDuelModule,
+  'cannon-siege': cannonSiegeModule,
+  'crown-heist': crownHeistModule,
+  'freeze-tag': freezeTagModule,
+  'ghost-hunt': ghostHuntModule,
+  'meteor-swarm': meteorSwarmModule,
+  'hook-shot': hookShotModule,
+  'gravity-flip': gravityFlipModule,
 };

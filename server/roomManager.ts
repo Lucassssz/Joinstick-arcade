@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import {
   MAX_PLAYERS_PER_ROOM,
   PLAYER_PALETTE,
+  type BotDifficulty,
   type ClientMessage,
   type ControllerInput,
   type GameId,
@@ -17,6 +18,7 @@ import {
 } from '../src/shared/types.ts';
 import { getGameMeta } from '../src/shared/games.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
+import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
 
 interface ConnectedPlayer {
   id: string;
@@ -26,6 +28,9 @@ interface ConnectedPlayer {
   ws: WebSocket | null;
   connected: boolean;
   ready: boolean;
+  isBot: boolean;
+  botDifficulty?: BotDifficulty;
+  botMemory?: BotMemory;
   score: number;
   alive: boolean;
   statText: string;
@@ -42,6 +47,8 @@ interface RoomRecord {
   hostToken: string;
   hostWs: WebSocket | null;
   hostDisconnectedAt: number | null;
+  hostPlayerId: string | null;
+  botDifficulty: BotDifficulty;
   status: RoomStatus;
   selectedGameId: GameId;
   gameSettingValue: number;
@@ -63,6 +70,17 @@ interface SocketBinding {
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const BOT_CALLSIGNS = [
+  'Bot Alpha',
+  'Bot Beta',
+  'Bot Pixel',
+  'Bot Nova',
+  'Bot Spark',
+  'Bot Turbo',
+  'Bot Echo',
+  'Bot Glitch',
+];
+const VALID_DIFFICULTIES = new Set<BotDifficulty>(['chill', 'arcade', 'spicy']);
 const TICK_MS = 33; // ~30Hz authoritative server tick
 const PLAYER_RECONNECT_GRACE_MS = 30_000;
 const HOST_RECONNECT_GRACE_MS = 120_000;
@@ -132,6 +150,17 @@ export class RoomManager {
     }
   }
 
+  private ensureHostPlayer(room: RoomRecord): void {
+    if (room.hostPlayerId) {
+      const current = room.players.get(room.hostPlayerId);
+      if (current && !current.isBot && current.connected) return;
+    }
+    const nextHuman = [...room.players.values()]
+      .filter((p) => !p.isBot && p.connected)
+      .sort((a, b) => a.slotIndex - b.slotIndex)[0];
+    room.hostPlayerId = nextHuman ? nextHuman.id : null;
+  }
+
   private buildRoomSnapshot(room: RoomRecord): RoomSnapshot {
     const players: PlayerSummary[] = [...room.players.values()]
       .sort((a, b) => a.slotIndex - b.slotIndex)
@@ -142,6 +171,8 @@ export class RoomManager {
         color: p.color,
         connected: p.connected,
         ready: p.ready,
+        isBot: p.isBot,
+        botDifficulty: p.isBot ? p.botDifficulty ?? room.botDifficulty : undefined,
         score: p.score,
         alive: p.alive,
         statText: p.statText,
@@ -154,6 +185,8 @@ export class RoomManager {
       status: room.status,
       selectedGameId: room.selectedGameId,
       gameSettingValue: room.gameSettingValue,
+      botDifficulty: room.botDifficulty,
+      hostPlayerId: room.hostPlayerId,
       countdownValue: room.countdownValue,
       players,
       rankings: room.rankings,
@@ -168,7 +201,9 @@ export class RoomManager {
     };
     this.send(room.hostWs, msg);
     for (const p of room.players.values()) {
-      if (p.connected) this.send(p.ws, msg);
+      if (p.connected && !p.isBot && p.ws) {
+        this.send(p.ws, msg);
+      }
     }
   }
 
@@ -196,6 +231,16 @@ export class RoomManager {
     return PLAYER_PALETTE.find((c) => !usedColors.has(c.id)) ?? defaultForSlot;
   }
 
+  private pickBotName(room: RoomRecord): string {
+    const usedNames = new Set([...room.players.values()].map((p) => p.name));
+    for (const candidate of BOT_CALLSIGNS) {
+      if (!usedNames.has(candidate)) return candidate;
+    }
+    let idx = 1;
+    while (usedNames.has(`Robot ${idx}`)) idx += 1;
+    return `Robot ${idx}`;
+  }
+
   private handleMessage(ws: WebSocket, msg: ClientMessage): void {
     switch (msg.type) {
       case 'ping':
@@ -217,7 +262,9 @@ export class RoomManager {
           hostToken,
           hostWs: ws,
           hostDisconnectedAt: null,
-          status: 'LOBBY',
+          hostPlayerId: null,
+          botDifficulty: 'arcade',
+          status: 'SETUP',
           selectedGameId: gameId,
           gameSettingValue: meta.defaultSetting,
           countdownValue: 3,
@@ -285,22 +332,25 @@ export class RoomManager {
         const cleanName = (msg.name || '').trim().slice(0, 14) || `Player ${room.players.size + 1}`;
         room.lastActivityAt = Date.now();
 
-        // Idempotent reconnect by playerId
+        // Idempotent reconnect by playerId (humans only)
         if (msg.playerId && room.players.has(msg.playerId)) {
           const existing = room.players.get(msg.playerId)!;
-          this.detachSocket(ws);
-          existing.ws = ws;
-          existing.connected = true;
-          existing.disconnectedAt = null;
-          existing.name = cleanName;
-          this.bindings.set(ws, { role: 'player', roomCode: code, playerId: existing.id });
-          this.send(ws, {
-            type: 'room:joined',
-            playerId: existing.id,
-            room: this.buildRoomSnapshot(room),
-          });
-          this.broadcastRoom(room);
-          return;
+          if (!existing.isBot) {
+            this.detachSocket(ws);
+            existing.ws = ws;
+            existing.connected = true;
+            existing.disconnectedAt = null;
+            existing.name = cleanName;
+            this.ensureHostPlayer(room);
+            this.bindings.set(ws, { role: 'player', roomCode: code, playerId: existing.id });
+            this.send(ws, {
+              type: 'room:joined',
+              playerId: existing.id,
+              room: this.buildRoomSnapshot(room),
+            });
+            this.broadcastRoom(room);
+            return;
+          }
         }
 
         if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
@@ -330,9 +380,10 @@ export class RoomManager {
           ws,
           connected: true,
           ready: false,
+          isBot: false,
           score: 0,
           alive: true,
-          statText: 'In Lobby',
+          statText: room.status === 'SETUP' ? 'In Setup' : 'In Lobby',
           cooldownA: 0,
           cooldownB: 0,
           input: { dx: 0, dy: 0, a: false, b: false },
@@ -342,6 +393,7 @@ export class RoomManager {
         };
 
         room.players.set(playerId, player);
+        this.ensureHostPlayer(room);
         this.bindings.set(ws, { role: 'player', roomCode: code, playerId });
 
         // If joining mid-match or during briefing, spawn the player directly into the active game state
@@ -359,6 +411,7 @@ export class RoomManager {
             name: player.name,
             color: player.color,
             connected: player.connected,
+            isBot: false,
             input: player.input,
             prevA: false,
             prevB: false,
@@ -380,14 +433,181 @@ export class RoomManager {
         return;
       }
 
+      case 'room:add-bot': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (room.status !== 'SETUP' && room.status !== 'LOBBY') {
+          this.send(ws, {
+            type: 'error',
+            message: 'Robots can only be added during Room Setup or in the Game Room.',
+          });
+          return;
+        }
+        if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
+          this.send(ws, {
+            type: 'error',
+            code: 'ROOM_FULL',
+            message: `Room already has all ${MAX_PLAYERS_PER_ROOM} players.`,
+          });
+          return;
+        }
+        const slotIndex = this.nextAvailableSlot(room);
+        if (slotIndex === -1) return;
+
+        const botId = `bot_${crypto.randomUUID().slice(0, 8)}`;
+        const difficulty: BotDifficulty =
+          msg.difficulty && VALID_DIFFICULTIES.has(msg.difficulty)
+            ? msg.difficulty
+            : room.botDifficulty;
+
+        const botPlayer: ConnectedPlayer = {
+          id: botId,
+          slotIndex,
+          name: this.pickBotName(room),
+          color: this.pickColor(room, slotIndex),
+          ws: null,
+          connected: true,
+          ready: true,
+          isBot: true,
+          botDifficulty: difficulty,
+          botMemory: createBotMemory(),
+          score: 0,
+          alive: true,
+          statText: 'Bot Ready',
+          cooldownA: 0,
+          cooldownB: 0,
+          input: { dx: 0, dy: 0, a: false, b: false },
+          prevA: false,
+          prevB: false,
+          disconnectedAt: null,
+        };
+
+        room.players.set(botId, botPlayer);
+        room.lastActivityAt = Date.now();
+        this.send(room.hostWs, {
+          type: 'game:tick',
+          snapshot: room.lastSnapshot as any,
+          sounds: [{ type: 'join', playerId: botId }],
+        });
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:remove-bot': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (room.status !== 'SETUP' && room.status !== 'LOBBY') return;
+        const target = room.players.get(msg.botId);
+        if (!target || !target.isBot) return;
+        room.players.delete(msg.botId);
+        room.lastActivityAt = Date.now();
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:set-bot-difficulty': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (!VALID_DIFFICULTIES.has(msg.difficulty)) return;
+        room.lastActivityAt = Date.now();
+        if (msg.botId) {
+          const target = room.players.get(msg.botId);
+          if (target && target.isBot) {
+            target.botDifficulty = msg.difficulty;
+          }
+        } else {
+          room.botDifficulty = msg.difficulty;
+          for (const p of room.players.values()) {
+            if (p.isBot) {
+              p.botDifficulty = msg.difficulty;
+            }
+          }
+        }
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:set-host-player': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        const target = room.players.get(msg.playerId);
+        if (!target || target.isBot || !target.connected) {
+          this.send(ws, {
+            type: 'error',
+            message: 'Only a connected human player can be chosen as the Room Host.',
+          });
+          return;
+        }
+        room.hostPlayerId = target.id;
+        room.lastActivityAt = Date.now();
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:enter-game-room': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (room.players.size === 0) {
+          this.send(ws, {
+            type: 'error',
+            message: 'Connect at least 1 player or add a robot before entering the Game Room.',
+          });
+          return;
+        }
+        this.stopGameLoop(room);
+        room.status = 'LOBBY';
+        room.gameState = null;
+        room.lastSnapshot = null;
+        room.rankings = [];
+        for (const p of room.players.values()) {
+          p.ready = p.isBot ? true : false;
+          p.score = 0;
+          p.alive = true;
+          p.statText = p.isBot ? 'Bot Ready' : 'Waiting for Ready';
+          p.cooldownA = 0;
+          p.cooldownB = 0;
+          p.input = { dx: 0, dy: 0, a: false, b: false };
+          p.prevA = false;
+          p.prevB = false;
+        }
+        room.lastActivityAt = Date.now();
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:return-setup': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        this.stopGameLoop(room);
+        room.status = 'SETUP';
+        room.gameState = null;
+        room.lastSnapshot = null;
+        room.rankings = [];
+        for (const p of room.players.values()) {
+          p.ready = p.isBot ? true : false;
+          p.score = 0;
+          p.alive = true;
+          p.statText = p.isBot ? 'Bot Ready' : 'In Setup';
+          p.cooldownA = 0;
+          p.cooldownB = 0;
+          p.input = { dx: 0, dy: 0, a: false, b: false };
+          p.prevA = false;
+          p.prevB = false;
+        }
+        room.lastActivityAt = Date.now();
+        this.broadcastRoom(room);
+        return;
+      }
+
       case 'player:ready': {
         const binding = this.bindings.get(ws);
         if (!binding || binding.role !== 'player' || !binding.playerId) return;
         const room = this.rooms.get(binding.roomCode);
         if (!room) return;
         const player = room.players.get(binding.playerId);
-        if (!player) return;
+        if (!player || player.isBot) return;
         player.ready = Boolean(msg.ready);
+        player.statText = player.ready ? 'Ready' : 'Waiting for Ready';
         room.lastActivityAt = Date.now();
         this.broadcastRoom(room);
         return;
@@ -400,13 +620,14 @@ export class RoomManager {
         if (!room) return;
         room.players.delete(binding.playerId);
         this.bindings.delete(ws);
+        this.ensureHostPlayer(room);
         room.lastActivityAt = Date.now();
         this.broadcastRoom(room);
         return;
       }
 
       case 'game:select': {
-        const room = this.getHostRoom(ws);
+        const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         if (!SERVER_GAMES[msg.gameId]) return;
         room.selectedGameId = msg.gameId;
@@ -418,28 +639,44 @@ export class RoomManager {
       }
 
       case 'game:start': {
-        const room = this.getHostRoom(ws);
+        const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         if (room.players.size === 0) {
           this.send(ws, {
             type: 'error',
-            message: 'Connect at least 1 controller (or open Test Controller) before starting.',
+            message: 'Connect at least 1 player (or add a robot) before starting.',
           });
           return;
         }
+
+        // Strict Ready Gate: every connected human player MUST press Ready on their phone controller
+        const unreadyHumans = [...room.players.values()]
+          .filter((p) => !p.isBot && p.connected && !p.ready)
+          .sort((a, b) => a.slotIndex - b.slotIndex);
+
+        if (unreadyHumans.length > 0) {
+          const names = unreadyHumans.map((p) => p.name).join(', ');
+          this.send(ws, {
+            type: 'error',
+            code: 'PLAYERS_NOT_READY',
+            message: `Everyone must press Ready on their phone before starting. Waiting for: ${names}`,
+          });
+          return;
+        }
+
         this.startMatch(room, true);
         return;
       }
 
       case 'game:dismiss-briefing': {
-        const room = this.getHostRoom(ws);
+        const room = this.getPrivilegedRoom(ws);
         if (!room || room.status !== 'BRIEFING') return;
         this.beginCountdown(room);
         return;
       }
 
       case 'game:pause': {
-        const room = this.getHostRoom(ws);
+        const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         if (room.status === 'PLAYING' && msg.paused) {
           room.status = 'PAUSED';
@@ -452,7 +689,7 @@ export class RoomManager {
       }
 
       case 'game:restart': {
-        const room = this.getHostRoom(ws);
+        const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         if (room.players.size === 0) return;
         this.startMatch(room, false);
@@ -460,7 +697,7 @@ export class RoomManager {
       }
 
       case 'game:return-lobby': {
-        const room = this.getHostRoom(ws);
+        const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         this.stopGameLoop(room);
         room.status = 'LOBBY';
@@ -468,10 +705,10 @@ export class RoomManager {
         room.lastSnapshot = null;
         room.rankings = [];
         for (const p of room.players.values()) {
-          p.ready = false;
+          p.ready = p.isBot ? true : false;
           p.score = 0;
           p.alive = true;
-          p.statText = 'In Lobby';
+          p.statText = p.isBot ? 'Bot Ready' : 'Waiting for Ready';
           p.cooldownA = 0;
           p.cooldownB = 0;
           p.input = { dx: 0, dy: 0, a: false, b: false };
@@ -488,7 +725,7 @@ export class RoomManager {
         const room = this.rooms.get(binding.roomCode);
         if (!room) return;
         const player = room.players.get(binding.playerId);
-        if (!player) return;
+        if (!player || player.isBot) return;
 
         const dx = Number.isFinite(msg.input.dx) ? Math.max(-1, Math.min(1, msg.input.dx)) : 0;
         const dy = Number.isFinite(msg.input.dy) ? Math.max(-1, Math.min(1, msg.input.dy)) : 0;
@@ -504,10 +741,19 @@ export class RoomManager {
     }
   }
 
-  private getHostRoom(ws: WebSocket): RoomRecord | null {
+  /**
+   * Authorizes either the Host Monitor screen OR the chosen Room Host human phone controller.
+   */
+  private getPrivilegedRoom(ws: WebSocket): RoomRecord | null {
     const binding = this.bindings.get(ws);
-    if (!binding || binding.role !== 'host') return null;
-    return this.rooms.get(binding.roomCode) ?? null;
+    if (!binding) return null;
+    const room = this.rooms.get(binding.roomCode);
+    if (!room) return null;
+    if (binding.role === 'host') return room;
+    if (binding.role === 'player' && binding.playerId && room.hostPlayerId === binding.playerId) {
+      return room;
+    }
+    return null;
   }
 
   private beginCountdown(room: RoomRecord): void {
@@ -523,28 +769,34 @@ export class RoomManager {
       this.broadcastTick(room, room.lastSnapshot, [{ type: 'countdown' }]);
     }
     for (const p of room.players.values()) {
-      if (p.connected) this.send(p.ws, { type: 'player:haptic', pattern: 35, reason: 'countdown' });
+      if (p.connected && !p.isBot && p.ws) {
+        this.send(p.ws, { type: 'player:haptic', pattern: 35, reason: 'countdown' });
+      }
     }
   }
 
   private startMatch(room: RoomRecord, showBriefing = true): void {
     this.stopGameLoop(room);
     const engine = SERVER_GAMES[room.selectedGameId];
-    const playerList = this.toInputPlayers(room);
-    room.gameState = engine.createState(playerList, room.gameSettingValue);
-    room.lastSnapshot = engine.getSnapshot(room.gameState);
-    room.rankings = [];
-    room.lastActivityAt = Date.now();
-
     for (const p of room.players.values()) {
       p.score = 0;
       p.alive = true;
       p.statText = showBriefing ? 'How to Play' : 'Get Ready!';
       p.cooldownA = 0;
       p.cooldownB = 0;
+      p.input = { dx: 0, dy: 0, a: false, b: false };
       p.prevA = false;
       p.prevB = false;
+      if (p.isBot) {
+        p.botMemory = createBotMemory();
+      }
     }
+
+    const playerList = this.toInputPlayers(room);
+    room.gameState = engine.createState(playerList, room.gameSettingValue);
+    room.lastSnapshot = engine.getSnapshot(room.gameState);
+    room.rankings = [];
+    room.lastActivityAt = Date.now();
 
     if (showBriefing) {
       room.status = 'BRIEFING';
@@ -593,7 +845,9 @@ export class RoomManager {
             this.broadcastTick(room, room.lastSnapshot, [{ type: 'countdown' }]);
           }
           for (const p of room.players.values()) {
-            if (p.connected) this.send(p.ws, { type: 'player:haptic', pattern: 35, reason: 'countdown' });
+            if (p.connected && !p.isBot && p.ws) {
+              this.send(p.ws, { type: 'player:haptic', pattern: 35, reason: 'countdown' });
+            }
           }
         }
         if (room.countdownTimer <= 0) {
@@ -604,7 +858,9 @@ export class RoomManager {
             this.broadcastTick(room, room.lastSnapshot, [{ type: 'go' }]);
           }
           for (const p of room.players.values()) {
-            if (p.connected) this.send(p.ws, { type: 'player:haptic', pattern: [55, 35, 95], reason: 'go' });
+            if (p.connected && !p.isBot && p.ws) {
+              this.send(p.ws, { type: 'player:haptic', pattern: [55, 35, 95], reason: 'go' });
+            }
           }
         }
         return;
@@ -612,10 +868,24 @@ export class RoomManager {
 
       if (room.status !== 'PLAYING' || !room.gameState) return;
 
+      // Drive every manually assigned Robot via the universal game-aware AI controller
+      for (const p of room.players.values()) {
+        if (p.isBot) {
+          if (!p.botMemory) p.botMemory = createBotMemory();
+          p.input = computeBotInput(
+            room.lastSnapshot,
+            p.id,
+            p.botDifficulty ?? room.botDifficulty,
+            dt,
+            p.botMemory
+          );
+        }
+      }
+
       const currentInputs = this.toInputPlayers(room);
       const result = engine.step(room.gameState, currentInputs, dt);
 
-      // Persist edge-trigger states
+      // Persist edge-trigger states & live HUD telemetry
       for (const p of room.players.values()) {
         p.prevA = p.input.a;
         p.prevB = p.input.b;
@@ -632,7 +902,7 @@ export class RoomManager {
       room.lastSnapshot = result.snapshot;
       this.broadcastTick(room, result.snapshot, result.sounds);
 
-      // Coalesce & dispatch targeted phone haptics (strongest pattern per player per tick)
+      // Coalesce & dispatch targeted phone haptics (human phones only)
       if (result.haptics.length > 0) {
         const strongestByPlayer = new Map<string, { pattern: number | number[]; reason?: string; weight: number }>();
         for (const h of result.haptics) {
@@ -646,7 +916,7 @@ export class RoomManager {
         }
         for (const [playerId, h] of strongestByPlayer.entries()) {
           const target = room.players.get(playerId);
-          if (target?.connected) {
+          if (target && target.connected && !target.isBot && target.ws) {
             this.send(target.ws, {
               type: 'player:haptic',
               pattern: h.pattern,
@@ -668,7 +938,7 @@ export class RoomManager {
         room.status = 'RESULTS';
         room.rankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
         for (const p of room.players.values()) {
-          if (p.connected) {
+          if (p.connected && !p.isBot && p.ws) {
             this.send(p.ws, { type: 'player:haptic', pattern: [70, 40, 120], reason: 'win' });
           }
         }
@@ -686,6 +956,7 @@ export class RoomManager {
         name: p.name,
         color: p.color,
         connected: p.connected,
+        isBot: p.isBot,
         input: p.input,
         prevA: p.prevA,
         prevB: p.prevB,
@@ -710,11 +981,12 @@ export class RoomManager {
       room.hostDisconnectedAt = Date.now();
     } else if (existing.role === 'player' && existing.playerId) {
       const p = room.players.get(existing.playerId);
-      if (p && p.ws === ws) {
+      if (p && !p.isBot && p.ws === ws) {
         p.ws = null;
         p.connected = false;
         p.disconnectedAt = Date.now();
         p.input = { dx: 0, dy: 0, a: false, b: false };
+        this.ensureHostPlayer(room);
       }
     }
   }
@@ -733,11 +1005,12 @@ export class RoomManager {
       this.broadcastRoom(room);
     } else if (binding.role === 'player' && binding.playerId) {
       const player = room.players.get(binding.playerId);
-      if (player && player.ws === ws) {
+      if (player && !player.isBot && player.ws === ws) {
         player.ws = null;
         player.connected = false;
         player.disconnectedAt = Date.now();
         player.input = { dx: 0, dy: 0, a: false, b: false };
+        this.ensureHostPlayer(room);
         this.broadcastRoom(room);
       }
     }
@@ -748,15 +1021,16 @@ export class RoomManager {
     for (const [code, room] of this.rooms.entries()) {
       let changed = false;
 
-      // Prune long-disconnected players (in lobby immediately after grace; in match after grace)
+      // Prune long-disconnected human players (never prune manually assigned bots)
       for (const [pid, p] of room.players.entries()) {
-        if (!p.connected && p.disconnectedAt && now - p.disconnectedAt > PLAYER_RECONNECT_GRACE_MS) {
+        if (!p.isBot && !p.connected && p.disconnectedAt && now - p.disconnectedAt > PLAYER_RECONNECT_GRACE_MS) {
           room.players.delete(pid);
           changed = true;
         }
       }
 
       if (changed) {
+        this.ensureHostPlayer(room);
         this.broadcastRoom(room);
       }
 
@@ -769,10 +1043,12 @@ export class RoomManager {
       if (hostGone || idleExpired) {
         this.stopGameLoop(room);
         for (const p of room.players.values()) {
-          this.send(p.ws, {
-            type: 'room:closed',
-            reason: 'The host monitor session ended.',
-          });
+          if (!p.isBot && p.ws) {
+            this.send(p.ws, {
+              type: 'room:closed',
+              reason: 'The host monitor session ended.',
+            });
+          }
         }
         this.rooms.delete(code);
       }

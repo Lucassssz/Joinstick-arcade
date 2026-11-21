@@ -1,10 +1,29 @@
 import { useEffect, useState } from 'react';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { GameId } from './shared/types';
 import { LandingView } from './components/LandingView';
 import { HostMonitor } from './components/HostMonitor';
 import { PhoneController } from './components/PhoneController';
 
 type AppMode = 'landing' | 'host' | 'controller';
+
+const VIEW_TRANSITION_VARIANTS = {
+  initial: { opacity: 0 },
+  animate: {
+    opacity: 1,
+    transition: {
+      duration: 0.22,
+      ease: [0.16, 1, 0.3, 1] as const,
+    },
+  },
+  exit: {
+    opacity: 0,
+    transition: {
+      duration: 0.16,
+      ease: [0.4, 0, 1, 1] as const,
+    },
+  },
+};
 
 function readInitialRoute(): { mode: AppMode; roomCode: string } {
   const params = new URLSearchParams(window.location.search);
@@ -61,23 +80,40 @@ export default function App() {
     setMode('controller');
   };
 
-  if (mode === 'host') {
-    return <HostMonitor initialGameId={preferredGameId} onExit={navigateHome} />;
-  }
-
-  if (mode === 'controller') {
-    return (
-      <PhoneController
-        initialRoomCode={initialRoomCode}
-        onExit={navigateHome}
-      />
-    );
-  }
-
   return (
-    <LandingView
-      onHostRoom={handleHostRoom}
-      onJoinController={handleJoinController}
-    />
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-dvh bg-[#121419]">
+        <AnimatePresence
+          mode="wait"
+          initial={false}
+          onExitComplete={() => {
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+          }}
+        >
+          <motion.div
+            key={mode}
+            variants={VIEW_TRANSITION_VARIANTS}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="min-h-dvh w-full will-change-[opacity]"
+          >
+            {mode === 'host' ? (
+              <HostMonitor initialGameId={preferredGameId} onExit={navigateHome} />
+            ) : mode === 'controller' ? (
+              <PhoneController
+                initialRoomCode={initialRoomCode}
+                onExit={navigateHome}
+              />
+            ) : (
+              <LandingView
+                onHostRoom={handleHostRoom}
+                onJoinController={handleJoinController}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </MotionConfig>
   );
 }

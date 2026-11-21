@@ -1,10 +1,13 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Bomb,
+  Bot,
   Check,
   Crosshair,
+  Crown,
   Flame,
   Footprints,
   Gauge,
@@ -12,6 +15,7 @@ import {
   Maximize2,
   Minimize2,
   Paintbrush,
+  Play,
   RotateCcw,
   Shield,
   Target,
@@ -902,10 +906,17 @@ export function PhoneController({
     );
   }
 
+  const isRoomHost = room.hostPlayerId === me.id;
+  const connectedHumans = room.players.filter((p) => !p.isBot && p.connected);
+  const readyHumans = connectedHumans.filter((p) => p.ready);
+  const unreadyHumans = connectedHumans.filter((p) => !p.ready);
+  const botCount = room.players.filter((p) => p.isBot).length;
+  const hostPlayer = room.players.find((p) => p.id === room.hostPlayerId);
+
   // =====================================================================
-  // STATE 3: LOBBY WAITING SCREEN (Full-screen landscape-ready on phones!)
+  // STATE 3A: ROOM SETUP SCREEN (Waiting for players / bots / host setup)
   // =====================================================================
-  if (room.status === 'LOBBY') {
+  if (room.status === 'SETUP') {
     return renderConnectedShell(
       <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
         <div className="flex items-center justify-between gap-3 h-11 shrink-0">
@@ -917,8 +928,178 @@ export function PhoneController({
               P{me.slotIndex + 1}
             </span>
             <div className="min-w-0 leading-tight">
-              <div className="font-bold text-sm truncate">{me.name}</div>
-              <div className="text-[11px] text-[#9CA3AF] font-mono">Room {room.code}</div>
+              <div className="font-bold text-sm truncate flex items-center gap-1.5">
+                <span className="truncate">{me.name}</span>
+                {isRoomHost && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#FFB800] shrink-0">
+                    <Crown className="w-3 h-3" />
+                    Host
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-[#9CA3AF] font-mono">Room {room.code} · Setup</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {!embedded && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                className="h-9 px-2.5 rounded-lg bg-[#222733] hover:bg-[#2B3140] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                <span>{isFullscreen ? 'Exit Full' : 'Fullscreen'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleLeave}
+              className="h-9 px-3 rounded-lg bg-[#222733] hover:bg-[#2B3140] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Leave
+            </button>
+          </div>
+        </div>
+
+        <div
+          className={`flex-1 grid ${
+            embedded ? 'grid-cols-1 gap-3 my-3' : 'grid-cols-2 gap-5 my-3 items-center'
+          }`}
+        >
+          <div className="p-4 rounded-xl bg-[#1C2029] border border-[#2B3140]">
+            <div className="text-xs font-medium text-[#00C2FF]">Step 1 · Room Setup</div>
+            <div className="font-display text-xl font-bold text-white mt-0.5">
+              Connected to Room {room.code}
+            </div>
+            <p className="text-xs text-[#A5AEBD] mt-1 leading-relaxed">
+              Players are joining and bots are being configured on the monitor.
+            </p>
+
+            <div className="mt-3 pt-2.5 border-t border-[#2A303D] space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Roster</span>
+                <span className="font-semibold text-white inline-flex items-center gap-1.5">
+                  {connectedHumans.length} Human{connectedHumans.length === 1 ? '' : 's'}
+                  {botCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[#00C2FF]">
+                      · <Bot className="w-3.5 h-3.5" /> {botCount} Bot{botCount === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Room Host</span>
+                <span className="font-semibold text-[#FFB800] inline-flex items-center gap-1">
+                  <Crown className="w-3 h-3" />
+                  {hostPlayer ? hostPlayer.name : 'Monitor'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 justify-center">
+            {isRoomHost ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!embedded) {
+                      controllerHaptics.unlock();
+                      vibrate(55, { fromUserGesture: true, intensity: 'medium', force: true });
+                    }
+                    enterFullscreenAndLandscape();
+                    wsRef.current?.send({ type: 'room:enter-game-room' });
+                  }}
+                  className="tactile-btn w-full h-16 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-lg shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>Enter Game Room</span>
+                  <ArrowRight className="w-5 h-5" />
+                </button>
+                <p className="text-[11px] text-center text-[#9CA3AF]">
+                  You are the Room Host — tap when everyone has joined and bots are set.
+                </p>
+              </>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#181C25] border border-[#2B3140] text-center">
+                <div className="text-sm font-bold text-white">You&apos;re In!</div>
+                <p className="text-xs text-[#9CA3AF] mt-1 leading-relaxed">
+                  Waiting for <strong className="text-white">{hostPlayer?.name ?? 'the Host'}</strong>{' '}
+                  to finish setup and open the Game Room.
+                </p>
+              </div>
+            )}
+
+            {!embedded && (
+              <div className="space-y-1.5">
+                <label
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    controllerHaptics.unlock();
+                    const res = vibrate([120, 60, 180], {
+                      fromUserGesture: true,
+                      intensity: 'heavy',
+                      force: true,
+                      skipIosSwitch: true,
+                    });
+                    setImpactPulse('heavy');
+                    setTimeout(() => setImpactPulse('none'), 220);
+                    setHapticNotice(controllerHaptics.describeResult(res));
+                  }}
+                  className="relative w-full h-10 rounded-xl bg-[#1C2029] border border-[#2B3140] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
+                >
+                  <IosHapticSwitch enabled={hapticsEnabled} />
+                  <Vibrate className="w-3.5 h-3.5" />
+                  <span>Test Vibration / Haptics</span>
+                </label>
+                {hapticNotice && (
+                  <p className="text-[11px] text-center text-[#10D98B] leading-snug">
+                    {hapticNotice}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="text-center text-[11px] text-[#6B7280] shrink-0">
+          Once the Game Room opens, tap Ready on your phone to unlock the match start.
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================================================
+  // STATE 3B: GAME ROOM READY CHECK (Full-screen landscape-ready on phones!)
+  // =====================================================================
+  if (room.status === 'LOBBY') {
+    const allHumansReady = unreadyHumans.length === 0;
+    return renderConnectedShell(
+      <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+        <div className="flex items-center justify-between gap-3 h-11 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span
+              className="w-8 h-8 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0"
+              style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+            >
+              P{me.slotIndex + 1}
+            </span>
+            <div className="min-w-0 leading-tight">
+              <div className="font-bold text-sm truncate flex items-center gap-1.5">
+                <span className="truncate">{me.name}</span>
+                {isRoomHost && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#FFB800] shrink-0">
+                    <Crown className="w-3 h-3" />
+                    Host
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-[#9CA3AF] font-mono">
+                Room {room.code} · {readyHumans.length}/{connectedHumans.length} Ready
+              </div>
             </div>
           </div>
 
@@ -959,15 +1140,28 @@ export function PhoneController({
               {gameMeta.controllerSchema.controlTip}
             </p>
 
-            <div className="mt-3 pt-2.5 border-t border-[#2A303D] flex items-center justify-between text-xs">
-              <span className="text-[#9CA3AF]">Buttons</span>
-              <span className="font-semibold text-white">
-                {gameMeta.controllerSchema.actionA.label} / {gameMeta.controllerSchema.actionB.label}
-              </span>
+            <div className="mt-3 pt-2.5 border-t border-[#2A303D] space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Buttons</span>
+                <span className="font-semibold text-white">
+                  {gameMeta.controllerSchema.actionA.label} / {gameMeta.controllerSchema.actionB.label}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[#9CA3AF]">Ready Check</span>
+                <span
+                  className={`font-mono font-bold tabular-nums ${
+                    allHumansReady ? 'text-[#10D98B]' : 'text-[#FFB800]'
+                  }`}
+                >
+                  {readyHumans.length}/{connectedHumans.length} Ready
+                  {botCount > 0 ? ` (+${botCount} Bot${botCount === 1 ? '' : 's'})` : ''}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 justify-center">
+          <div className="flex flex-col gap-2.5 justify-center">
             <label
               role="button"
               tabIndex={0}
@@ -982,9 +1176,10 @@ export function PhoneController({
                   });
                 }
                 enterFullscreenAndLandscape();
+                setErrorMsg(null);
                 wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
               }}
-              className="relative tactile-btn w-full h-16 rounded-xl font-display font-bold text-lg cursor-pointer transition-colors flex items-center justify-center select-none"
+              className="relative tactile-btn w-full h-16 rounded-xl font-display font-bold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
               style={
                 me.ready
                   ? {
@@ -1000,8 +1195,41 @@ export function PhoneController({
               }
             >
               <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
-              <span>{me.ready ? 'Ready! Waiting for Host' : 'Tap to Ready Up'}</span>
+              {me.ready && <Check className="w-5 h-5" />}
+              <span>
+                {me.ready
+                  ? allHumansReady
+                    ? 'Ready! Starting Soon'
+                    : 'Ready! Waiting for Others'
+                  : 'Tap to Ready Up'}
+              </span>
             </label>
+
+            {isRoomHost && (
+              <button
+                type="button"
+                disabled={!allHumansReady || room.players.length === 0}
+                onClick={() => {
+                  if (!embedded) {
+                    controllerHaptics.unlock();
+                    vibrate([40, 25, 65], { fromUserGesture: true, intensity: 'medium', force: true });
+                  }
+                  wsRef.current?.send({ type: 'game:start' });
+                }}
+                className="tactile-btn w-full h-12 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>
+                  {allHumansReady
+                    ? `Start ${gameMeta.name}`
+                    : `Waiting for ${unreadyHumans.map((p) => p.name).join(', ')}`}
+                </span>
+              </button>
+            )}
+
+            {errorMsg && (
+              <p className="text-[11px] text-center text-[#FF9B8A] leading-snug">{errorMsg}</p>
+            )}
 
             {!embedded && (
               <div className="space-y-1.5">
@@ -1041,7 +1269,7 @@ export function PhoneController({
             ? 'Keyboard active: W A S D to move · Space (A) · Left Shift (B)'
             : keyboardProfile === 'arrows'
             ? 'Keyboard active: Arrow Keys to move · Enter (A) · Right Shift (B)'
-            : 'Hold your phone horizontally — your joystick opens automatically when the host starts.'}
+            : 'Every player must tap Ready before the game can start.'}
         </div>
       </div>
     );

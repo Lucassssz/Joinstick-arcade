@@ -14,6 +14,21 @@ import {
   renderRicochetTanks,
   renderTurboStriker,
 } from './extraRenderers';
+import {
+  renderBladeDuel,
+  renderCannonSiege,
+  renderCrownHeist,
+  renderHyperPong,
+  renderLaserGauntlet,
+  renderVaultHeist,
+} from './partyRenderersA';
+import {
+  renderFreezeTag,
+  renderGhostHunt,
+  renderGravityFlip,
+  renderHookShot,
+  renderMeteorSwarm,
+} from './partyRenderersB';
 
 export interface RenderFxState {
   skidMarks: { x: number; y: number; alpha: number; color: string }[];
@@ -815,6 +830,39 @@ export function renderGameSnapshot(
       break;
     case 'paint-rush':
       renderPaintRush(ctx, snap);
+      break;
+    case 'laser-gauntlet':
+      renderLaserGauntlet(ctx, snap);
+      break;
+    case 'vault-heist':
+      renderVaultHeist(ctx, snap);
+      break;
+    case 'hyper-pong':
+      renderHyperPong(ctx, snap);
+      break;
+    case 'blade-duel':
+      renderBladeDuel(ctx, snap);
+      break;
+    case 'cannon-siege':
+      renderCannonSiege(ctx, snap);
+      break;
+    case 'crown-heist':
+      renderCrownHeist(ctx, snap);
+      break;
+    case 'freeze-tag':
+      renderFreezeTag(ctx, snap);
+      break;
+    case 'ghost-hunt':
+      renderGhostHunt(ctx, snap);
+      break;
+    case 'meteor-swarm':
+      renderMeteorSwarm(ctx, snap);
+      break;
+    case 'hook-shot':
+      renderHookShot(ctx, snap);
+      break;
+    case 'gravity-flip':
+      renderGravityFlip(ctx, snap);
       break;
   }
 

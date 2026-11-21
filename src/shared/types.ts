@@ -7,9 +7,22 @@ export type GameId =
   | 'grid-runners'
   | 'ricochet-tanks'
   | 'turbo-striker'
-  | 'paint-rush';
+  | 'paint-rush'
+  | 'laser-gauntlet'
+  | 'vault-heist'
+  | 'hyper-pong'
+  | 'blade-duel'
+  | 'cannon-siege'
+  | 'crown-heist'
+  | 'freeze-tag'
+  | 'ghost-hunt'
+  | 'meteor-swarm'
+  | 'hook-shot'
+  | 'gravity-flip';
 
-export type RoomStatus = 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
+export type RoomStatus = 'SETUP' | 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
+
+export type BotDifficulty = 'chill' | 'arcade' | 'spicy';
 
 export type GameSuitability = 'solo' | 'double' | 'multiplayer';
 export type PlayerFilterMode = 'all' | GameSuitability;
@@ -99,6 +112,8 @@ export interface PlayerSummary {
   color: PlayerColorSpec;
   connected: boolean;
   ready: boolean;
+  isBot?: boolean;
+  botDifficulty?: BotDifficulty;
   score: number;
   alive: boolean;
   statText: string;
@@ -503,6 +518,370 @@ export interface PaintRushSnapshot {
   players: PaintPlayerState[];
 }
 
+// --- 10. Laser Gauntlet ---
+export interface LaserGauntletPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  blinkTimer: number;
+  invulnTimer: number;
+  combo: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface LaserGauntletSnapshot {
+  gameId: 'laser-gauntlet';
+  timeLeft: number;
+  totalTime: number;
+  wave: number;
+  slowMoTimer: number;
+  coreAngle: number;
+  beams: { angle: number; width: number; state: 'warn' | 'active'; progress: number }[];
+  rings: { radius: number; maxRadius: number; thickness: number; alpha: number }[];
+  orbs: { id: string; x: number; y: number; r: number }[];
+  shards: { id: string; x: number; y: number; value: number; pulse: number }[];
+  players: LaserGauntletPlayerState[];
+}
+
+// --- 11. Vault Heist ---
+export interface VaultPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  dashTimer: number;
+  invulnTimer: number;
+  carrying: number;
+  banked: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface VaultHeistSnapshot {
+  gameId: 'vault-heist';
+  timeLeft: number;
+  totalTime: number;
+  walls: { x: number; y: number; w: number; h: number }[];
+  spikes: { x: number; y: number; w: number; h: number; state: 'idle' | 'warn' | 'active'; disabledTimer: number }[];
+  lasers: { x1: number; y1: number; x2: number; y2: number; state: 'off' | 'warn' | 'active'; disabledTimer: number }[];
+  drones: { x: number; y: number; r: number; angle: number; disabledTimer: number }[];
+  relics: { id: string; x: number; y: number; value: number }[];
+  portal: { x: number; y: number; r: number };
+  hackWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  players: VaultPlayerState[];
+}
+
+// --- 12. Hyper Pong ---
+export interface HyperPongPaddleState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  side: 'left' | 'right';
+  isBot?: boolean;
+  x: number;
+  y: number;
+  radius: number;
+  smashTimer: number;
+  magnetTimer: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface HyperPongSnapshot {
+  gameId: 'hyper-pong';
+  targetScore: number;
+  scoreLeft: number;
+  scoreRight: number;
+  goalBanner: string | null;
+  goalBannerColor: string | null;
+  puck: { x: number; y: number; vx: number; vy: number; radius: number; hot: boolean; trail: { x: number; y: number }[] };
+  bumpers: { x: number; y: number; r: number; flash: number }[];
+  players: HyperPongPaddleState[];
+}
+
+// --- 13. Blade Duel ---
+export interface BladeDuelPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  x: number;
+  y: number;
+  angle: number;
+  alive: boolean;
+  slashTimer: number;
+  parryTimer: number;
+  stunTimer: number;
+  roundsWon: number;
+  parries: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface BladeDuelSnapshot {
+  gameId: 'blade-duel';
+  round: number;
+  targetWins: number;
+  roundTimer: number;
+  roundBanner: string | null;
+  pillars: { x: number; y: number; r: number }[];
+  slashes: { x: number; y: number; angle: number; colorHex: string; alpha: number }[];
+  sparks: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  players: BladeDuelPlayerState[];
+}
+
+// --- 14. Cannon Siege ---
+export interface CannonPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  side: 'left' | 'right';
+  isBot?: boolean;
+  x: number;
+  y: number;
+  aimAngle: number;
+  coreHp: number;
+  maxCoreHp: number;
+  shieldTimer: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface CannonSiegeSnapshot {
+  gameId: 'cannon-siege';
+  timeLeft: number;
+  totalTime: number;
+  blocks: { id: number; side: 'left' | 'right'; x: number; y: number; w: number; h: number; hp: number; maxHp: number }[];
+  cores: { side: 'left' | 'right'; x: number; y: number; r: number; hp: number; maxHp: number; colorHex: string }[];
+  shells: { id: string; ownerId: string; colorHex: string; x: number; y: number; vx: number; vy: number; r: number }[];
+  explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  players: CannonPlayerState[];
+}
+
+// --- 15. Crown Heist ---
+export interface CrownPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  x: number;
+  y: number;
+  angle: number;
+  hasCrown: boolean;
+  tackleTimer: number;
+  stunTimer: number;
+  stealGraceTimer: number;
+  score: number;
+  steals: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface CrownHeistSnapshot {
+  gameId: 'crown-heist';
+  timeLeft: number;
+  totalTime: number;
+  crownX: number;
+  crownY: number;
+  crownHolderId: string | null;
+  obstacles: { x: number; y: number; r: number }[];
+  waves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  players: CrownPlayerState[];
+}
+
+// --- 16. Freeze Tag Arena ---
+export interface FreezePlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  role: 'hunter' | 'runner';
+  x: number;
+  y: number;
+  angle: number;
+  frozen: boolean;
+  dashTimer: number;
+  immuneTimer: number;
+  saves: number;
+  freezes: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface FreezeTagSnapshot {
+  gameId: 'freeze-tag';
+  timeLeft: number;
+  totalTime: number;
+  frozenCount: number;
+  runnerCount: number;
+  banner: string | null;
+  bolts: { id: string; x: number; y: number; vx: number; vy: number }[];
+  traps: { id: string; x: number; y: number; r: number; alpha: number }[];
+  pillars: { x: number; y: number; r: number }[];
+  players: FreezePlayerState[];
+}
+
+// --- 17. Ghost Hunt ---
+export interface GhostPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  role: 'ghost' | 'hunter';
+  x: number;
+  y: number;
+  angle: number;
+  alive: boolean;
+  hp: number;
+  maxHp: number;
+  visibility: number; // 0 (invisible) .. 1 (fully revealed)
+  dashTimer: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface GhostHuntSnapshot {
+  gameId: 'ghost-hunt';
+  timeLeft: number;
+  totalTime: number;
+  banner: string | null;
+  walls: { x: number; y: number; w: number; h: number }[];
+  nets: { id: string; x: number; y: number; r: number; colorHex: string }[];
+  pings: { x: number; y: number; radius: number; maxRadius: number; alpha: number }[];
+  players: GhostPlayerState[];
+}
+
+// --- 18. Meteor Swarm ---
+export interface MeteorPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  hp: number;
+  maxHp: number;
+  downed: boolean;
+  reviveProgress: number;
+  novaTimer: number;
+  kills: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface MeteorSwarmSnapshot {
+  gameId: 'meteor-swarm';
+  timeLeft: number;
+  totalTime: number;
+  wave: number;
+  coreHp: number;
+  maxCoreHp: number;
+  teamScore: number;
+  meteors: { id: string; kind: 'rock' | 'ufo'; x: number; y: number; r: number; hp: number; maxHp: number; angle: number }[];
+  bullets: { id: string; x: number; y: number; colorHex: string; enemy?: boolean }[];
+  explosions: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
+  players: MeteorPlayerState[];
+}
+
+// --- 19. Hook Shot ---
+export interface HookPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  x: number;
+  y: number;
+  angle: number;
+  alive: boolean;
+  falling: boolean;
+  fallProgress: number;
+  respawnTimer: number;
+  parryTimer: number;
+  hookedBy: string | null;
+  kos: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface HookLineState {
+  ownerId: string;
+  colorHex: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  state: 'extending' | 'retracting' | 'pulling';
+}
+
+export interface HookShotSnapshot {
+  gameId: 'hook-shot';
+  timeLeft: number;
+  totalTime: number;
+  islands: { x: number; y: number; w: number; h: number }[];
+  hooks: HookLineState[];
+  waves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  players: HookPlayerState[];
+}
+
+// --- 20. Gravity Flip ---
+export interface GravityPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  gravityDir: 1 | -1; // 1 = floor, -1 = ceiling
+  alive: boolean;
+  phaseTimer: number;
+  distance: number;
+  coins: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface GravityFlipSnapshot {
+  gameId: 'gravity-flip';
+  timeLeft: number;
+  totalTime: number;
+  speed: number;
+  scrollX: number;
+  floorY: number;
+  ceilingY: number;
+  obstacles: { id: string; kind: 'saw' | 'barrier' | 'gap'; x: number; y: number; w: number; h: number; side: 'floor' | 'ceiling' | 'mid' }[];
+  coins: { id: string; x: number; y: number; r: number }[];
+  players: GravityPlayerState[];
+}
+
 export type GameSnapshot =
   | BumperBrawlSnapshot
   | AstroBlasterSnapshot
@@ -512,7 +891,18 @@ export type GameSnapshot =
   | GridRunnersSnapshot
   | RicochetTanksSnapshot
   | TurboStrikerSnapshot
-  | PaintRushSnapshot;
+  | PaintRushSnapshot
+  | LaserGauntletSnapshot
+  | VaultHeistSnapshot
+  | HyperPongSnapshot
+  | BladeDuelSnapshot
+  | CannonSiegeSnapshot
+  | CrownHeistSnapshot
+  | FreezeTagSnapshot
+  | GhostHuntSnapshot
+  | MeteorSwarmSnapshot
+  | HookShotSnapshot
+  | GravityFlipSnapshot;
 
 export interface RoomSnapshot {
   code: string;
@@ -520,6 +910,8 @@ export interface RoomSnapshot {
   selectedGameId: GameId;
   gameSettingValue: number;
   countdownValue: number;
+  botDifficulty: BotDifficulty;
+  hostPlayerId: string | null;
   players: PlayerSummary[];
   rankings: RankingEntry[];
   hostConnected: boolean;
@@ -531,6 +923,12 @@ export type ClientMessage =
   | { type: 'room:create'; preferredGameId?: GameId }
   | { type: 'room:host-reattach'; code: string; hostToken: string }
   | { type: 'room:join'; code: string; name: string; playerId?: string; preferredColorId?: string }
+  | { type: 'room:add-bot'; difficulty?: BotDifficulty }
+  | { type: 'room:remove-bot'; botId: string }
+  | { type: 'room:set-bot-difficulty'; difficulty: BotDifficulty; botId?: string }
+  | { type: 'room:set-host-player'; playerId: string }
+  | { type: 'room:enter-game-room' }
+  | { type: 'room:return-setup' }
   | { type: 'player:ready'; ready: boolean }
   | { type: 'player:leave' }
   | { type: 'game:select'; gameId: GameId; settingValue?: number }
