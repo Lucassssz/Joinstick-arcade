@@ -30,6 +30,20 @@ import {
   renderHookShot,
   renderMeteorSwarm,
 } from './partyRenderersB';
+import {
+  renderColorMatch,
+  renderJungleLadders,
+  renderLuckyAuction,
+  renderRichStreet,
+  renderTreasureDig,
+} from './boardRenderers';
+import {
+  renderBombGrid,
+  renderFruitDrop,
+  renderKitchenRush,
+  renderPinballClash,
+  renderRedLightDash,
+} from './partyRenderersC';
 
 export interface RenderFxState {
   skidMarks: { x: number; y: number; alpha: number; color: string }[];
@@ -873,6 +887,36 @@ export function renderGameSnapshot(
       break;
     case 'gravity-flip':
       renderGravityFlip(ctx, snap);
+      break;
+    case 'rich-street':
+      renderRichStreet(ctx, snap);
+      break;
+    case 'jungle-ladders':
+      renderJungleLadders(ctx, snap);
+      break;
+    case 'bomb-grid':
+      renderBombGrid(ctx, snap);
+      break;
+    case 'red-light-dash':
+      renderRedLightDash(ctx, snap);
+      break;
+    case 'color-match':
+      renderColorMatch(ctx, snap);
+      break;
+    case 'kitchen-rush':
+      renderKitchenRush(ctx, snap);
+      break;
+    case 'treasure-dig':
+      renderTreasureDig(ctx, snap);
+      break;
+    case 'fruit-drop':
+      renderFruitDrop(ctx, snap);
+      break;
+    case 'lucky-auction':
+      renderLuckyAuction(ctx, snap);
+      break;
+    case 'pinball-clash':
+      renderPinballClash(ctx, snap);
       break;
   }
 

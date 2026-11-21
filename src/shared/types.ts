@@ -18,7 +18,17 @@ export type GameId =
   | 'ghost-hunt'
   | 'meteor-swarm'
   | 'hook-shot'
-  | 'gravity-flip';
+  | 'gravity-flip'
+  | 'rich-street'
+  | 'jungle-ladders'
+  | 'bomb-grid'
+  | 'red-light-dash'
+  | 'color-match'
+  | 'kitchen-rush'
+  | 'treasure-dig'
+  | 'fruit-drop'
+  | 'lucky-auction'
+  | 'pinball-clash';
 
 export type RoomStatus = 'SETUP' | 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
 
@@ -892,6 +902,428 @@ export interface GravityFlipSnapshot {
   players: GravityPlayerState[];
 }
 
+// --- 21. Rich Street (Monopoly-Style Fast Board Game) ---
+export interface RichStreetTileState {
+  index: number;
+  kind: 'go' | 'property' | 'chance' | 'tax' | 'jail' | 'jackpot';
+  name: string;
+  groupColor: string;
+  price: number;
+  baseRent: number;
+  ownerId: string | null;
+  ownerColor: string | null;
+  level: number; // 0 unowned, 1 shop, 2 plaza, 3 tower
+}
+
+export interface RichStreetPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  tileIndex: number;
+  visualTile: number;
+  cash: number;
+  netWorth: number;
+  propertiesOwned: number;
+  jailTurns: number;
+  luckyCharge: number; // 0..100
+  rentShield: boolean;
+  bankrupt: boolean;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface RichStreetSnapshot {
+  gameId: 'rich-street';
+  round: number;
+  totalRounds: number;
+  activePlayerId: string;
+  phase: 'wait-roll' | 'rolling' | 'moving' | 'decision' | 'event';
+  turnTimeLeft: number;
+  dice: [number, number];
+  diceRolling: boolean;
+  jackpotPool: number;
+  decisionTileIndex: number | null;
+  decisionAction: 'buy' | 'upgrade' | null;
+  decisionCost: number;
+  banner: string | null;
+  eventText: string | null;
+  tiles: RichStreetTileState[];
+  players: RichStreetPlayerState[];
+}
+
+// --- 22. Jungle Ladders (Snakes & Ladders Party) ---
+export interface JungleLaddersPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  tile: number; // 1..100
+  visualTile: number;
+  slideFrom: number | null;
+  slideTo: number | null;
+  slideProgress: number; // 0..1
+  trickReady: boolean;
+  boostQueued: boolean;
+  climbs: number;
+  slides: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface JungleLaddersSnapshot {
+  gameId: 'jungle-ladders';
+  targetTile: number;
+  activePlayerId: string;
+  phase: 'wait-roll' | 'rolling' | 'moving' | 'sliding' | 'event';
+  turnTimeLeft: number;
+  powerMeter: number; // 0..1 oscillating timing bar
+  diceValue: number;
+  diceRolling: boolean;
+  banner: string | null;
+  eventText: string | null;
+  ladders: { from: number; to: number }[];
+  snakes: { from: number; to: number; colorHex: string }[];
+  mysteryTiles: number[];
+  bananas: number[];
+  players: JungleLaddersPlayerState[];
+}
+
+// --- 23. Bomb Grid (Bomberman-Style Maze) ---
+export interface BombGridPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  alive: boolean;
+  maxBombs: number;
+  blastRange: number;
+  speedBonus: number;
+  kos: number;
+  score: number;
+  roundsWon: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface BombGridSnapshot {
+  gameId: 'bomb-grid';
+  round: number;
+  totalRounds: number;
+  roundTimer: number;
+  roundBanner: string | null;
+  cols: number;
+  rows: number;
+  cells: number[]; // 0 empty, 1 steel wall, 2 wooden crate
+  bombs: { id: string; ownerId: string; col: number; row: number; x: number; y: number; fuse: number; maxFuse: number; range: number; colorHex: string }[];
+  flames: { col: number; row: number; alpha: number; colorHex: string }[];
+  powerups: { id: string; col: number; row: number; kind: 'flame' | 'bomb' | 'speed' }[];
+  players: BombGridPlayerState[];
+}
+
+// --- 24. Red Light Dash ---
+export interface RedLightPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  sprintTimer: number;
+  shieldTimer: number;
+  zappedTimer: number;
+  finished: boolean;
+  finishOrder: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface RedLightDashSnapshot {
+  gameId: 'red-light-dash';
+  round: number;
+  totalRounds: number;
+  roundTimer: number;
+  lightState: 'green' | 'yellow' | 'red';
+  lightTimer: number;
+  finishX: number;
+  startX: number;
+  banner: string | null;
+  zapLines: { x: number; y: number; alpha: number }[];
+  players: RedLightPlayerState[];
+}
+
+// --- 25. Color Match Dance ---
+export interface ColorMatchTileState {
+  id: number;
+  col: number;
+  row: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  colorIndex: number; // 0 red, 1 cyan, 2 amber, 3 mint
+  symbol: 'star' | 'moon' | 'diamond' | 'bolt';
+  dropped: boolean;
+  warning: boolean;
+}
+
+export interface ColorMatchPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  alive: boolean;
+  falling: boolean;
+  fallProgress: number;
+  hopTimer: number;
+  hopDuration: number;
+  shoveTimer: number;
+  score: number;
+  survivedWaves: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface ColorMatchSnapshot {
+  gameId: 'color-match';
+  wave: number;
+  totalWaves: number;
+  phase: 'preview' | 'scramble' | 'drop';
+  phaseTimer: number;
+  targetColorIndex: number;
+  targetSymbol: 'star' | 'moon' | 'diamond' | 'bolt';
+  banner: string | null;
+  tiles: ColorMatchTileState[];
+  shoveWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  players: ColorMatchPlayerState[];
+}
+
+// --- 26. Kitchen Rush ---
+export type DishKind = 'burger' | 'pizza' | 'taco';
+
+export interface KitchenOrderState {
+  id: string;
+  dish: DishKind;
+  timeLeft: number;
+  maxTime: number;
+  points: number;
+}
+
+export interface KitchenStationState {
+  id: string;
+  kind: 'raw-burger' | 'raw-pizza' | 'raw-taco' | 'grill' | 'serve';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cookingDish: DishKind | null;
+  cookProgress: number; // 0..1
+  cookOwnerId: string | null;
+}
+
+export interface KitchenPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  holding: { dish: DishKind; cooked: boolean } | null;
+  dashTimer: number;
+  served: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface KitchenRushSnapshot {
+  gameId: 'kitchen-rush';
+  timeLeft: number;
+  totalTime: number;
+  orders: KitchenOrderState[];
+  stations: KitchenStationState[];
+  flyingPlates: { id: string; dish: DishKind; x: number; y: number; colorHex: string }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: KitchenPlayerState[];
+}
+
+// --- 27. Treasure Island Dig ---
+export interface TreasureSpotState {
+  id: string;
+  x: number;
+  y: number;
+  kind: 'gold' | 'gem' | 'crown';
+  value: number;
+  revealedTimer: number;
+}
+
+export interface TreasureCrabState {
+  id: string;
+  x: number;
+  y: number;
+  angle: number;
+  stunTimer: number;
+}
+
+export interface TreasurePlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  angle: number;
+  heat: number; // 0..1 proximity to nearest buried chest
+  digTimer: number;
+  stunTimer: number;
+  chestsFound: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface TreasureDigSnapshot {
+  gameId: 'treasure-dig';
+  timeLeft: number;
+  totalTime: number;
+  spots: TreasureSpotState[];
+  crabs: TreasureCrabState[];
+  dugHoles: { x: number; y: number; success: boolean; alpha: number; colorHex: string }[];
+  radars: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: TreasurePlayerState[];
+}
+
+// --- 28. Fruit Drop Frenzy ---
+export interface FallingItemState {
+  id: string;
+  kind: 'pineapple' | 'watermelon' | 'berry' | 'star' | 'bomb';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  rot: number;
+}
+
+export interface FruitPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  dashTimer: number;
+  bounceTimer: number;
+  stunTimer: number;
+  combo: number;
+  caught: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface FruitDropSnapshot {
+  gameId: 'fruit-drop';
+  timeLeft: number;
+  totalTime: number;
+  items: FallingItemState[];
+  bounceWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: FruitPlayerState[];
+}
+
+// --- 29. Lucky Auction ---
+export interface AuctionPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cash: number;
+  treasureValue: number;
+  totalWorth: number;
+  itemsWon: number;
+  draftBid: number;
+  passed: boolean;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface LuckyAuctionSnapshot {
+  gameId: 'lucky-auction';
+  round: number;
+  totalRounds: number;
+  phase: 'bidding' | 'reveal';
+  timer: number;
+  chestLabel: string;
+  chestClue: string;
+  chestVisual: 'royal' | 'wooden' | 'mystery' | 'crystal';
+  revealedPrize: 'diamond' | 'crown' | 'gold' | 'ruby' | 'duck' | null;
+  revealedValue: number;
+  highestBid: number;
+  highestBidderId: string | null;
+  highestBidderName: string | null;
+  highestBidderColor: string | null;
+  banner: string | null;
+  players: AuctionPlayerState[];
+}
+
+// --- 30. Pinball Clash ---
+export interface PinballPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  side: 'left' | 'right';
+  isBot?: boolean;
+  x: number;
+  y: number;
+  flipTimer: number;
+  bumpTimer: number;
+  goals: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface PinballBallState {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  golden: boolean;
+  lastTouchColor: string | null;
+  trail: { x: number; y: number }[];
+}
+
+export interface PinballClashSnapshot {
+  gameId: 'pinball-clash';
+  targetGoals: number;
+  scoreLeft: number;
+  scoreRight: number;
+  goalBanner: string | null;
+  goalBannerColor: string | null;
+  multiballCharge: number; // 0..1
+  bumpers: { x: number; y: number; r: number; value: number; flash: number; colorHex: string }[];
+  balls: PinballBallState[];
+  players: PinballPlayerState[];
+}
+
 export type GameSnapshot =
   | BumperBrawlSnapshot
   | AstroBlasterSnapshot
@@ -912,7 +1344,17 @@ export type GameSnapshot =
   | GhostHuntSnapshot
   | MeteorSwarmSnapshot
   | HookShotSnapshot
-  | GravityFlipSnapshot;
+  | GravityFlipSnapshot
+  | RichStreetSnapshot
+  | JungleLaddersSnapshot
+  | BombGridSnapshot
+  | RedLightDashSnapshot
+  | ColorMatchSnapshot
+  | KitchenRushSnapshot
+  | TreasureDigSnapshot
+  | FruitDropSnapshot
+  | LuckyAuctionSnapshot
+  | PinballClashSnapshot;
 
 export interface RoomSnapshot {
   code: string;

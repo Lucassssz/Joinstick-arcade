@@ -778,6 +778,355 @@ export function computeBotInput(
       break;
     }
 
+    case 'rich-street': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.bankrupt || snapshot.activePlayerId !== botId) break;
+      // Realistic ~0.8s board-game thinking delay via turnTimeLeft
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 9.1 && mem.actionCooldown <= 0) {
+        if (me.luckyCharge >= 100 && !me.rentShield && Math.random() < tuning.abilityChance) {
+          b = true;
+          mem.actionCooldown = 0.6;
+        } else {
+          a = true;
+          mem.actionCooldown = 0.7;
+        }
+      } else if (snapshot.phase === 'decision' && snapshot.turnTimeLeft < 7.0 && mem.actionCooldown <= 0) {
+        const keepBuffer = difficulty === 'chill' ? 320 : difficulty === 'arcade' ? 180 : 90;
+        const canAffordComfortably = me.cash - snapshot.decisionCost >= keepBuffer;
+        if (canAffordComfortably || (snapshot.decisionAction === 'buy' && me.propertiesOwned < 2 && me.cash >= snapshot.decisionCost)) {
+          a = true;
+        } else {
+          b = true;
+        }
+        mem.actionCooldown = 0.7;
+      }
+      break;
+    }
+
+    case 'jungle-ladders': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 9.1 && mem.actionCooldown <= 0) {
+        if (me.trickReady && !me.boostQueued && Math.random() < tuning.abilityChance) {
+          b = true;
+          mem.actionCooldown = 0.55;
+        } else {
+          // Spicy bots time the power meter high; chill bots roll casually
+          const goodTiming =
+            difficulty === 'spicy'
+              ? snapshot.powerMeter > 0.78
+              : difficulty === 'arcade'
+                ? snapshot.powerMeter > 0.62
+                : true;
+          if (goodTiming || snapshot.turnTimeLeft < 7.2) {
+            a = true;
+            mem.actionCooldown = 0.75;
+          }
+        }
+      }
+      break;
+    }
+
+    case 'bomb-grid': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      // Flee any active bomb in same row/col within blast range
+      const dangerBomb = snapshot.bombs.find(
+        (bm) =>
+          Math.hypot(bm.x - me.x, bm.y - me.y) < 220 &&
+          (Math.abs(bm.x - me.x) < 48 || Math.abs(bm.y - me.y) < 48)
+      );
+      if (dangerBomb) {
+        const rx = me.x - dangerBomb.x;
+        const ry = me.y - dangerBomb.y;
+        // Step perpendicular to escape cross-blast!
+        if (Math.abs(rx) < 34) {
+          dx = mem.strafeDir * tuning.moveScale;
+          dy = Math.sign(ry || 1) * 0.45 * tuning.moveScale;
+        } else {
+          dx = Math.sign(rx || 1) * 0.45 * tuning.moveScale;
+          dy = mem.strafeDir * tuning.moveScale;
+        }
+        if (Math.hypot(rx, ry) < 76 && me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+          b = true;
+          markActed();
+        }
+      } else {
+        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+        const { item: rival, dist } = nearestOf(me.x, me.y, rivals);
+        if (rival && dist < 340) {
+          const s = steerToward(me.x, me.y, rival.x, rival.y, tuning, mem.wanderAngle);
+          dx = s.dx;
+          dy = s.dy;
+          if (dist < 135 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
+            a = true;
+            markActed();
+          }
+        } else {
+          dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.8;
+          dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.8;
+          if (me.cooldownA <= 0 && canAct() && Math.random() < 0.04) {
+            a = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'red-light-dash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.finished) break;
+      if (snapshot.lightState === 'green') {
+        dx = tuning.moveScale;
+        dy = Math.sin(mem.wanderAngle) * 0.15;
+        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.16) {
+          a = true;
+          markActed();
+        }
+      } else if (snapshot.lightState === 'yellow') {
+        // Chill bots sometimes brake slightly late; spicy bots stop immediately
+        const brakeNow = difficulty === 'spicy' || snapshot.lightTimer < 0.45;
+        dx = brakeNow ? 0 : tuning.moveScale * 0.45;
+      } else {
+        // Red light: freeze completely!
+        dx = 0;
+        dy = 0;
+      }
+      break;
+    }
+
+    case 'color-match': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive || me.falling) break;
+      const safeTiles = snapshot.tiles.filter(
+        (t) => !t.dropped && t.colorIndex === snapshot.targetColorIndex
+      );
+      if (safeTiles.length > 0) {
+        let best = safeTiles[0];
+        let bestD = Infinity;
+        for (const t of safeTiles) {
+          const cx = t.x + t.w / 2;
+          const cy = t.y + t.h / 2;
+          const d = Math.hypot(cx - me.x, cy - me.y);
+          if (d < bestD) {
+            bestD = d;
+            best = t;
+          }
+        }
+        const cx = best.x + best.w / 2;
+        const cy = best.y + best.h / 2;
+        if (bestD > 26) {
+          const s = steerToward(me.x, me.y, cx, cy, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (bestD > 165 && me.cooldownA <= 0 && canAct() && Math.random() < 0.22) {
+            a = true;
+            markActed();
+          }
+        } else {
+          // On safe tile: occasionally shove nearby rival!
+          const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive && !p.falling);
+          const { item: near, dist } = nearestOf(me.x, me.y, rivals);
+          if (near && dist < 95 && me.cooldownB <= 0 && canAct() && Math.random() < 0.14) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'kitchen-rush': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const serveSt = snapshot.stations.find((s) => s.kind === 'serve');
+      const readyGrill = snapshot.stations.find((s) => s.kind === 'grill' && s.cookingDish && s.cookProgress >= 1);
+      const emptyGrill = snapshot.stations.find((s) => s.kind === 'grill' && !s.cookingDish);
+      const wantedDish = snapshot.orders[0]?.dish ?? 'burger';
+      const rawKind = wantedDish === 'burger' ? 'raw-burger' : wantedDish === 'pizza' ? 'raw-pizza' : 'raw-taco';
+      const rawSt = snapshot.stations.find((s) => s.kind === rawKind);
+
+      let targetX = ARENA_WIDTH / 2;
+      let targetY = ARENA_HEIGHT / 2;
+      let wantInteract = false;
+
+      if (me.holding && me.holding.cooked && serveSt) {
+        targetX = serveSt.x - 32;
+        targetY = Math.max(serveSt.y + 30, Math.min(serveSt.y + serveSt.h - 30, me.y));
+        const dServe = Math.hypot(targetX - me.x, targetY - me.y);
+        if (dServe < 480 && me.cooldownB <= 0 && canAct()) {
+          // Toss cooked dish straight across to serving counter!
+          b = true;
+          markActed();
+        } else if (dServe < 85) {
+          wantInteract = true;
+        }
+      } else if (me.holding && !me.holding.cooked && emptyGrill) {
+        targetX = emptyGrill.x - 34;
+        targetY = emptyGrill.y + emptyGrill.h / 2;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
+      } else if (!me.holding && readyGrill) {
+        targetX = readyGrill.x + readyGrill.w + 34;
+        targetY = readyGrill.y + readyGrill.h / 2;
+        // Prefer whichever side of the grill the bot is already closer to
+        if (me.x < readyGrill.x + readyGrill.w / 2) targetX = readyGrill.x - 34;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
+      } else if (!me.holding && rawSt) {
+        targetX = rawSt.x + rawSt.w + 34;
+        targetY = rawSt.y + rawSt.h / 2;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
+      }
+
+      // If crossing the grill column (x: 495..700), steer through nearest open horizontal walkway (y = 295 or 486)
+      const crossingGrills = (me.x < 500 && targetX > 690) || (me.x > 690 && targetX < 500);
+      if (crossingGrills) {
+        const aisleY = Math.abs(me.y - 295) < Math.abs(me.y - 486) ? 295 : 486;
+        if (Math.abs(me.y - aisleY) > 28) {
+          targetX = me.x < 600 ? 465 : 725;
+          targetY = aisleY;
+        }
+      }
+
+      const s = steerToward(me.x, me.y, targetX, targetY, tuning);
+      dx = s.dx;
+      dy = s.dy;
+      if (wantInteract && mem.actionCooldown <= 0) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'treasure-dig': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      // Avoid nearby active crabs
+      const activeCrabs = snapshot.crabs.filter((c) => c.stunTimer <= 0);
+      const { item: nearCrab, dist: crabDist } = nearestOf(me.x, me.y, activeCrabs);
+      if (nearCrab && crabDist < 95) {
+        const flee = steerToward(nearCrab.x, nearCrab.y, me.x, me.y, tuning);
+        dx = flee.dx;
+        dy = flee.dy;
+        if (me.cooldownB <= 0 && canAct()) {
+          b = true;
+          markActed();
+        }
+      } else {
+        const revealed = snapshot.spots.filter((s) => s.revealedTimer > 0);
+        const targetList = revealed.length > 0 ? revealed : difficulty === 'spicy' ? snapshot.spots : [];
+        const { item: spot, dist: spotDist } = nearestOf(me.x, me.y, targetList);
+        if (spot) {
+          const s = steerToward(me.x, me.y, spot.x, spot.y, tuning, mem.wanderAngle);
+          dx = s.dx;
+          dy = s.dy;
+          if (spotDist < 54 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          }
+        } else {
+          // Follow heat + wander and dig when hot!
+          dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.85;
+          dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.85;
+          if (me.heat > 0.8 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          } else if (me.heat > 0.38 && me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'fruit-drop': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      const nearbyBomb = snapshot.items.find(
+        (it) => it.kind === 'bomb' && it.y > me.y - 180 && it.y < me.y + 20 && Math.abs(it.x - me.x) < 90
+      );
+      if (nearbyBomb) {
+        if (me.cooldownB <= 0 && canAct() && Math.abs(nearbyBomb.x - me.x) < 110) {
+          b = true;
+          markActed();
+        } else {
+          dx = (nearbyBomb.x >= me.x ? -1 : 1) * tuning.moveScale;
+        }
+      } else {
+        const goodItems = snapshot.items.filter((it) => it.kind !== 'bomb' && it.y < me.y + 10);
+        let best = goodItems[0] ?? null;
+        let bestScore = -Infinity;
+        for (const it of goodItems) {
+          const val = it.kind === 'star' ? 220 : 90;
+          const score = val + it.y * 0.4 - Math.abs(it.x - me.x) * 0.7;
+          if (score > bestScore) {
+            bestScore = score;
+            best = it;
+          }
+        }
+        if (best) {
+          const err = best.x - me.x;
+          if (Math.abs(err) > 16) {
+            dx = Math.sign(err) * tuning.moveScale;
+            if (Math.abs(err) > 140 && best.y > me.y - 240 && me.cooldownA <= 0 && canAct()) {
+              a = true;
+              markActed();
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    case 'lucky-auction': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.passed || snapshot.phase !== 'bidding') break;
+      if (snapshot.highestBidderId === botId || mem.actionCooldown > 0) break;
+      // Estimate chest value from clue without cheating unfairly
+      const soundsLikeDuck =
+        snapshot.chestClue.toLowerCase().includes('squeak') ||
+        snapshot.chestClue.toLowerCase().includes('hollow');
+      const maxWilling = soundsLikeDuck
+        ? difficulty === 'chill'
+          ? 200
+          : 100
+        : difficulty === 'spicy'
+          ? 340
+          : 280;
+      const nextBid = snapshot.highestBid + 50;
+      if (nextBid <= maxWilling && me.cash >= nextBid && Math.random() < 0.14) {
+        a = true;
+        mem.actionCooldown = 1.1;
+      } else if ((nextBid > maxWilling || me.cash < nextBid) && snapshot.timer < 7.5 && Math.random() < 0.25) {
+        b = true;
+        mem.actionCooldown = 0.8;
+      }
+      break;
+    }
+
+    case 'pinball-clash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.balls.length === 0) break;
+      // Track ball closest to my side
+      const targetBall = [...snapshot.balls].sort(
+        (b1, b2) => Math.abs(b1.x - me.x) - Math.abs(b2.x - me.x)
+      )[0];
+      const diffY = targetBall.y - me.y;
+      if (Math.abs(diffY) > 14) {
+        dy = Math.sign(diffY) * Math.min(1, Math.abs(diffY) / 70) * tuning.moveScale;
+      }
+      const dist = Math.hypot(targetBall.x - me.x, targetBall.y - me.y);
+      if (dist < 115 && me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      } else if (dist < 145 && me.cooldownB <= 0 && canAct() && Math.random() < 0.14) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
     default: {
       // Universal fallback AI for any newly added future game without a custom tactic block:
       // Inspects generic player positions when present, stays away from arena edges, chases rivals

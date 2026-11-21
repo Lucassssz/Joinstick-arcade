@@ -592,6 +592,216 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     settingLabel: '奔跑时长',
     settingOptions: { 45: '45 秒', 60: '60 秒', 90: '90 秒' },
   },
+  'rich-street': {
+    name: '富豪大街',
+    category: '大富翁棋盘',
+    tagline: '掷骰子买商铺、建黄金高塔、狂收过路费！',
+    description: '快节奏大富翁城市棋盘！轮流掷骰子绕 24 格热闹街区前进，购买并升级商铺，成为全场首富。',
+    playerModeLabel: '2人 · 3–8人棋盘',
+    rules: [
+      '轮到你时，按「掷骰 / 购买 (A)」掷出骰子在城市棋盘前进。',
+      '走到空商铺？按 A 立即买下，或按 B 跳过保留现金。',
+      '走到自己的商铺可升级建筑——对手路过要付超高租金！',
+      '幸运能量满格时，掷骰前按 B 可触发免租护盾和奖金！',
+    ],
+    joystickLabel: '棋盘视角',
+    actionALabel: '掷骰/买',
+    actionASublabel: '前进建楼',
+    actionBLabel: '跳过/幸运',
+    actionBSublabel: '放弃或护盾',
+    controlTip: '前期多买地并升级商铺，最终总资产最高者赢得冠军！',
+    settingLabel: '游戏回合',
+    settingOptions: { 6: '6 回合', 8: '8 回合', 10: '10 回合', 14: '14 回合' },
+  },
+  'jungle-ladders': {
+    name: '丛林蛇梯棋',
+    category: '蛇梯棋盘',
+    tagline: '爬上巨型竹梯一路飙升，小心躲开调皮丛林蛇！',
+    description: '经典 1 到 100 格蛇梯大冒险！结合能量条掷骰子、神秘问号格和香蕉皮陷阱，最先到达终点获胜！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '轮到你时，看准能量条按「掷骰 (A)」决定步数向前跳。',
+      '踩到竹梯底部，直接顺着梯子大幅爬升！',
+      '小心别踩到蛇头——不然会一路滑回下方！',
+      '踩中蓝色问号格可充能「妙计 (B)」：骰子+2 并在身后丢香蕉皮！',
+    ],
+    joystickLabel: '准备掷骰',
+    actionALabel: '掷骰',
+    actionASublabel: '定格点数',
+    actionBLabel: '妙计',
+    actionBSublabel: '+2与香蕉',
+    controlTip: '等能量条涨到绿色高处时按下掷骰，更容易掷出大点数！',
+    settingLabel: '终点格数',
+    settingOptions: { 50: '50 格（快赛）', 100: '100 格（经典）' },
+  },
+  'bomb-grid': {
+    name: '炸弹迷宫',
+    category: '爆破派对',
+    tagline: '炸开木箱抢强化道具，还能一脚把炸弹踢出去！',
+    description: '经典炸弹人迷宫大作战！放下炸弹炸开木箱收集火焰和加速道具，把对手困在转角！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '在迷宫中奔跑，按「放弹 (A)」在脚下放置定时炸弹。',
+      '放完炸弹记得立刻躲进侧边通道，避开十字火焰！',
+      '炸碎木箱收集更大火焰、更多炸弹和极速道具。',
+      '靠近炸弹按「踢弹 (B)」，直接把炸弹顺着走廊踢飞！',
+    ],
+    joystickLabel: '迷宫奔跑',
+    actionALabel: '放弹',
+    actionASublabel: '放置炸弹',
+    actionBLabel: '踢弹',
+    actionBSublabel: '踢飞炸弹',
+    controlTip: '放下炸弹后立刻拐进旁边的安全通道！',
+    settingLabel: '回合数',
+    settingOptions: { 3: '3 回合', 5: '5 回合', 1: '1 局快战' },
+  },
+  'red-light-dash': {
+    name: '红绿灯冲刺',
+    category: '木头人竞速',
+    tagline: '绿灯全力狂奔——红灯一亮立刻定格不动！',
+    description: '向终点的红绿灯机器人全力冲刺！绿灯狂跑、黄灯急刹、红灯一动就会被激光打回起点！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '绿灯亮起时，向右推动摇杆全力冲向终点线。',
+      '黄灯代表准备刹车——务必在变红灯前松开摇杆！',
+      '红灯时乱动会被激光打退，除非提前开了「护盾 (B)」！',
+      '绿灯时按「冲刺 (A)」触发爆发加速甩开所有人！',
+    ],
+    joystickLabel: '奔跑急停',
+    actionALabel: '冲刺',
+    actionASublabel: '极速爆发',
+    actionBLabel: '护盾',
+    actionBSublabel: '抵挡激光',
+    controlTip: '一看到黄灯立刻松手停步，稳稳冲线最保险！',
+    settingLabel: '比赛局数',
+    settingOptions: { 3: '3 局竞速', 5: '5 局竞速', 1: '1 局快赛' },
+  },
+  'color-match': {
+    name: '色彩记忆舞池',
+    category: '记忆地板',
+    tagline: '看准目标颜色和图案，在地板掉落前冲上去！',
+    description: '记下顶部播报的目标颜色与符号，在倒计时结束前抢占安全舞砖，还能把好友挤下去！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '看清顶部大牌子提示的目标「颜色 + 图案」。',
+      '在倒计时归零前站到对应舞砖上——其他地板会瞬间掉落！',
+      '按「跳跃 (A)」灵活越过空洞或其他玩家。',
+      '按「推挤 (B)」把对手撞下最后的安全地板！',
+    ],
+    joystickLabel: '舞池奔跑',
+    actionALabel: '跳跃',
+    actionASublabel: '快速跃起',
+    actionBLabel: '推挤',
+    actionBSublabel: '撞开对手',
+    controlTip: '每波倒计时都会变快——平时待在舞池中央最容易抢位！',
+    settingLabel: '挑战波次',
+    settingOptions: { 6: '6 波', 8: '8 波', 10: '10 波' },
+  },
+  'kitchen-rush': {
+    name: '疯狂厨房',
+    category: '料理派对',
+    tagline: '拿食材、上烤炉、把香喷喷的美食直接甩上餐台！',
+    description: '汉堡、披萨、玉米卷订单源源不断！抢拿新鲜食材快速烤熟，把热腾腾的餐盘抛上出餐台赢高分！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '看顶部订单需求（汉堡、披萨或玉米卷）。',
+      '走到左侧对应食材箱，按「烹饪 (A)」拿取生食材。',
+      '到中间烤炉按「烹饪 (A)」快速烤熟，烤好后再按 A 端起！',
+      '送到右侧出餐台按 A 上菜——或者按「抛盘 (B)」直接飞盘上菜！',
+    ],
+    joystickLabel: '厨房奔跑',
+    actionALabel: '烹饪',
+    actionASublabel: '拿取/上菜',
+    actionBLabel: '抛盘',
+    actionBSublabel: '冲刺/甩盘',
+    controlTip: '端着熟食面向右侧出餐台直接按抛盘，省下跑路时间狂刷分！',
+    settingLabel: '营业时长',
+    settingOptions: { 60: '60 秒', 75: '75 秒', 90: '90 秒', 120: '120 秒' },
+  },
+  'treasure-dig': {
+    name: '海岛寻宝挖矿',
+    category: '雷达寻宝',
+    tagline: '跟着冷热雷达光环找宝藏，一铲挖出黄金海盗箱！',
+    description: '在阳光海滩上搜索埋藏的宝箱！越靠近黄金，光环越亮越烫（手机也会震动提醒），小心躲开红螃蟹！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '在海滩上走动——离宝藏越近，脚下光环越红越亮！',
+      '光环发烫时按「挖掘 (A)」挖出金币、宝石或皇冠！',
+      '按「雷达 (B)」发射声呐直接显形附近 X 标记，还能震晕红螃蟹！',
+      '时间结束时挖到宝藏总价值最高者获胜！',
+    ],
+    joystickLabel: '海滩搜索',
+    actionALabel: '挖掘',
+    actionASublabel: '挖出宝箱',
+    actionBLabel: '雷达',
+    actionBSublabel: '扫描晕蟹',
+    controlTip: '光环变暖时开一次雷达，直接看清红叉位置精准开挖！',
+    settingLabel: '寻宝时长',
+    settingOptions: { 60: '60 秒', 75: '75 秒', 90: '90 秒' },
+  },
+  'fruit-drop': {
+    name: '水果大接龙',
+    category: '高空接果',
+    tagline: '接住漫天飞落的水果和彩虹星，把炸弹扇飞！',
+    description: '菠萝、西瓜、彩虹星从天而降！连击接果冲上 5 倍高分，顺手把刺球炸弹弹飞保护连击！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '左右推摇杆移动果篮，接住天上掉下来的新鲜水果。',
+      '连续接中水果可叠加最高 5 倍连击得分！',
+      '按「冲刺 (A)」飞扑抢接高分彩虹星星。',
+      '躲开刺球炸弹——或者按「反弹 (B)」直接把炸弹拍飞得分！',
+    ],
+    joystickLabel: '移动果篮',
+    actionALabel: '冲刺',
+    actionASublabel: '飞扑抢星',
+    actionBLabel: '反弹',
+    actionBSublabel: '拍飞炸弹',
+    controlTip: '保住 5 倍连击最重要，看到炸弹赶紧按反弹拍飞！',
+    settingLabel: '比赛时长',
+    settingOptions: { 45: '45 秒', 60: '60 秒', 90: '90 秒' },
+  },
+  'lucky-auction': {
+    name: '幸运大拍卖',
+    category: '盲盒竞拍',
+    tagline: '细读线索抢拍神秘宝箱，千万别高价买到小黄鸭！',
+    description: '神秘宝箱轮番登上拍卖舞台！根据线索叫价抢夺钻石与皇冠，或果断放弃避免冤大头买到搞笑橡皮鸭！',
+    playerModeLabel: '2人 · 3–8人竞拍',
+    rules: [
+      '阅读舞台上的神秘线索，猜猜箱子里是天价宝石还是小黄鸭！',
+      '左右推摇杆调节出价，按「出价 (A)」举牌压过对手！',
+      '觉得太贵就按「放弃 (B)」保住现金，等下一个更好的宝箱。',
+      '全部拍完后，剩余现金 + 宝藏总价值最高者获胜！',
+    ],
+    joystickLabel: '调节报价',
+    actionALabel: '出价',
+    actionASublabel: '举牌加价',
+    actionBLabel: '放弃',
+    actionBSublabel: '本轮观望',
+    controlTip: '直接快速按出价 (A) 即可自动比当前最高价多加 $50！',
+    settingLabel: '拍卖轮数',
+    settingOptions: { 5: '5 个宝箱', 6: '6 个宝箱', 7: '7 个宝箱', 9: '9 个宝箱' },
+  },
+  'pinball-clash': {
+    name: '弹珠对决',
+    category: '双人弹珠',
+    tagline: '双人同台机械弹珠对轰，触发黄金双球狂飙！',
+    description: '在霓虹弹珠台上 1v1 激情对决！滑动机械弹板大力抽射银球，撞满中央弹柱召唤黄金多球！',
+    playerModeLabel: '双人对战 (1v1)',
+    rules: [
+      '上下推动摇杆，沿球门滑动你的机械弹板。',
+      '弹珠贴近瞬间按「弹射 (A)」轰出超高速暴击球！',
+      '按「震波 (B)」释放磁力波弹开高速来球。',
+      '撞击中央发光弹柱充能黄金双球——先达目标进球数获胜！',
+    ],
+    joystickLabel: '滑动弹板',
+    actionALabel: '弹射',
+    actionASublabel: '强力抽球',
+    actionBLabel: '震波',
+    actionBSublabel: '磁力弹开',
+    controlTip: '算准弹珠撞板瞬间按弹射，能打出极速角度球！',
+    settingLabel: '获胜进球',
+    settingOptions: { 5: '先得 5 球', 7: '先得 7 球', 9: '先得 9 球' },
+  },
 };
 
 export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMetadata {
@@ -749,6 +959,89 @@ const EXACT_GAME_TEXT_ZH: Record<string, string> = {
   '1st': '第1名',
   '2nd': '第2名',
   '3rd': '第3名',
+
+  // New 10 games exact labels
+  'RICH STREET': '富豪大街',
+  'CITY WEALTH': '城市财富榜',
+  'JUNGLE LADDERS': '丛林蛇梯棋',
+  'MATCH COMPLETE': '比赛结束',
+  'FINAL WEALTH COUNT!': '最终资产结算！',
+  'GO +$200': '起点 +$200',
+  'Sunny Cafe': '阳光咖啡馆',
+  'Boba Alley': '奶茶一条街',
+  'Lucky Card': '幸运机遇卡',
+  'Pixel Arcade': '像素游戏厅',
+  'Neon Cinema': '霓虹电影院',
+  'Chill Jail': '悠闲禁闭室',
+  'Ramen Row': '拉面美食街',
+  'Sushi Pier': '寿司海鲜港',
+  'City Tax': '城市市政税',
+  'Sky Park': '空中大公园',
+  'Botanic Dome': '植物玻璃穹',
+  'Free Jackpot': '免费大彩池',
+  'Harbor Mall': '海港购物城',
+  'Marina Club': '游艇俱乐部',
+  'Gold Plaza': '黄金大广场',
+  'Crown Hotel': '皇冠大酒店',
+  'Luxury Fee': '奢华消费税',
+  'Star Tower': '星光摩天楼',
+  'Diamond Ave': '钻石大道',
+  'Royal Palace': '皇家宫殿',
+  'Grand Spire': '云端双子塔',
+  Bankrupt: '已破产',
+  Eliminated: '已出局',
+  shops: '间商铺',
+  cash: '现金',
+  loot: '宝藏',
+  WORTH: '总资产',
+  PASSED: '已放弃',
+  'LEADING!': '当前最高！',
+  OFFER: '出价',
+  'CURRENT TOP BID': '当前最高出价',
+  'NO BIDS YET — PRESS A!': '暂无出价 — 按 A 举牌！',
+  'Royal Vault Box': '皇家金库盒',
+  'Velvet Crown Case': '天鹅绒皇冠盒',
+  'Crystal Lockbox': '水晶密码箱',
+  'Pirate Oak Chest': '海盗橡木箱',
+  'Mystery Party Box': '神秘派对盲盒',
+  'Gilded Mystery Box': '镀金神秘箱',
+  'Starlight Coffer': '星光藏宝箱',
+  'Old Harbor Trunk': '老港口旧皮箱',
+  'Royal Question Box': '皇家问号箱',
+  'Heavy & sparkles inside!': '沉甸甸的，里面闪闪发光！',
+  'Feels solid gold!': '手感像纯金一样重！',
+  'Glowing bright red!': '透着耀眼的红宝石光！',
+  'Clinks like coins!': '摇起来叮当作响像金币！',
+  'Suspiciously squeaky...': '怎么捏起来嘎嘎响……',
+  'Light... or hollow gem?': '好轻……是空心宝石还是整蛊？',
+  'Humming with luxury!': '散发着奢华的宝光！',
+  'Smells like treasure!': '闻起来全是宝藏的味道！',
+  'Might be priceless... or quack!': '可能价值连城……也可能嘎嘎叫！',
+  'FLOOR DROPPED!': '错误地板已掉落！',
+  'STAND ON RED!': '快站上红色星形！',
+  'STAND ON BLUE!': '快站上蓝色月亮！',
+  'STAND ON GOLD!': '快站上金色菱形！',
+  'STAND ON MINT!': '快站上绿色闪电！',
+  'Fell — Next Wave!': '已掉落 — 下波复活！',
+  'MAZE CLEARED!': '迷宫全清！',
+  'GREEN LIGHT — RUN!': '绿灯 — 快跑！',
+  'YELLOW — SLOW DOWN!': '黄灯 — 准备急停！',
+  'RED LIGHT — FREEZE!': '红灯 — 禁止移动！',
+  BURGER: '汉堡',
+  PIZZA: '披萨',
+  TACO: '玉米卷',
+  GRILL: '烤炉',
+  SERVE: '出餐台',
+  'A / TOSS B': '按A 或 B抛盘',
+  'HOT!': '超近！快挖！',
+  Warm: '接近中',
+  Cold: '较远',
+  'PINCHED!': '被螃蟹夹了！',
+  'LEFT GOAL!': '左方进球！',
+  'RIGHT GOAL!': '右方进球！',
+  'BALL LOST!': '漏球了！',
+  'GOLDEN MULTIBALL!': '黄金双球时刻！',
+  'MULTIBALL CHARGE': '多球充能',
 };
 
 function translateOrdinalZh(ord: string): string {
@@ -994,6 +1287,188 @@ export function translateGameText(text: string, lang: Language): string {
   }
   if ((m = trimmed.match(/^(\d+)\s+pass(?:es)?$/i))) {
     return `传递 ${m[1]} 次`;
+  }
+
+  // --- New 10 games dynamic patterns ---
+  if ((m = trimmed.match(/^ROUND\s+(\d+)\/(\d+)\s+·\s+POT\s+\$(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 回合 · 彩池 $${m[3]}`;
+  }
+  if ((m = trimmed.match(/^PRESS A TO ROLL\s+\((\d+)s\)$/i))) {
+    return `按 A 掷骰子 (${m[1]}秒)`;
+  }
+  if ((m = trimmed.match(/^A: BUY\/UPGRADE \(\$(\d+)\)\s+·\s+B: SKIP \((\d+)s\)$/i))) {
+    return `A 购买/升级 ($${m[1]}) · B 跳过 (${m[2]}秒)`;
+  }
+  if ((m = trimmed.match(/^JACKPOT \+\$(\d+)!$/i))) {
+    return `中大奖 +$${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^BUY \$(\d+)\? A\/B$/i))) {
+    return `买 $${m[1]}? 按A/B`;
+  }
+  if ((m = trimmed.match(/^YOUR TURN · \$(\d+)$/i))) {
+    return `你的回合 · $${m[1]}`;
+  }
+  if ((m = trimmed.match(/^\$(\d+) · (\d+) shops$/i))) {
+    return `$${m[1]} · ${m[2]} 间铺`;
+  }
+  if ((m = trimmed.match(/^\$(\d+) cash · (\d+) shops$/i))) {
+    return `$${m[1]} 现金 · ${m[2]} 间商铺`;
+  }
+  if ((m = trimmed.match(/^(.+)'s Turn — Press A to Roll!$/i))) {
+    return `轮到 ${m[1]} — 按 A 掷骰！`;
+  }
+  if ((m = trimmed.match(/^(.+) rolled (\d+) \+ (\d+) = (\d+)!$/i))) {
+    return `${m[1]} 掷出了 ${m[2]} + ${m[3]} = ${m[4]} 点！`;
+  }
+  if ((m = trimmed.match(/^(.+) rolled a (\d+)!$/i))) {
+    return `${m[1]} 掷出了 ${m[2]} 点！`;
+  }
+  if ((m = trimmed.match(/^(.+) rolled (\d+) \+ 2 Boost = (\d+)!$/i))) {
+    return `${m[1]} 掷出 ${m[2]} +2 加速 = ${m[3]} 步！`;
+  }
+  if ((m = trimmed.match(/^(.+) bought (.+)!$/i))) {
+    return `${m[1]} 买下了 ${translateGameText(m[2], lang)}！`;
+  }
+  if ((m = trimmed.match(/^(.+) upgraded (.+) to Lv\.(\d+)!$/i))) {
+    return `${m[1]} 将 ${translateGameText(m[2], lang)} 升至 ${m[3]} 级！`;
+  }
+  if ((m = trimmed.match(/^(.+) paid \$(\d+) rent to (.+)!$/i))) {
+    return `${m[1]} 向 ${m[3]} 支付 $${m[2]} 租金！`;
+  }
+  if ((m = trimmed.match(/^(.+) passed GO! \+\$200$/i))) {
+    return `${m[1]} 经过起点！+$200`;
+  }
+  if ((m = trimmed.match(/^POWER ROLL · (\d+)s$/i))) {
+    return `蓄力掷骰 · ${m[1]}秒`;
+  }
+  if ((m = trimmed.match(/^LADDER! #(\d+) → #(\d+)$/i))) {
+    return `爬梯大捷！#${m[1]} → #${m[2]}`;
+  }
+  if ((m = trimmed.match(/^SNAKE! #(\d+) → #(\d+)$/i))) {
+    return `踩到蛇啦！#${m[1]} → #${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(.+) REACHED #(\d+)!$/i))) {
+    return `${m[1]} 率先抵达 #${m[2]}！`;
+  }
+  if ((m = trimmed.match(/^YOUR TURN · #(\d+)\/(\d+)$/i))) {
+    return `你的回合 · #${m[1]}/${m[2]}`;
+  }
+  if ((m = trimmed.match(/^Tile #(\d+)\/(\d+)$/i))) {
+    return `第 #${m[1]}/${m[2]} 格`;
+  }
+  if ((m = trimmed.match(/^Tile #(\d+) · (\d+) climbs$/i))) {
+    return `第 #${m[1]} 格 · 爬梯 ${m[2]} 次`;
+  }
+  if ((m = trimmed.match(/^(.+) WINS ROUND (\d+)!$/i))) {
+    return `${m[1]} 赢得第 ${m[2]} 回合！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) DRAW!$/i))) {
+    return `第 ${m[1]} 回合平局！`;
+  }
+  if ((m = trimmed.match(/^(\d+) wins · (\d+) KOs$/i))) {
+    return `${m[1]} 胜 · ${m[2]} 击杀`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts · (\d+)B\/(\d+)F$/i))) {
+    return `${m[1]} 分 · ${m[2]}弹/${m[3]}火`;
+  }
+  if ((m = trimmed.match(/^RACE (\d+)\/(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 局`;
+  }
+  if ((m = trimmed.match(/^RACE (\d+) — GO!$/i))) {
+    return `第 ${m[1]} 局 — 开跑！`;
+  }
+  if ((m = trimmed.match(/^RACE (\d+) COMPLETE!$/i))) {
+    return `第 ${m[1]} 局结束！`;
+  }
+  if ((m = trimmed.match(/^(.+) FINISHED 1ST!$/i))) {
+    return `${m[1]} 第一个冲线！`;
+  }
+  if ((m = trimmed.match(/^FINISHED #(\d+)$/i))) {
+    return `第 ${m[1]} 名完赛`;
+  }
+  if ((m = trimmed.match(/^(\d+)% · (\d+) pts$/i))) {
+    return `进度 ${m[1]}% · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(GREEN LIGHT — RUN!|YELLOW — SLOW DOWN!|RED LIGHT — FREEZE!) · (\d+)s$/i))) {
+    return `${translateGameText(m[1], lang)} · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^WAVE (\d+)\/(\d+) · ([\d.]+)s$/i))) {
+    return `第 ${m[1]}/${m[2]} 波 · ${m[3]}秒`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts · (\d+) waves$/i))) {
+    return `${m[1]} 分 · 存活 ${m[2]} 波`;
+  }
+  if ((m = trimmed.match(/^(\d+)\/(\d+) waves safe$/i))) {
+    return `安全通过 ${m[1]}/${m[2]} 波`;
+  }
+  if ((m = trimmed.match(/^TIME (\d+)s$/i))) {
+    return `时间 ${m[1]}秒`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts · (\d+) served$/i))) {
+    return `${m[1]} 分 · 上菜 ${m[2]} 份`;
+  }
+  if ((m = trimmed.match(/^(\d+) dishes served$/i))) {
+    return `共上菜 ${m[1]} 份`;
+  }
+  if ((m = trimmed.match(/^(\d+)g · (HOT!|Warm|Cold)$/i))) {
+    return `${m[1]}金 · ${translateGameText(m[2], lang)}`;
+  }
+  if ((m = trimmed.match(/^(\d+) chests found$/i))) {
+    return `挖出 ${m[1]} 个宝箱`;
+  }
+  if ((m = trimmed.match(/^CROWN \+(\d+)!$/i))) {
+    return `皇冠 +${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^GEM \+(\d+)!$/i))) {
+    return `宝石 +${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^\+(\d+) GOLD!$/i))) {
+    return `黄金 +${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^SWAT \+35!$/i))) {
+    return `拍飞 +35！`;
+  }
+  if ((m = trimmed.match(/^BOOM -50!$/i))) {
+    return `炸到啦 -50！`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts · x(\d+)$/i))) {
+    return `${m[1]} 分 · ${m[2]}倍连击`;
+  }
+  if ((m = trimmed.match(/^(\d+) fruits caught$/i))) {
+    return `接住 ${m[1]} 个水果`;
+  }
+  if ((m = trimmed.match(/^CHEST (\d+)\/(\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]}/${m[2]} 宝箱 · ${m[3]}秒`;
+  }
+  if ((m = trimmed.match(/^CHEST (\d+) OF (\d+)$/i))) {
+    return `第 ${m[1]} / ${m[2]} 号神秘宝箱`;
+  }
+  if ((m = trimmed.match(/^(.+) BID \$(\d+)!$/i))) {
+    return `${m[1]} 出价 $${m[2]}！`;
+  }
+  if ((m = trimmed.match(/^TOP BID \$(\d+)!$/i))) {
+    return `当前最高 $${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^PASSED · \$(\d+)$/i))) {
+    return `已放弃 · $${m[1]}`;
+  }
+  if ((m = trimmed.match(/^\$(\d+) cash · Worth \$(\d+)$/i))) {
+    return `现金 $${m[1]} · 总值 $${m[2]}`;
+  }
+  if ((m = trimmed.match(/^\$(\d+) cash \+ \$(\d+) loot$/i))) {
+    return `$${m[1]} 现金 + $${m[2]} 宝藏`;
+  }
+  if ((m = trimmed.match(/^NO BIDS! Chest held \$(\d+)!$/i))) {
+    return `流拍！宝箱里藏着 $${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^(\d+)\s+—\s+(\d+)\s+\(FIRST TO (\d+)\)$/i))) {
+    return `${m[1]}  —  ${m[2]}  (先得 ${m[3]} 球)`;
+  }
+  if ((m = trimmed.match(/^(\d+) goals · (\d+) pts$/i))) {
+    return `${m[1]} 球 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts$/i))) {
+    return `${m[1]} 分`;
   }
 
   return text;

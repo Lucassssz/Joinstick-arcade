@@ -26,6 +26,16 @@ import { ghostHuntModule } from './ghostHunt.ts';
 import { meteorSwarmModule } from './meteorSwarm.ts';
 import { hookShotModule } from './hookShot.ts';
 import { gravityFlipModule } from './gravityFlip.ts';
+import { richStreetModule } from './richStreet.ts';
+import { jungleLaddersModule } from './jungleLadders.ts';
+import { bombGridModule } from './bombGrid.ts';
+import { redLightDashModule } from './redLightDash.ts';
+import { colorMatchModule } from './colorMatch.ts';
+import { kitchenRushModule } from './kitchenRush.ts';
+import { treasureDigModule } from './treasureDig.ts';
+import { fruitDropModule } from './fruitDrop.ts';
+import { luckyAuctionModule } from './luckyAuction.ts';
+import { pinballClashModule } from './pinballClash.ts';
 
 export interface ServerPlayerInputState {
   id: string;
@@ -92,4 +102,14 @@ export const SERVER_GAMES: Record<GameId, ServerGameModule<any>> = {
   'meteor-swarm': meteorSwarmModule,
   'hook-shot': hookShotModule,
   'gravity-flip': gravityFlipModule,
+  'rich-street': richStreetModule,
+  'jungle-ladders': jungleLaddersModule,
+  'bomb-grid': bombGridModule,
+  'red-light-dash': redLightDashModule,
+  'color-match': colorMatchModule,
+  'kitchen-rush': kitchenRushModule,
+  'treasure-dig': treasureDigModule,
+  'fruit-drop': fruitDropModule,
+  'lucky-auction': luckyAuctionModule,
+  'pinball-clash': pinballClashModule,
 };
