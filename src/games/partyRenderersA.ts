@@ -8,7 +8,7 @@ import {
   type LaserGauntletSnapshot,
   type VaultHeistSnapshot,
 } from '../shared/types';
-import { drawNameplate } from './renderers';
+import { drawNameplate, tCanvas } from './renderers';
 
 function drawTopHud(ctx: CanvasRenderingContext2D, leftText: string, centerText: string, rightText?: string) {
   ctx.save();
@@ -24,26 +24,27 @@ function drawTopHud(ctx: CanvasRenderingContext2D, leftText: string, centerText:
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#CBD5E1';
   ctx.textAlign = 'left';
-  ctx.fillText(leftText, ARENA_WIDTH / 2 - 194, 29);
+  ctx.fillText(tCanvas(leftText), ARENA_WIDTH / 2 - 194, 29);
 
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '800 15px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(centerText, ARENA_WIDTH / 2, 29);
+  ctx.fillText(tCanvas(centerText), ARENA_WIDTH / 2, 29);
 
   if (rightText) {
     ctx.fillStyle = '#FFB800';
     ctx.font = '700 13px "JetBrains Mono", monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(rightText, ARENA_WIDTH / 2 + 194, 29);
+    ctx.fillText(tCanvas(rightText), ARENA_WIDTH / 2 + 194, 29);
   }
   ctx.restore();
 }
 
 function drawBanner(ctx: CanvasRenderingContext2D, text: string, colorHex = '#FFB800') {
+  const localized = tCanvas(text);
   ctx.save();
   ctx.font = '800 28px "Bricolage Grotesque", sans-serif';
-  const w = Math.max(320, ctx.measureText(text).width + 56);
+  const w = Math.max(320, ctx.measureText(localized).width + 56);
   ctx.fillStyle = 'rgba(13, 15, 20, 0.9)';
   ctx.strokeStyle = colorHex;
   ctx.lineWidth = 2.5;
@@ -54,7 +55,7 @@ function drawBanner(ctx: CanvasRenderingContext2D, text: string, colorHex = '#FF
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, ARENA_WIDTH / 2, 101);
+  ctx.fillText(localized, ARENA_WIDTH / 2, 101);
   ctx.restore();
 }
 
@@ -268,7 +269,7 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
   ctx.font = '800 11px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('BANK', snap.portal.x, snap.portal.y);
+  ctx.fillText(tCanvas('BANK'), snap.portal.x, snap.portal.y);
   ctx.restore();
 
   // Spike pads

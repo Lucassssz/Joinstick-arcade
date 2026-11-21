@@ -112,6 +112,13 @@ class ArcadeAudioEngine {
         this.tone(783.99, 0.14, 'triangle', 0.15, undefined, 0.22);
         this.tone(1046.5, 0.34, 'triangle', 0.16, undefined, 0.34);
         break;
+      case 'nav':
+        this.tone(540, 0.045, 'sine', 0.075, 660);
+        break;
+      case 'confirm':
+        this.tone(523.25, 0.06, 'triangle', 0.1);
+        this.tone(783.99, 0.11, 'triangle', 0.11, undefined, 0.05);
+        break;
     }
   }
 }

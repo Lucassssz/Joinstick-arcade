@@ -9,14 +9,21 @@ import {
   type GameId,
   type GameSnapshot,
   type PlayerColorSpec,
+  type PlayerFilterMode,
   type PlayerSummary,
   type RankingEntry,
+  type RemoteDirection,
+  type RemoteFocusState,
   type RoomSnapshot,
   type RoomStatus,
   type ServerMessage,
   type SoundEvent,
 } from '../src/shared/types.ts';
-import { getGameMeta } from '../src/shared/games.ts';
+import {
+  filterGamesByPlayerMode,
+  getGameMeta,
+  PLAYER_FILTER_OPTIONS,
+} from '../src/shared/games.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
 import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
 
@@ -52,6 +59,8 @@ interface RoomRecord {
   status: RoomStatus;
   selectedGameId: GameId;
   gameSettingValue: number;
+  lobbyFilter: PlayerFilterMode;
+  remoteFocus: RemoteFocusState;
   countdownValue: number;
   countdownTimer: number;
   players: Map<string, ConnectedPlayer>;
@@ -188,6 +197,8 @@ export class RoomManager {
       gameSettingValue: room.gameSettingValue,
       botDifficulty: room.botDifficulty,
       hostPlayerId: room.hostPlayerId,
+      lobbyFilter: room.lobbyFilter,
+      remoteFocus: { ...room.remoteFocus },
       countdownValue: room.countdownValue,
       players,
       rankings: room.rankings,
@@ -268,6 +279,8 @@ export class RoomManager {
           status: 'SETUP',
           selectedGameId: gameId,
           gameSettingValue: meta.defaultSetting,
+          lobbyFilter: 'all',
+          remoteFocus: { zone: 'games', index: 0, modalIndex: 0 },
           countdownValue: 3,
           countdownTimer: 0,
           players: new Map(),
@@ -437,60 +450,7 @@ export class RoomManager {
       case 'room:add-bot': {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
-        if (room.status !== 'SETUP' && room.status !== 'LOBBY') {
-          this.send(ws, {
-            type: 'error',
-            message: 'Robots can only be added during Room Setup or in the Game Room.',
-          });
-          return;
-        }
-        if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
-          this.send(ws, {
-            type: 'error',
-            code: 'ROOM_FULL',
-            message: `Room already has all ${MAX_PLAYERS_PER_ROOM} players.`,
-          });
-          return;
-        }
-        const slotIndex = this.nextAvailableSlot(room);
-        if (slotIndex === -1) return;
-
-        const botId = `bot_${crypto.randomUUID().slice(0, 8)}`;
-        const difficulty: BotDifficulty =
-          msg.difficulty && VALID_DIFFICULTIES.has(msg.difficulty)
-            ? msg.difficulty
-            : room.botDifficulty;
-
-        const botPlayer: ConnectedPlayer = {
-          id: botId,
-          slotIndex,
-          name: this.pickBotName(room),
-          color: this.pickColor(room, slotIndex),
-          ws: null,
-          connected: true,
-          ready: true,
-          isBot: true,
-          botDifficulty: difficulty,
-          botMemory: createBotMemory(),
-          score: 0,
-          alive: true,
-          statText: 'Bot Ready',
-          cooldownA: 0,
-          cooldownB: 0,
-          input: { dx: 0, dy: 0, a: false, b: false },
-          prevA: false,
-          prevB: false,
-          disconnectedAt: null,
-        };
-
-        room.players.set(botId, botPlayer);
-        room.lastActivityAt = Date.now();
-        this.send(room.hostWs, {
-          type: 'game:tick',
-          snapshot: room.lastSnapshot as any,
-          sounds: [{ type: 'join', playerId: botId }],
-        });
-        this.broadcastRoom(room);
+        this.addBotToRoom(room, ws, msg.difficulty);
         return;
       }
 
@@ -541,6 +501,10 @@ export class RoomManager {
         }
         room.hostPlayerId = target.id;
         room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'confirm');
+        if (target.ws) {
+          this.send(target.ws, { type: 'player:haptic', pattern: [45, 30, 85], reason: 'host' });
+        }
         this.broadcastRoom(room);
         return;
       }
@@ -557,6 +521,13 @@ export class RoomManager {
         }
         this.stopGameLoop(room);
         room.status = 'LOBBY';
+        room.lobbyFilter = 'all';
+        const allGames = filterGamesByPlayerMode('all');
+        const currentIdx = Math.max(
+          0,
+          allGames.findIndex((g) => g.id === room.selectedGameId)
+        );
+        room.remoteFocus = { zone: 'games', index: currentIdx, modalIndex: 0 };
         room.gameState = null;
         room.lastSnapshot = null;
         room.rankings = [];
@@ -572,6 +543,7 @@ export class RoomManager {
           p.prevB = false;
         }
         room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'confirm');
         this.broadcastRoom(room);
         return;
       }
@@ -579,24 +551,14 @@ export class RoomManager {
       case 'room:return-setup': {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
-        this.stopGameLoop(room);
-        room.status = 'SETUP';
-        room.gameState = null;
-        room.lastSnapshot = null;
-        room.rankings = [];
-        for (const p of room.players.values()) {
-          p.ready = p.isBot ? true : false;
-          p.score = 0;
-          p.alive = true;
-          p.statText = p.isBot ? 'Bot Ready' : 'In Setup';
-          p.cooldownA = 0;
-          p.cooldownB = 0;
-          p.input = { dx: 0, dy: 0, a: false, b: false };
-          p.prevA = false;
-          p.prevB = false;
-        }
-        room.lastActivityAt = Date.now();
-        this.broadcastRoom(room);
+        this.returnToSetup(room);
+        return;
+      }
+
+      case 'remote:action': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        this.handleRemoteAction(room, ws, msg.action);
         return;
       }
 
@@ -677,7 +639,13 @@ export class RoomManager {
         room.selectedGameId = msg.gameId;
         const meta = getGameMeta(msg.gameId);
         room.gameSettingValue = msg.settingValue ?? meta.defaultSetting;
+        const visibleGames = filterGamesByPlayerMode(room.lobbyFilter);
+        const gameIdx = visibleGames.findIndex((g) => g.id === msg.gameId);
+        if (gameIdx >= 0) {
+          room.remoteFocus = { ...room.remoteFocus, zone: 'games', index: gameIdx };
+        }
         room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'nav');
         this.broadcastRoom(room);
         return;
       }
@@ -685,30 +653,7 @@ export class RoomManager {
       case 'game:start': {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
-        if (room.players.size === 0) {
-          this.send(ws, {
-            type: 'error',
-            message: 'Connect at least 1 player (or add a robot) before starting.',
-          });
-          return;
-        }
-
-        // Strict Ready Gate: every connected human player MUST press Ready on their phone controller
-        const unreadyHumans = [...room.players.values()]
-          .filter((p) => !p.isBot && p.connected && !p.ready)
-          .sort((a, b) => a.slotIndex - b.slotIndex);
-
-        if (unreadyHumans.length > 0) {
-          const names = unreadyHumans.map((p) => p.name).join(', ');
-          this.send(ws, {
-            type: 'error',
-            code: 'PLAYERS_NOT_READY',
-            message: `Everyone must press Ready on their phone before starting. Waiting for: ${names}`,
-          });
-          return;
-        }
-
-        this.startMatch(room, true);
+        this.attemptStartMatch(room, ws);
         return;
       }
 
@@ -724,6 +669,7 @@ export class RoomManager {
         if (!room) return;
         if (room.status === 'PLAYING' && msg.paused) {
           room.status = 'PAUSED';
+          room.remoteFocus.modalIndex = 0;
           this.broadcastRoom(room);
         } else if (room.status === 'PAUSED' && !msg.paused) {
           room.status = 'PLAYING';
@@ -743,23 +689,7 @@ export class RoomManager {
       case 'game:return-lobby': {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
-        this.stopGameLoop(room);
-        room.status = 'LOBBY';
-        room.gameState = null;
-        room.lastSnapshot = null;
-        room.rankings = [];
-        for (const p of room.players.values()) {
-          p.ready = p.isBot ? true : false;
-          p.score = 0;
-          p.alive = true;
-          p.statText = p.isBot ? 'Bot Ready' : 'Waiting for Ready';
-          p.cooldownA = 0;
-          p.cooldownB = 0;
-          p.input = { dx: 0, dy: 0, a: false, b: false };
-          p.prevA = false;
-          p.prevB = false;
-        }
-        this.broadcastRoom(room);
+        this.returnToLobby(room);
         return;
       }
 
@@ -785,18 +715,403 @@ export class RoomManager {
     }
   }
 
+  private playHostSound(room: RoomRecord, soundType: SoundEvent['type']): void {
+    this.send(room.hostWs, {
+      type: 'game:tick',
+      snapshot: room.lastSnapshot as any,
+      sounds: [{ type: soundType }],
+    });
+  }
+
+  private addBotToRoom(room: RoomRecord, senderWs: WebSocket, requestedDiff?: BotDifficulty): void {
+    if (room.status !== 'SETUP' && room.status !== 'LOBBY') {
+      this.send(senderWs, {
+        type: 'error',
+        message: 'Robots can only be added during Room Setup or in the Game Room.',
+      });
+      return;
+    }
+    if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
+      this.send(senderWs, {
+        type: 'error',
+        code: 'ROOM_FULL',
+        message: `Room already has all ${MAX_PLAYERS_PER_ROOM} players.`,
+      });
+      return;
+    }
+    const slotIndex = this.nextAvailableSlot(room);
+    if (slotIndex === -1) return;
+
+    const botId = `bot_${crypto.randomUUID().slice(0, 8)}`;
+    const difficulty: BotDifficulty =
+      requestedDiff && VALID_DIFFICULTIES.has(requestedDiff) ? requestedDiff : room.botDifficulty;
+
+    const botPlayer: ConnectedPlayer = {
+      id: botId,
+      slotIndex,
+      name: this.pickBotName(room),
+      color: this.pickColor(room, slotIndex),
+      ws: null,
+      connected: true,
+      ready: true,
+      isBot: true,
+      botDifficulty: difficulty,
+      botMemory: createBotMemory(),
+      score: 0,
+      alive: true,
+      statText: 'Bot Ready',
+      cooldownA: 0,
+      cooldownB: 0,
+      input: { dx: 0, dy: 0, a: false, b: false },
+      prevA: false,
+      prevB: false,
+      disconnectedAt: null,
+    };
+
+    room.players.set(botId, botPlayer);
+    room.lastActivityAt = Date.now();
+    this.send(room.hostWs, {
+      type: 'game:tick',
+      snapshot: room.lastSnapshot as any,
+      sounds: [{ type: 'join', playerId: botId }],
+    });
+    this.broadcastRoom(room);
+  }
+
+  private attemptStartMatch(room: RoomRecord, senderWs: WebSocket): boolean {
+    if (room.players.size === 0) {
+      this.send(senderWs, {
+        type: 'error',
+        message: 'Connect at least 1 player (or add a robot) before starting.',
+      });
+      return false;
+    }
+
+    // Strict Ready Gate: every connected human player MUST press Ready on their phone controller
+    const unreadyHumans = [...room.players.values()]
+      .filter((p) => !p.isBot && p.connected && !p.ready)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+
+    if (unreadyHumans.length > 0) {
+      const names = unreadyHumans.map((p) => p.name).join(', ');
+      this.send(senderWs, {
+        type: 'error',
+        code: 'PLAYERS_NOT_READY',
+        message: `Everyone must press Ready on their phone first. Waiting for: ${names}`,
+      });
+      if (room.hostWs && room.hostWs !== senderWs) {
+        this.send(room.hostWs, {
+          type: 'error',
+          code: 'PLAYERS_NOT_READY',
+          message: `Waiting for ${names} to press Ready on their phone!`,
+        });
+      }
+      return false;
+    }
+
+    this.playHostSound(room, 'confirm');
+    this.startMatch(room, true);
+    return true;
+  }
+
+  private returnToLobby(room: RoomRecord): void {
+    this.stopGameLoop(room);
+    room.status = 'LOBBY';
+    room.gameState = null;
+    room.lastSnapshot = null;
+    room.rankings = [];
+    const visibleGames = filterGamesByPlayerMode(room.lobbyFilter);
+    const idx = Math.max(
+      0,
+      visibleGames.findIndex((g) => g.id === room.selectedGameId)
+    );
+    room.remoteFocus = { zone: 'games', index: idx, modalIndex: 0 };
+    for (const p of room.players.values()) {
+      p.ready = p.isBot ? true : false;
+      p.score = 0;
+      p.alive = true;
+      p.statText = p.isBot ? 'Bot Ready' : 'Waiting for Ready';
+      p.cooldownA = 0;
+      p.cooldownB = 0;
+      p.input = { dx: 0, dy: 0, a: false, b: false };
+      p.prevA = false;
+      p.prevB = false;
+    }
+    room.lastActivityAt = Date.now();
+    this.playHostSound(room, 'confirm');
+    this.broadcastRoom(room);
+  }
+
+  private returnToSetup(room: RoomRecord): void {
+    this.stopGameLoop(room);
+    room.status = 'SETUP';
+    room.gameState = null;
+    room.lastSnapshot = null;
+    room.rankings = [];
+    for (const p of room.players.values()) {
+      p.ready = p.isBot ? true : false;
+      p.score = 0;
+      p.alive = true;
+      p.statText = p.isBot ? 'Bot Ready' : 'In Setup';
+      p.cooldownA = 0;
+      p.cooldownB = 0;
+      p.input = { dx: 0, dy: 0, a: false, b: false };
+      p.prevA = false;
+      p.prevB = false;
+    }
+    room.lastActivityAt = Date.now();
+    this.playHostSound(room, 'confirm');
+    this.broadcastRoom(room);
+  }
+
+  private handleRemoteAction(room: RoomRecord, senderWs: WebSocket, action: RemoteDirection): void {
+    room.lastActivityAt = Date.now();
+
+    // --- BRIEFING REMOTE ---
+    if (room.status === 'BRIEFING') {
+      if (action === 'left' || action === 'up') {
+        room.remoteFocus.modalIndex = 0;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'right' || action === 'down') {
+        room.remoteFocus.modalIndex = 1;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'ok') {
+        if (room.remoteFocus.modalIndex === 0) {
+          this.playHostSound(room, 'confirm');
+          this.beginCountdown(room);
+        } else {
+          this.returnToLobby(room);
+        }
+      }
+      return;
+    }
+
+    // --- PAUSED REMOTE ---
+    if (room.status === 'PAUSED') {
+      if (action === 'left' || action === 'up') {
+        room.remoteFocus.modalIndex = Math.max(0, room.remoteFocus.modalIndex - 1);
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'right' || action === 'down') {
+        room.remoteFocus.modalIndex = Math.min(2, room.remoteFocus.modalIndex + 1);
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'ok') {
+        if (room.remoteFocus.modalIndex === 0) {
+          room.status = 'PLAYING';
+          this.playHostSound(room, 'confirm');
+          this.broadcastRoom(room);
+        } else if (room.remoteFocus.modalIndex === 1) {
+          this.playHostSound(room, 'confirm');
+          this.startMatch(room, false);
+        } else {
+          this.returnToLobby(room);
+        }
+      }
+      return;
+    }
+
+    // --- RESULTS PODIUM REMOTE ---
+    if (room.status === 'RESULTS') {
+      if (action === 'left' || action === 'up') {
+        room.remoteFocus.modalIndex = 0;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'right' || action === 'down') {
+        room.remoteFocus.modalIndex = 1;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'ok') {
+        if (room.remoteFocus.modalIndex === 0) {
+          this.playHostSound(room, 'confirm');
+          this.startMatch(room, false);
+        } else {
+          this.returnToLobby(room);
+        }
+      }
+      return;
+    }
+
+    // --- FULLSCREEN GAME ROOM (LOBBY) TV REMOTE ---
+    if (room.status !== 'LOBBY') return;
+
+    const COLS = 4;
+    const ACTION_COUNT = 5; // 0: Start Game, 1: Match Setting, 2: Add Robot, 3: Bot Difficulty, 4: Room Setup
+    const filteredGames = filterGamesByPlayerMode(room.lobbyFilter);
+    const focus = room.remoteFocus;
+
+    const selectGameAt = (idx: number) => {
+      const clamped = Math.max(0, Math.min(filteredGames.length - 1, idx));
+      focus.index = clamped;
+      const picked = filteredGames[clamped];
+      if (picked && picked.id !== room.selectedGameId) {
+        room.selectedGameId = picked.id;
+        room.gameSettingValue = picked.defaultSetting;
+      }
+    };
+
+    if (focus.zone === 'filter') {
+      if (action === 'left') {
+        focus.index = Math.max(0, focus.index - 1);
+        this.playHostSound(room, 'nav');
+      } else if (action === 'right') {
+        focus.index = Math.min(PLAYER_FILTER_OPTIONS.length - 1, focus.index + 1);
+        this.playHostSound(room, 'nav');
+      } else if (action === 'down') {
+        focus.zone = 'games';
+        const curIdx = filteredGames.findIndex((g) => g.id === room.selectedGameId);
+        selectGameAt(curIdx >= 0 ? curIdx : 0);
+        this.playHostSound(room, 'nav');
+      } else if (action === 'ok') {
+        const chosenOpt = PLAYER_FILTER_OPTIONS[focus.index];
+        if (chosenOpt) {
+          room.lobbyFilter = chosenOpt.id;
+          const nextGames = filterGamesByPlayerMode(room.lobbyFilter);
+          if (nextGames.length > 0 && !nextGames.some((g) => g.id === room.selectedGameId)) {
+            room.selectedGameId = nextGames[0].id;
+            room.gameSettingValue = nextGames[0].defaultSetting;
+          }
+          this.playHostSound(room, 'confirm');
+        }
+      }
+      this.broadcastRoom(room);
+      return;
+    }
+
+    if (focus.zone === 'games') {
+      if (filteredGames.length === 0) {
+        focus.zone = 'filter';
+        focus.index = 0;
+        this.broadcastRoom(room);
+        return;
+      }
+      if (action === 'left') {
+        if (focus.index > 0) {
+          selectGameAt(focus.index - 1);
+          this.playHostSound(room, 'nav');
+        }
+      } else if (action === 'right') {
+        if (focus.index < filteredGames.length - 1) {
+          selectGameAt(focus.index + 1);
+          this.playHostSound(room, 'nav');
+        }
+      } else if (action === 'up') {
+        if (focus.index >= COLS) {
+          selectGameAt(focus.index - COLS);
+        } else {
+          focus.zone = 'filter';
+          focus.index = Math.max(
+            0,
+            PLAYER_FILTER_OPTIONS.findIndex((o) => o.id === room.lobbyFilter)
+          );
+        }
+        this.playHostSound(room, 'nav');
+      } else if (action === 'down') {
+        const currentRow = Math.floor(focus.index / COLS);
+        const lastRow = Math.floor((filteredGames.length - 1) / COLS);
+        if (focus.index + COLS < filteredGames.length) {
+          selectGameAt(focus.index + COLS);
+        } else if (currentRow < lastRow) {
+          selectGameAt(filteredGames.length - 1);
+        } else {
+          focus.zone = 'actions';
+          focus.index = 0;
+        }
+        this.playHostSound(room, 'nav');
+      } else if (action === 'ok') {
+        // Ensure focused game is selected, then try to launch it (or move focus to Start bar with prompt)
+        selectGameAt(focus.index);
+        const started = this.attemptStartMatch(room, senderWs);
+        if (!started) {
+          focus.zone = 'actions';
+          focus.index = 0;
+          this.broadcastRoom(room);
+        }
+        return;
+      }
+      this.broadcastRoom(room);
+      return;
+    }
+
+    // focus.zone === 'actions'
+    if (action === 'left') {
+      focus.index = Math.max(0, focus.index - 1);
+      this.playHostSound(room, 'nav');
+      this.broadcastRoom(room);
+      return;
+    }
+    if (action === 'right') {
+      focus.index = Math.min(ACTION_COUNT - 1, focus.index + 1);
+      this.playHostSound(room, 'nav');
+      this.broadcastRoom(room);
+      return;
+    }
+    if (action === 'up') {
+      focus.zone = 'games';
+      const curIdx = filteredGames.findIndex((g) => g.id === room.selectedGameId);
+      selectGameAt(curIdx >= 0 ? curIdx : Math.max(0, filteredGames.length - 1));
+      this.playHostSound(room, 'nav');
+      this.broadcastRoom(room);
+      return;
+    }
+    if (action === 'ok') {
+      if (focus.index === 0) {
+        this.attemptStartMatch(room, senderWs);
+      } else if (focus.index === 1) {
+        const meta = getGameMeta(room.selectedGameId);
+        const opts = meta.settingOptions;
+        const curIdx = opts.findIndex((o) => o.value === room.gameSettingValue);
+        const nextOpt = opts[(curIdx + 1) % opts.length];
+        if (nextOpt) {
+          room.gameSettingValue = nextOpt.value;
+          this.playHostSound(room, 'confirm');
+          this.broadcastRoom(room);
+        }
+      } else if (focus.index === 2) {
+        this.addBotToRoom(room, senderWs);
+      } else if (focus.index === 3) {
+        const order: BotDifficulty[] = ['chill', 'arcade', 'spicy'];
+        const nextDiff = order[(order.indexOf(room.botDifficulty) + 1) % order.length];
+        room.botDifficulty = nextDiff;
+        for (const p of room.players.values()) {
+          if (p.isBot) p.botDifficulty = nextDiff;
+        }
+        this.playHostSound(room, 'confirm');
+        this.broadcastRoom(room);
+      } else if (focus.index === 4) {
+        this.returnToSetup(room);
+      }
+    }
+  }
+
   /**
-   * Authorizes either the Host Monitor screen OR the chosen Room Host human phone controller.
+   * Host-Only Authorization:
+   * - During SETUP: either the Monitor screen OR the chosen Room Host phone can configure setup & enter the Game Room.
+   * - Inside the Game Room & Match (LOBBY / BRIEFING / PLAYING / PAUSED / RESULTS):
+   *   When a human Room Host is connected (`room.hostPlayerId !== null`), ONLY that Host's phone remote can control the screen
+   *   until they pass host to another player. If there are 0 connected humans (bot-only room), the Monitor acts as fallback.
    */
   private getPrivilegedRoom(ws: WebSocket): RoomRecord | null {
     const binding = this.bindings.get(ws);
     if (!binding) return null;
     const room = this.rooms.get(binding.roomCode);
     if (!room) return null;
-    if (binding.role === 'host') return room;
+
     if (binding.role === 'player' && binding.playerId && room.hostPlayerId === binding.playerId) {
       return room;
     }
+
+    if (binding.role === 'host') {
+      if (room.status === 'SETUP') return room;
+      const activeHumanHost =
+        room.hostPlayerId &&
+        room.players.get(room.hostPlayerId)?.connected &&
+        !room.players.get(room.hostPlayerId)?.isBot;
+      if (!activeHumanHost) return room;
+    }
+
     return null;
   }
 
@@ -850,6 +1165,7 @@ export class RoomManager {
 
     if (showBriefing) {
       room.status = 'BRIEFING';
+      room.remoteFocus.modalIndex = 0;
       room.countdownValue = 0;
       room.countdownTimer = 0;
       this.broadcastRoom(room);
@@ -978,6 +1294,7 @@ export class RoomManager {
       if (result.finished) {
         this.stopGameLoop(room);
         room.status = 'RESULTS';
+        room.remoteFocus.modalIndex = 0;
         room.rankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
         for (const p of room.players.values()) {
           if (p.connected && !p.isBot && p.ws) {

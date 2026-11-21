@@ -6,6 +6,7 @@ import {
   GameSnapshot,
   TurboDriftSnapshot,
 } from '../shared/types';
+import { Language, translateGameText } from '../lib/i18n';
 import {
   renderFusePass,
   renderGridRunners,
@@ -39,6 +40,12 @@ export function createRenderFxState(): RenderFxState {
   return { skidMarks: [], shake: 0 };
 }
 
+let activeCanvasLang: Language = 'en';
+
+export function tCanvas(text: string): string {
+  return translateGameText(text, activeCanvasLang);
+}
+
 export function drawNameplate(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -48,7 +55,8 @@ export function drawNameplate(
   colorHex: string,
   extra?: string
 ): void {
-  const label = `P${slotIndex + 1} ${name}${extra ? ` · ${extra}` : ''}`;
+  const extraLabel = extra ? tCanvas(extra) : '';
+  const label = `P${slotIndex + 1} ${name}${extraLabel ? ` · ${extraLabel}` : ''}`;
   ctx.save();
   ctx.font = '700 12px "Plus Jakarta Sans", sans-serif';
   const metrics = ctx.measureText(label);
@@ -262,7 +270,7 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(
-    `ROUND ${snap.round}/${snap.totalRounds}  ·  ${Math.ceil(snap.roundTimer)}s`,
+    tCanvas(`ROUND ${snap.round}/${snap.totalRounds}  ·  ${Math.ceil(snap.roundTimer)}s`),
     38,
     40
   );
@@ -283,7 +291,7 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
     ctx.font = '800 28px "Bricolage Grotesque", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(snap.roundBanner, ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+    ctx.fillText(tCanvas(snap.roundBanner), ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
     ctx.restore();
   }
 }
@@ -501,7 +509,7 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
   const secs = Math.ceil(snap.timeLeft);
   const mm = Math.floor(secs / 60);
   const ss = String(secs % 60).padStart(2, '0');
-  ctx.fillText(`TIME  ${mm}:${ss}`, 40, 40);
+  ctx.fillText(tCanvas(`TIME  ${mm}:${ss}`), 40, 40);
   ctx.restore();
 }
 
@@ -763,7 +771,7 @@ function renderTurboDrift(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const sec = (snap.elapsedMs / 1000).toFixed(1);
-  ctx.fillText(`LAP ${leaderLap}/${snap.totalLaps}  ·  ${sec}s`, 38, 40);
+  ctx.fillText(tCanvas(`LAP ${leaderLap}/${snap.totalLaps}  ·  ${sec}s`), 38, 40);
   ctx.restore();
 
   if (snap.finishCountdown !== null) {
@@ -780,7 +788,7 @@ function renderTurboDrift(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
-      `RACE ENDING IN ${Math.ceil(snap.finishCountdown)}s`,
+      tCanvas(`RACE ENDING IN ${Math.ceil(snap.finishCountdown)}s`),
       ARENA_WIDTH / 2,
       40
     );
@@ -791,8 +799,10 @@ function renderTurboDrift(
 export function renderGameSnapshot(
   ctx: CanvasRenderingContext2D,
   snap: GameSnapshot,
-  fx: RenderFxState
+  fx: RenderFxState,
+  lang: Language = 'en'
 ): void {
+  activeCanvasLang = lang;
   ctx.save();
   if (fx.shake > 0.2) {
     const ox = (Math.random() - 0.5) * fx.shake;

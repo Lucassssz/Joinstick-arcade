@@ -9,7 +9,7 @@ import {
   RicochetTanksSnapshot,
   TurboStrikerSnapshot,
 } from '../shared/types';
-import { drawNameplate } from './renderers';
+import { drawNameplate, tCanvas } from './renderers';
 
 function drawHudChip(
   ctx: CanvasRenderingContext2D,
@@ -33,7 +33,7 @@ function drawHudChip(
   ctx.font = '700 14px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + w / 2, y + 20);
+  ctx.fillText(tCanvas(text), x + w / 2, y + 20);
   ctx.restore();
 }
 
@@ -55,7 +55,7 @@ function drawCenterBanner(
   ctx.font = '800 28px "Bricolage Grotesque", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+  ctx.fillText(tCanvas(text), ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
   ctx.restore();
 }
 
@@ -931,7 +931,7 @@ export function renderTurboStriker(
 
   ctx.fillStyle = '#FF4D2E';
   ctx.textAlign = 'right';
-  ctx.fillText(`RED ${snap.scoreRed}`, ARENA_WIDTH / 2 - 48, 30);
+  ctx.fillText(tCanvas(`RED ${snap.scoreRed}`), ARENA_WIDTH / 2 - 48, 30);
 
   ctx.fillStyle = snap.timeLeft <= 10 ? '#FFB800' : '#F8FAFC';
   ctx.textAlign = 'center';
@@ -939,7 +939,7 @@ export function renderTurboStriker(
 
   ctx.fillStyle = '#00C2FF';
   ctx.textAlign = 'left';
-  ctx.fillText(`${snap.scoreBlue} BLUE`, ARENA_WIDTH / 2 + 48, 30);
+  ctx.fillText(tCanvas(`${snap.scoreBlue} BLUE`), ARENA_WIDTH / 2 + 48, 30);
   ctx.restore();
 
   if (snap.goalBanner) {

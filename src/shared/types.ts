@@ -26,6 +26,14 @@ export type BotDifficulty = 'chill' | 'arcade' | 'spicy';
 
 export type GameSuitability = 'solo' | 'double' | 'multiplayer';
 export type PlayerFilterMode = 'all' | GameSuitability;
+export type RemoteDirection = 'up' | 'down' | 'left' | 'right' | 'ok';
+export type LobbyFocusZone = 'filter' | 'games' | 'actions';
+
+export interface RemoteFocusState {
+  zone: LobbyFocusZone;
+  index: number;
+  modalIndex: number;
+}
 
 export interface PlayerColorSpec {
   id: string;
@@ -145,7 +153,9 @@ export interface SoundEvent {
     | 'pickup'
     | 'boost'
     | 'lap'
-    | 'win';
+    | 'win'
+    | 'nav'
+    | 'confirm';
   playerId?: string;
   intensity?: number;
 }
@@ -912,6 +922,8 @@ export interface RoomSnapshot {
   countdownValue: number;
   botDifficulty: BotDifficulty;
   hostPlayerId: string | null;
+  lobbyFilter: PlayerFilterMode;
+  remoteFocus: RemoteFocusState;
   players: PlayerSummary[];
   rankings: RankingEntry[];
   hostConnected: boolean;
@@ -929,6 +941,7 @@ export type ClientMessage =
   | { type: 'room:set-host-player'; playerId: string }
   | { type: 'room:enter-game-room' }
   | { type: 'room:return-setup' }
+  | { type: 'remote:action'; action: RemoteDirection }
   | { type: 'player:ready'; ready: boolean }
   | { type: 'player:emote'; emoji: string }
   | { type: 'player:leave' }

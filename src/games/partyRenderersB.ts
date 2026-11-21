@@ -7,7 +7,7 @@ import {
   type HookShotSnapshot,
   type MeteorSwarmSnapshot,
 } from '../shared/types';
-import { drawNameplate } from './renderers';
+import { drawNameplate, tCanvas } from './renderers';
 
 function drawHudPill(ctx: CanvasRenderingContext2D, leftText: string, centerText: string, rightText?: string) {
   ctx.save();
@@ -23,18 +23,18 @@ function drawHudPill(ctx: CanvasRenderingContext2D, leftText: string, centerText
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#CBD5E1';
   ctx.textAlign = 'left';
-  ctx.fillText(leftText, ARENA_WIDTH / 2 - 204, 29);
+  ctx.fillText(tCanvas(leftText), ARENA_WIDTH / 2 - 204, 29);
 
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '800 15px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(centerText, ARENA_WIDTH / 2, 29);
+  ctx.fillText(tCanvas(centerText), ARENA_WIDTH / 2, 29);
 
   if (rightText) {
     ctx.fillStyle = '#00C2FF';
     ctx.font = '700 13px "JetBrains Mono", monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(rightText, ARENA_WIDTH / 2 + 204, 29);
+    ctx.fillText(tCanvas(rightText), ARENA_WIDTH / 2 + 204, 29);
   }
   ctx.restore();
 }
@@ -133,7 +133,7 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
     ctx.font = '800 22px "Bricolage Grotesque", sans-serif';
     ctx.fillStyle = '#E0F2FE';
     ctx.textAlign = 'center';
-    ctx.fillText(snap.banner, ARENA_WIDTH / 2, 76);
+    ctx.fillText(tCanvas(snap.banner), ARENA_WIDTH / 2, 76);
     ctx.restore();
   }
 }
@@ -259,7 +259,7 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
     ctx.font = '800 22px "Bricolage Grotesque", sans-serif';
     ctx.fillStyle = '#E9D5FF';
     ctx.textAlign = 'center';
-    ctx.fillText(snap.banner, ARENA_WIDTH / 2, 76);
+    ctx.fillText(tCanvas(snap.banner), ARENA_WIDTH / 2, 76);
     ctx.restore();
   }
 }

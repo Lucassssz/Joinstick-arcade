@@ -1,11 +1,16 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   ArrowUp,
   Bomb,
   Bot,
   Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
   Crosshair,
   Crown,
   Flame,
@@ -15,25 +20,40 @@ import {
   Maximize2,
   Minimize2,
   Paintbrush,
-  Play,
+  Pause,
   RotateCcw,
   Shield,
   Target,
   Vibrate,
   Waves,
   Wind,
+  X,
   Zap,
 } from 'lucide-react';
-import { getGameMeta } from '../shared/games';
+import {
+  filterGamesByPlayerMode,
+  getGameMeta,
+  PLAYER_FILTER_OPTIONS,
+} from '../shared/games';
 import {
   ActionButtonSpec,
   ControllerInput,
   PLAYER_PALETTE,
+  RemoteDirection,
   RoomSnapshot,
   ServerMessage,
 } from '../shared/types';
 import { ManagedWebSocket } from '../lib/ws';
 import { controllerHaptics, HapticIntensity, HapticResult } from '../lib/haptics';
+import {
+  getLocalizedDifficulty,
+  getLocalizedFilterLabel,
+  getLocalizedGameMeta,
+  LanguageToggle,
+  translateGameText,
+  translateServerMessage,
+  useLanguage,
+} from '../lib/i18n';
 
 /**
  * Centralized controller vibration utility backed by `window.navigator.vibrate`.
@@ -168,6 +188,7 @@ export function PhoneController({
   keyboardProfile = 'none',
   onExit,
 }: PhoneControllerProps) {
+  const { lang, t } = useLanguage();
   const [roomCode, setRoomCode] = useState(initialRoomCode.toUpperCase());
   const [playerName, setPlayerName] = useState(
     () => defaultName || CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)]
@@ -183,6 +204,7 @@ export function PhoneController({
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [hapticNotice, setHapticNotice] = useState<string | null>(null);
   const [impactPulse, setImpactPulse] = useState<'none' | 'light' | 'heavy'>('none');
+  const [passHostOpen, setPassHostOpen] = useState(false);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Viewport tracking for automatic CSS landscape rotation on portrait phones
@@ -373,8 +395,9 @@ export function PhoneController({
 
   useEffect(() => {
     resetControlsState();
+    setPassHostOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room?.status, room?.selectedGameId]);
+  }, [room?.status, room?.selectedGameId, room?.hostPlayerId]);
 
   // Clear stuck touches if browser tab loses focus
   useEffect(() => {
@@ -559,7 +582,12 @@ export function PhoneController({
     e.preventDefault();
     const cleaned = roomCode.trim().toUpperCase();
     if (cleaned.length !== 4) {
-      setErrorMsg('Enter the 4-letter room code shown on the monitor.');
+      setErrorMsg(
+        t(
+          'Enter the 4-letter room code shown on the monitor.',
+          '请输入大屏上显示的 4 位房间码。'
+        )
+      );
       return;
     }
     setErrorMsg(null);
@@ -599,7 +627,7 @@ export function PhoneController({
   };
 
   const me = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
-  const gameMeta = room ? getGameMeta(room.selectedGameId) : null;
+  const gameMeta = room ? getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang) : null;
 
   // --- Multi-touch Analog Joystick Pointer Handlers (Rotation-Aware!) ---
   const maxStickRadius = embedded ? 38 : 54;
@@ -717,7 +745,7 @@ export function PhoneController({
   const renderConnectedShell = (children: ReactNode) => {
     if (embedded) {
       return (
-        <div className="gamepad-surface rounded-2xl border border-[#2C3342] bg-[#14171E] text-white p-3.5 overflow-hidden">
+        <div className="gamepad-surface rounded-2xl border border-[#2A303D] bg-[#121419] text-[#F4F6FA] p-3.5 overflow-hidden">
           {children}
         </div>
       );
@@ -725,9 +753,9 @@ export function PhoneController({
 
     if (isCssRotated) {
       return (
-        <div className="fixed inset-0 bg-[#14171E] overflow-hidden gamepad-surface z-50">
+        <div className="fixed inset-0 bg-[#121419] overflow-hidden gamepad-surface z-50">
           <div
-            className="fixed top-1/2 left-1/2 flex flex-col justify-between bg-[#14171E] text-white overflow-hidden"
+            className="fixed top-1/2 left-1/2 flex flex-col justify-between bg-[#121419] text-[#F4F6FA] overflow-hidden"
             style={{
               width: '100dvh',
               height: '100dvw',
@@ -743,7 +771,7 @@ export function PhoneController({
 
     return (
       <div
-        className="fixed inset-0 w-screen h-[100dvh] flex flex-col justify-between bg-[#14171E] text-white overflow-hidden gamepad-surface z-50"
+        className="fixed inset-0 w-screen h-[100dvh] flex flex-col justify-between bg-[#121419] text-[#F4F6FA] overflow-hidden gamepad-surface z-50"
         style={{
           padding: 'max(10px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left))',
         }}
@@ -759,15 +787,17 @@ export function PhoneController({
   if (closedReason) {
     return (
       <div className="min-h-screen bg-[#121419] text-white flex flex-col items-center justify-center p-6 text-center">
-        <h2 className="font-display text-2xl font-bold">Room Closed</h2>
-        <p className="mt-2 text-sm text-[#9CA3AF] max-w-sm">{closedReason}</p>
+        <h2 className="font-display text-2xl font-bold">{t('Room Closed', '房间已关闭')}</h2>
+        <p className="mt-2 text-sm text-[#9CA3AF] max-w-sm">
+          {translateServerMessage(closedReason, lang)}
+        </p>
         <button
           type="button"
           onClick={() => setClosedReason(null)}
           className="tactile-btn mt-6 px-6 py-3 rounded-xl bg-[#FF4D2E] text-white font-semibold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
         >
           <RotateCcw className="w-4 h-4" />
-          Join Another Room
+          {t('Join Another Room', '加入其他房间')}
         </button>
       </div>
     );
@@ -792,27 +822,32 @@ export function PhoneController({
                 className="min-h-[44px] min-w-[44px] -ml-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#9CA3AF] hover:text-white cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
-                Back
+                {t('Back', '返回')}
               </button>
             ) : (
               <span className="font-display font-bold text-lg">JoinStick Arcade</span>
             )}
-            <span className="text-xs font-medium text-[#9CA3AF] flex items-center gap-1.5">
-              <span
-                className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
-              />
-              {wsConnected ? 'Live' : 'Connecting'}
-            </span>
+            <div className="flex items-center gap-2.5">
+              <LanguageToggle compact />
+              <span className="text-xs font-medium text-[#9CA3AF] flex items-center gap-1.5">
+                <span
+                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
+                />
+                {wsConnected ? t('Live', '已连接') : t('Connecting', '连接中')}
+              </span>
+            </div>
           </div>
         )}
 
         <div className="max-w-md w-full mx-auto my-auto py-4">
           <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
-            Connect Your Controller
+            {t('Connect Your Controller', '连接手机手柄')}
           </h1>
           <p className="mt-1.5 text-sm text-[#9CA3AF]">
-            Enter the 4-letter code on the game monitor. Your controller switches to full-screen
-            landscape as soon as you join.
+            {t(
+              'Enter the 4-letter code on the game monitor. Your controller switches to full-screen landscape as soon as you join.',
+              '输入大屏上的 4 位房间码，加入后手机将自动切换为全屏横屏手柄。'
+            )}
           </p>
 
           <form onSubmit={handleJoinSubmit} className="mt-6 space-y-5">
@@ -821,7 +856,7 @@ export function PhoneController({
                 htmlFor={`room-code-${sessionKey}`}
                 className="block text-xs font-semibold text-[#A5AEBD] mb-2"
               >
-                Room Code
+                {t('Room Code', '房间码')}
               </label>
               <input
                 id={`room-code-${sessionKey}`}
@@ -842,7 +877,7 @@ export function PhoneController({
                 htmlFor={`player-name-${sessionKey}`}
                 className="block text-xs font-semibold text-[#A5AEBD] mb-2"
               >
-                Player Name
+                {t('Player Name', '玩家昵称')}
               </label>
               <input
                 id={`player-name-${sessionKey}`}
@@ -850,14 +885,14 @@ export function PhoneController({
                 maxLength={14}
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="Your arcade name"
+                placeholder={t('Your arcade name', '输入你的昵称')}
                 className="w-full h-12 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none text-base font-medium text-white"
               />
             </div>
 
             <div>
               <span className="block text-xs font-semibold text-[#A5AEBD] mb-2.5">
-                Controller Color
+                {t('Controller Color', '手柄配色')}
               </span>
               <div className="grid grid-cols-8 gap-2">
                 {PLAYER_PALETTE.map((c) => {
@@ -867,7 +902,7 @@ export function PhoneController({
                       key={c.id}
                       type="button"
                       title={c.name}
-                      aria-label={`Select color ${c.name}`}
+                      aria-label={t(`Select color ${c.name}`, `选择颜色 ${c.name}`)}
                       onClick={() => setPreferredColor(c.id)}
                       className={`h-10 rounded-lg transition-transform flex items-center justify-center cursor-pointer ${
                         selected
@@ -885,7 +920,7 @@ export function PhoneController({
 
             {errorMsg && (
               <div className="p-3 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-sm text-[#FF9B8A]">
-                {errorMsg}
+                {translateServerMessage(errorMsg, lang)}
               </div>
             )}
 
@@ -894,14 +929,17 @@ export function PhoneController({
               disabled={!wsConnected}
               className="tactile-btn w-full h-13 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-50 text-white font-bold text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
             >
-              Join Room & Open Gamepad
+              {t('Join Room & Open Gamepad', '加入房间并打开手柄')}
             </button>
           </form>
         </div>
 
         {!embedded && (
           <div className="max-w-md w-full mx-auto text-center text-xs text-[#6B7280] py-2">
-            Full-screen landscape gamepad activates automatically once connected.
+            {t(
+              'Full-screen landscape gamepad activates automatically once connected.',
+              '连接后自动切换为全屏横屏手柄。'
+            )}
           </div>
         )}
       </div>
@@ -910,10 +948,134 @@ export function PhoneController({
 
   const isRoomHost = room.hostPlayerId === me.id;
   const connectedHumans = room.players.filter((p) => !p.isBot && p.connected);
+  const otherConnectedHumans = connectedHumans.filter((p) => p.id !== me.id);
   const readyHumans = connectedHumans.filter((p) => p.ready);
   const unreadyHumans = connectedHumans.filter((p) => !p.ready);
   const botCount = room.players.filter((p) => p.isBot).length;
   const hostPlayer = room.players.find((p) => p.id === room.hostPlayerId);
+
+  const sendRemote = (action: RemoteDirection) => {
+    if (!isRoomHost) return;
+    setErrorMsg(null);
+    if (!embedded) {
+      controllerHaptics.unlock();
+      vibrate(action === 'ok' ? 55 : 24, {
+        fromUserGesture: true,
+        intensity: action === 'ok' ? 'medium' : 'light',
+        force: true,
+      });
+    }
+    wsRef.current?.send({ type: 'remote:action', action });
+  };
+
+  const handlePassHost = (targetPlayerId: string) => {
+    if (!isRoomHost) return;
+    if (!embedded) {
+      controllerHaptics.unlock();
+      vibrate([35, 25, 65], { fromUserGesture: true, intensity: 'medium', force: true });
+    }
+    wsRef.current?.send({ type: 'room:set-host-player', playerId: targetPlayerId });
+    setPassHostOpen(false);
+  };
+
+  const describeRemoteTarget = (): { kicker: string; title: string } => {
+    const focus = room.remoteFocus;
+    if (focus.zone === 'filter') {
+      const opt = PLAYER_FILTER_OPTIONS[focus.index] ?? PLAYER_FILTER_OPTIONS[0];
+      return {
+        kicker: t('Filter Tab · Press OK to Apply', '筛选标签 · 按 OK 切换'),
+        title: getLocalizedFilterLabel(opt.id, lang, false),
+      };
+    }
+    if (focus.zone === 'games') {
+      const list = filterGamesByPlayerMode(room.lobbyFilter);
+      const rawGame = list[focus.index];
+      const focusedGame = rawGame ? getLocalizedGameMeta(rawGame, lang) : gameMeta;
+      return {
+        kicker: t(
+          `Game ${focus.index + 1}/${list.length} · Press OK to Open`,
+          `游戏 ${focus.index + 1}/${list.length} · 按 OK 进入`
+        ),
+        title: focusedGame.name,
+      };
+    }
+    const diffLabel = getLocalizedDifficulty(room.botDifficulty, lang).label;
+    const actionLabels = [
+      t(`Open ${gameMeta.name}`, `进入 ${gameMeta.name}`),
+      t(`Change ${gameMeta.settingLabel}`, `切换 ${gameMeta.settingLabel}`),
+      t('+ Add Robot', '+ 添加机器人'),
+      t(`Bot Level: ${diffLabel}`, `机器人难度：${diffLabel}`),
+      t('Room Setup / QR', '房间设置 / 二维码'),
+    ];
+    return {
+      kicker: t('Bottom Action · Press OK', '底部功能 · 按 OK 执行'),
+      title: actionLabels[focus.index] ?? actionLabels[0],
+    };
+  };
+
+  const passHostOverlay = passHostOpen && isRoomHost && (
+    <div className="absolute inset-0 z-50 bg-[#121419]/95 backdrop-blur-sm p-4 flex flex-col justify-between">
+      <div className="flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <Crown className="w-5 h-5 text-[#FFB800]" />
+          <span className="font-display text-lg font-extrabold text-white">
+            {t('Pass Host Remote Control', '移交房主遥控权')}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setPassHostOpen(false)}
+          aria-label={t('Close Pass Host picker', '关闭移交房主弹窗')}
+          className="h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto my-3">
+        {otherConnectedHumans.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center text-sm text-[#9CA3AF]">
+            {t('No other human players are connected right now.', '目前没有其他在线玩家。')}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {otherConnectedHumans.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => handlePassHost(p.id)}
+                className="tactile-btn min-h-[54px] px-4 py-2.5 rounded-xl bg-[#1A1E26] hover:bg-[#242A36] border border-[#2A303D] flex items-center justify-between gap-3 text-left cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className="w-8 h-8 rounded-lg font-mono text-xs font-black flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: p.color.hex, color: p.color.textOnColor }}
+                  >
+                    P{p.slotIndex + 1}
+                  </span>
+                  <span className="font-display font-bold text-base text-white truncate">
+                    {p.name}
+                  </span>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] text-xs font-extrabold inline-flex items-center gap-1 shrink-0">
+                  <Crown className="w-3.5 h-3.5" />
+                  {t('Make Host', '设为房主')}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setPassHostOpen(false)}
+        className="h-10 w-full rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-white cursor-pointer shrink-0"
+      >
+        {t('Cancel', '取消')}
+      </button>
+    </div>
+  );
 
   // =====================================================================
   // STATE 3A: ROOM SETUP SCREEN (Waiting for players / bots / host setup)
@@ -935,33 +1097,36 @@ export function PhoneController({
                 {isRoomHost && (
                   <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#FFB800] shrink-0">
                     <Crown className="w-3 h-3" />
-                    Host
+                    {t('Host', '房主')}
                   </span>
                 )}
               </div>
-              <div className="text-[11px] text-[#9CA3AF] font-mono">Room {room.code} · Setup</div>
+              <div className="text-[11px] text-[#9CA3AF] font-mono">
+                {t(`Room ${room.code} · Setup`, `房间 ${room.code} · 等待集结`)}
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {!embedded && <LanguageToggle compact className="h-9" />}
             {!embedded && (
               <button
                 type="button"
                 onClick={toggleFullscreen}
-                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                className="h-9 px-2.5 rounded-lg bg-[#222733] hover:bg-[#2B3140] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
+                aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+                className="h-9 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
               >
                 {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                <span>{isFullscreen ? 'Exit Full' : 'Fullscreen'}</span>
+                <span>{isFullscreen ? t('Exit Full', '退出全屏') : t('Fullscreen', '全屏')}</span>
               </button>
             )}
             <button
               type="button"
               onClick={handleLeave}
-              className="h-9 px-3 rounded-lg bg-[#222733] hover:bg-[#2B3140] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-3 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
-              Leave
+              {t('Leave', '退出')}
             </button>
           </div>
         </div>
@@ -971,32 +1136,41 @@ export function PhoneController({
             embedded ? 'grid-cols-1 gap-3 my-3' : 'grid-cols-2 gap-5 my-3 items-center'
           }`}
         >
-          <div className="p-4 rounded-xl bg-[#1C2029] border border-[#2B3140]">
-            <div className="text-xs font-medium text-[#00C2FF]">Step 1 · Room Setup</div>
+          <div className="p-4 rounded-xl bg-[#1A1E26] border border-[#2A303D]">
+            <div className="text-xs font-medium text-[#00C2FF]">
+              {t('Step 1 · Room Setup', '第 1 步 · 房间集结')}
+            </div>
             <div className="font-display text-xl font-bold text-white mt-0.5">
-              Connected to Room {room.code}
+              {t(`Connected to Room ${room.code}`, `已连接到房间 ${room.code}`)}
             </div>
             <p className="text-xs text-[#A5AEBD] mt-1 leading-relaxed">
-              Players are joining and bots are being configured on the monitor.
+              {t(
+                'Players are joining and bots are being configured on the monitor.',
+                '玩家正在陆续加入，大屏端正在配置机器人与房主。'
+              )}
             </p>
 
-            <div className="mt-3 pt-2.5 border-t border-[#2A303D] space-y-1.5 text-xs">
+            <div className="mt-3 pt-2.5 border-t border-[#262C38] space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Roster</span>
+                <span className="text-[#9CA3AF]">{t('Roster', '当前成员')}</span>
                 <span className="font-semibold text-white inline-flex items-center gap-1.5">
-                  {connectedHumans.length} Human{connectedHumans.length === 1 ? '' : 's'}
+                  {t(
+                    `${connectedHumans.length} Human${connectedHumans.length === 1 ? '' : 's'}`,
+                    `${connectedHumans.length} 名玩家`
+                  )}
                   {botCount > 0 && (
                     <span className="inline-flex items-center gap-1 text-[#00C2FF]">
-                      · <Bot className="w-3.5 h-3.5" /> {botCount} Bot{botCount === 1 ? '' : 's'}
+                      · <Bot className="w-3.5 h-3.5" />{' '}
+                      {t(`${botCount} Bot${botCount === 1 ? '' : 's'}`, `${botCount} 个机器人`)}
                     </span>
                   )}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Room Host</span>
+                <span className="text-[#9CA3AF]">{t('Room Host', '房主')}</span>
                 <span className="font-semibold text-[#FFB800] inline-flex items-center gap-1">
                   <Crown className="w-3 h-3" />
-                  {hostPlayer ? hostPlayer.name : 'Monitor'}
+                  {hostPlayer ? hostPlayer.name : t('Monitor', '大屏')}
                 </span>
               </div>
             </div>
@@ -1017,19 +1191,25 @@ export function PhoneController({
                   }}
                   className="tactile-btn w-full h-16 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-lg shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <span>Enter Game Room</span>
+                  <span>{t('Enter Game Room', '进入游戏厅')}</span>
                   <ArrowRight className="w-5 h-5" />
                 </button>
                 <p className="text-[11px] text-center text-[#9CA3AF]">
-                  You are the Room Host — tap when everyone has joined and bots are set.
+                  {t(
+                    'You are the Room Host — tap when everyone has joined and bots are set.',
+                    '你是房主 — 所有人加入并配好机器人后即可点击进入游戏厅。'
+                  )}
                 </p>
               </>
             ) : (
-              <div className="p-4 rounded-xl bg-[#181C25] border border-[#2B3140] text-center">
-                <div className="text-sm font-bold text-white">You&apos;re In!</div>
+              <div className="p-4 rounded-xl bg-[#1A1E26] border border-[#2A303D] text-center">
+                <div className="text-sm font-bold text-white">{t("You're In!", '加入成功！')}</div>
                 <p className="text-xs text-[#9CA3AF] mt-1 leading-relaxed">
-                  Waiting for <strong className="text-white">{hostPlayer?.name ?? 'the Host'}</strong>{' '}
-                  to finish setup and open the Game Room.
+                  {t('Waiting for', '等待')}{' '}
+                  <strong className="text-white">
+                    {hostPlayer?.name ?? t('the Host', '房主')}
+                  </strong>{' '}
+                  {t('to finish setup and open the Game Room.', '完成设置并开启游戏厅。')}
                 </p>
               </div>
             )}
@@ -1051,15 +1231,15 @@ export function PhoneController({
                     setTimeout(() => setImpactPulse('none'), 220);
                     setHapticNotice(controllerHaptics.describeResult(res));
                   }}
-                  className="relative w-full h-10 rounded-xl bg-[#1C2029] border border-[#2B3140] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
+                  className="relative w-full h-10 rounded-xl bg-[#1A1E26] border border-[#2A303D] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
                 >
                   <IosHapticSwitch enabled={hapticsEnabled} />
                   <Vibrate className="w-3.5 h-3.5" />
-                  <span>Test Vibration / Haptics</span>
+                  <span>{t('Test Vibration / Haptics', '测试震动反馈')}</span>
                 </label>
                 {hapticNotice && (
                   <p className="text-[11px] text-center text-[#10D98B] leading-snug">
-                    {hapticNotice}
+                    {translateServerMessage(hapticNotice, lang)}
                   </p>
                 )}
               </div>
@@ -1080,15 +1260,15 @@ export function PhoneController({
                   }
                   wsRef.current?.send({ type: 'player:emote', emoji });
                 }}
-                className="tactile-btn h-9 w-9 rounded-lg bg-[#22273A] hover:bg-[#2F3652] text-base flex items-center justify-center cursor-pointer"
-                aria-label={`Send ${emoji} reaction`}
+                className="tactile-btn h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-base flex items-center justify-center cursor-pointer"
+                aria-label={t(`Send ${emoji} reaction`, `发送 ${emoji} 表情`)}
               >
                 {emoji}
               </button>
             ))}
           </div>
-          <span className="text-[11px] text-[#8B95A7] truncate">
-            Tap emojis to pop reactions on the big screen!
+          <span className="text-[11px] text-[#9CA3AF] truncate">
+            {t('Tap emojis to pop reactions on the big screen!', '点击表情在大屏上发送互动弹幕！')}
           </span>
         </div>
       </div>
@@ -1096,10 +1276,264 @@ export function PhoneController({
   }
 
   // =====================================================================
-  // STATE 3B: GAME ROOM READY CHECK (Full-screen landscape-ready on phones!)
+  // STATE 3B: GAME ROOM — HOST BECOMES TV REMOTE / OTHERS GET READY PAD
   // =====================================================================
   if (room.status === 'LOBBY') {
     const allHumansReady = unreadyHumans.length === 0;
+    const focusInfo = describeRemoteTarget();
+
+    // --- HOST TV REMOTE CONTROL ---
+    if (isRoomHost) {
+      return renderConnectedShell(
+        <div className="relative flex flex-col justify-between h-full w-full max-w-4xl mx-auto">
+          {passHostOverlay}
+
+          {/* Slim Remote Top Bar */}
+          <div className="flex items-center justify-between gap-2 h-10 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="w-7 h-7 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0"
+                style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+              >
+                P{me.slotIndex + 1}
+              </span>
+              <div className="min-w-0 leading-tight">
+                <div className="font-bold text-xs sm:text-sm truncate flex items-center gap-1.5">
+                  <span className="truncate">{me.name}</span>
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-[#FFB800] shrink-0">
+                    <Crown className="w-3 h-3" />
+                    {t('TV Remote', '大屏遥控器')}
+                  </span>
+                </div>
+                <div className="text-[10px] text-[#9CA3AF] font-mono">
+                  PIN {room.code} · {readyHumans.length}/{connectedHumans.length}{' '}
+                  {t('Ready', '已准备')}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {!embedded && <LanguageToggle compact />}
+              {otherConnectedHumans.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPassHostOpen(true)}
+                  className="tactile-btn h-8 px-2.5 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[#14120B] text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  <span>{t('Pass Host', '移交房主')}</span>
+                </button>
+              )}
+              {!embedded && (
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+                  className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
+                >
+                  {isFullscreen ? (
+                    <Minimize2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleLeave}
+                aria-label={t('Leave room', '退出房间')}
+                className="h-8 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{t('Leave', '退出')}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Main 2-Column Host Remote Deck: Left = Tactile Cross D-Pad + OK, Right = TV Target + Ready + Pass Host */}
+          <div
+            className={`flex-1 grid ${
+              embedded ? 'grid-cols-1 gap-3 my-2' : 'grid-cols-2 gap-5 my-2 items-center'
+            } min-h-0`}
+          >
+            {/* LEFT HALF: Living-Room TV Remote D-Pad + Center OK */}
+            <div className="flex flex-col items-center justify-center">
+              <div
+                className={`grid grid-cols-3 grid-rows-3 gap-2 p-2.5 rounded-[2rem] bg-[#151820] border-2 border-[#2A303D] shadow-[inset_0_4px_14px_rgba(0,0,0,0.55)] ${
+                  embedded ? 'w-44 h-44' : 'w-52 h-52 sm:w-56 sm:h-56'
+                }`}
+              >
+                <div />
+                <button
+                  type="button"
+                  onClick={() => sendRemote('up')}
+                  aria-label={t('Remote Up', '遥控器上')}
+                  className="tactile-btn rounded-2xl bg-[#242A36] hover:bg-[#2E3646] active:bg-[#FFB800] active:text-[#14120B] text-white flex items-center justify-center shadow-[0_3px_0_#101217] cursor-pointer"
+                >
+                  <ChevronUp className="w-7 h-7 stroke-[2.8]" />
+                </button>
+                <div />
+
+                <button
+                  type="button"
+                  onClick={() => sendRemote('left')}
+                  aria-label={t('Remote Left', '遥控器左')}
+                  className="tactile-btn rounded-2xl bg-[#242A36] hover:bg-[#2E3646] active:bg-[#FFB800] active:text-[#14120B] text-white flex items-center justify-center shadow-[0_3px_0_#101217] cursor-pointer"
+                >
+                  <ChevronLeft className="w-7 h-7 stroke-[2.8]" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => sendRemote('ok')}
+                  aria-label={t('Remote OK', '遥控器确认')}
+                  className="tactile-btn rounded-full bg-[#FF4D2E] hover:bg-[#FF6145] active:bg-[#FFB800] text-white font-display font-black text-base tracking-wide flex items-center justify-center shadow-[0_4px_0_#B82E17] cursor-pointer"
+                >
+                  OK
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => sendRemote('right')}
+                  aria-label={t('Remote Right', '遥控器右')}
+                  className="tactile-btn rounded-2xl bg-[#242A36] hover:bg-[#2E3646] active:bg-[#FFB800] active:text-[#14120B] text-white flex items-center justify-center shadow-[0_3px_0_#101217] cursor-pointer"
+                >
+                  <ChevronRight className="w-7 h-7 stroke-[2.8]" />
+                </button>
+
+                <div />
+                <button
+                  type="button"
+                  onClick={() => sendRemote('down')}
+                  aria-label={t('Remote Down', '遥控器下')}
+                  className="tactile-btn rounded-2xl bg-[#242A36] hover:bg-[#2E3646] active:bg-[#FFB800] active:text-[#14120B] text-white flex items-center justify-center shadow-[0_3px_0_#101217] cursor-pointer"
+                >
+                  <ChevronDown className="w-7 h-7 stroke-[2.8]" />
+                </button>
+                <div />
+              </div>
+              <span className="mt-1.5 text-[11px] font-semibold text-[#9CA3AF]">
+                {t('Control the big TV screen · Press OK to select', '方向键控制大屏 · 按 OK 确认')}
+              </span>
+            </div>
+
+            {/* RIGHT HALF: Live TV Target Readout + Host Ready Button + Pass Host */}
+            <div className="flex flex-col gap-2.5 justify-center min-w-0">
+              <div className="p-3.5 rounded-xl bg-[#1A1E26] border border-[#2A303D]">
+                <div className="text-[11px] font-bold text-[#FFB800] truncate">
+                  {focusInfo.kicker}
+                </div>
+                <div className="font-display text-lg font-extrabold text-white truncate mt-0.5">
+                  {focusInfo.title}
+                </div>
+                <div className="mt-2 pt-2 border-t border-[#262C38] flex items-center justify-between text-xs">
+                  <span className="text-[#9CA3AF]">{t('Ready Check', '准备进度')}</span>
+                  <span
+                    className={`font-mono font-bold tabular-nums ${
+                      allHumansReady ? 'text-[#10D98B]' : 'text-[#FFB800]'
+                    }`}
+                  >
+                    {readyHumans.length}/{connectedHumans.length} {t('Ready', '已准备')}
+                    {botCount > 0
+                      ? t(` (+${botCount} Bot${botCount === 1 ? '' : 's'})`, ` (+${botCount} 机器人)`)
+                      : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Host's own Ready Toggle */}
+              <label
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  if (!embedded) {
+                    controllerHaptics.unlock();
+                    vibrate(60, {
+                      fromUserGesture: true,
+                      intensity: 'medium',
+                      force: true,
+                      skipIosSwitch: true,
+                    });
+                  }
+                  enterFullscreenAndLandscape();
+                  setErrorMsg(null);
+                  wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+                }}
+                className="relative tactile-btn w-full h-13 rounded-xl font-display font-extrabold text-base cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
+                style={
+                  me.ready
+                    ? {
+                        backgroundColor: '#10D98B',
+                        color: '#0A1913',
+                        boxShadow: '0 4px 0 #0A915D',
+                      }
+                    : {
+                        backgroundColor: me.color.hex,
+                        color: me.color.textOnColor,
+                        boxShadow: `0 4px 0 ${me.color.dark}`,
+                      }
+                }
+              >
+                <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
+                {me.ready && <Check className="w-5 h-5" />}
+                <span>
+                  {me.ready
+                    ? allHumansReady
+                      ? t('All Ready! Press OK to Open', '全员已准备！按 OK 开始')
+                      : t('You Are Ready!', '你已准备就绪！')
+                    : t('Tap to Ready Up', '点击准备')}
+                </span>
+              </label>
+
+              {errorMsg && (
+                <p className="text-[11px] text-center text-[#FF9B8A] font-medium leading-snug">
+                  {translateServerMessage(errorMsg, lang)}
+                </p>
+              )}
+
+              {otherConnectedHumans.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPassHostOpen(true)}
+                  className="h-10 w-full rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                  <span>{t('Pass Host Remote to Another Player', '把房主遥控权交给其他玩家')}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Bottom Emoji Reaction Strip */}
+          <div className="flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-1.5">
+              {QUICK_EMOTES.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => {
+                    if (!embedded) {
+                      controllerHaptics.unlock();
+                      vibrate(25, { fromUserGesture: true, intensity: 'light', force: true });
+                    }
+                    wsRef.current?.send({ type: 'player:emote', emoji });
+                  }}
+                  className="tactile-btn h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-sm flex items-center justify-center cursor-pointer"
+                  aria-label={t(`Send ${emoji} reaction`, `发送 ${emoji} 表情`)}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-[#9CA3AF] truncate">
+              {t('Only your Host Remote controls the TV screen', '当前仅你的房主遥控器可操作大屏')}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // --- NON-HOST PLAYER READY CONTROLLER ---
     return renderConnectedShell(
       <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
         <div className="flex items-center justify-between gap-3 h-11 shrink-0">
@@ -1111,40 +1545,34 @@ export function PhoneController({
               P{me.slotIndex + 1}
             </span>
             <div className="min-w-0 leading-tight">
-              <div className="font-bold text-sm truncate flex items-center gap-1.5">
-                <span className="truncate">{me.name}</span>
-                {isRoomHost && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#FFB800] shrink-0">
-                    <Crown className="w-3 h-3" />
-                    Host
-                  </span>
-                )}
-              </div>
+              <div className="font-bold text-sm truncate">{me.name}</div>
               <div className="text-[11px] text-[#9CA3AF] font-mono">
-                Room {room.code} · {readyHumans.length}/{connectedHumans.length} Ready
+                {t(`Room ${room.code}`, `房间 ${room.code}`)} · {readyHumans.length}/
+                {connectedHumans.length} {t('Ready', '已准备')}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {!embedded && <LanguageToggle compact className="h-9" />}
             {!embedded && (
               <button
                 type="button"
                 onClick={toggleFullscreen}
-                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                className="h-9 px-2.5 rounded-lg bg-[#222733] hover:bg-[#2B3140] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
+                aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+                className="h-9 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
               >
                 {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                <span>{isFullscreen ? 'Exit Full' : 'Fullscreen'}</span>
+                <span>{isFullscreen ? t('Exit Full', '退出全屏') : t('Fullscreen', '全屏')}</span>
               </button>
             )}
             <button
               type="button"
               onClick={handleLeave}
-              className="h-9 px-3 rounded-lg bg-[#222733] hover:bg-[#2B3140] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-3 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1.5 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
-              Leave
+              {t('Leave', '退出')}
             </button>
           </div>
         </div>
@@ -1154,31 +1582,39 @@ export function PhoneController({
             embedded ? 'grid-cols-1 gap-3 my-3' : 'grid-cols-2 gap-5 my-3 items-center'
           }`}
         >
-          <div className="p-4 rounded-xl bg-[#1C2029] border border-[#2B3140]">
-            <div className="text-xs font-medium text-[#9CA3AF]">
-              Selected Game · {gameMeta.category}
+          <div className="p-4 rounded-xl bg-[#1A1E26] border border-[#2A303D]">
+            <div className="text-xs font-semibold text-[#FFB800] inline-flex items-center gap-1">
+              <Crown className="w-3.5 h-3.5" />
+              <span>
+                {t(
+                  `${hostPlayer?.name ?? 'Host'} is picking a game`,
+                  `${hostPlayer?.name ?? '房主'} 正在挑选游戏`
+                )}
+              </span>
             </div>
-            <div className="font-display text-xl font-bold text-white mt-0.5">{gameMeta.name}</div>
+            <div className="font-display text-xl font-bold text-white mt-1">{gameMeta.name}</div>
             <p className="text-xs text-[#A5AEBD] mt-1 leading-relaxed">
               {gameMeta.controllerSchema.controlTip}
             </p>
 
-            <div className="mt-3 pt-2.5 border-t border-[#2A303D] space-y-1.5 text-xs">
+            <div className="mt-3 pt-2.5 border-t border-[#262C38] space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Buttons</span>
+                <span className="text-[#9CA3AF]">{t('Buttons', '按键')}</span>
                 <span className="font-semibold text-white">
                   {gameMeta.controllerSchema.actionA.label} / {gameMeta.controllerSchema.actionB.label}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Ready Check</span>
+                <span className="text-[#9CA3AF]">{t('Ready Check', '准备进度')}</span>
                 <span
                   className={`font-mono font-bold tabular-nums ${
                     allHumansReady ? 'text-[#10D98B]' : 'text-[#FFB800]'
                   }`}
                 >
-                  {readyHumans.length}/{connectedHumans.length} Ready
-                  {botCount > 0 ? ` (+${botCount} Bot${botCount === 1 ? '' : 's'})` : ''}
+                  {readyHumans.length}/{connectedHumans.length} {t('Ready', '已准备')}
+                  {botCount > 0
+                    ? t(` (+${botCount} Bot${botCount === 1 ? '' : 's'})`, ` (+${botCount} 机器人)`)
+                    : ''}
                 </span>
               </div>
             </div>
@@ -1222,36 +1658,16 @@ export function PhoneController({
               <span>
                 {me.ready
                   ? allHumansReady
-                    ? 'Ready! Starting Soon'
-                    : 'Ready! Waiting for Others'
-                  : 'Tap to Ready Up'}
+                    ? t('Ready! Waiting for Host', '已准备！等待房主开启')
+                    : t('Ready! Waiting for Others', '已准备！等待其他玩家')
+                  : t('Tap to Ready Up', '点击准备')}
               </span>
             </label>
 
-            {isRoomHost && (
-              <button
-                type="button"
-                disabled={!allHumansReady || room.players.length === 0}
-                onClick={() => {
-                  if (!embedded) {
-                    controllerHaptics.unlock();
-                    vibrate([40, 25, 65], { fromUserGesture: true, intensity: 'medium', force: true });
-                  }
-                  wsRef.current?.send({ type: 'game:start' });
-                }}
-                className="tactile-btn w-full h-12 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>
-                  {allHumansReady
-                    ? `Start ${gameMeta.name}`
-                    : `Waiting for ${unreadyHumans.map((p) => p.name).join(', ')}`}
-                </span>
-              </button>
-            )}
-
             {errorMsg && (
-              <p className="text-[11px] text-center text-[#FF9B8A] leading-snug">{errorMsg}</p>
+              <p className="text-[11px] text-center text-[#FF9B8A] leading-snug">
+                {translateServerMessage(errorMsg, lang)}
+              </p>
             )}
 
             {!embedded && (
@@ -1271,15 +1687,15 @@ export function PhoneController({
                     setTimeout(() => setImpactPulse('none'), 220);
                     setHapticNotice(controllerHaptics.describeResult(res));
                   }}
-                  className="relative w-full h-10 rounded-xl bg-[#1C2029] border border-[#2B3140] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
+                  className="relative w-full h-10 rounded-xl bg-[#1A1E26] border border-[#2A303D] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
                 >
                   <IosHapticSwitch enabled={hapticsEnabled} />
                   <Vibrate className="w-3.5 h-3.5" />
-                  <span>Test Vibration / Haptics</span>
+                  <span>{t('Test Vibration / Haptics', '测试震动反馈')}</span>
                 </label>
                 {hapticNotice && (
                   <p className="text-[11px] text-center text-[#10D98B] leading-snug">
-                    {hapticNotice}
+                    {translateServerMessage(hapticNotice, lang)}
                   </p>
                 )}
               </div>
@@ -1300,19 +1716,19 @@ export function PhoneController({
                   }
                   wsRef.current?.send({ type: 'player:emote', emoji });
                 }}
-                className="tactile-btn h-9 w-9 rounded-lg bg-[#22273A] hover:bg-[#2F3652] text-base flex items-center justify-center cursor-pointer"
-                aria-label={`Send ${emoji} reaction`}
+                className="tactile-btn h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-base flex items-center justify-center cursor-pointer"
+                aria-label={t(`Send ${emoji} reaction`, `发送 ${emoji} 表情`)}
               >
                 {emoji}
               </button>
             ))}
           </div>
-          <span className="text-[11px] text-[#8B95A7] truncate">
+          <span className="text-[11px] text-[#9CA3AF] truncate">
             {keyboardProfile === 'wasd'
-              ? 'WASD · Space (A) · Shift (B)'
+              ? t('WASD · Space (A) · Shift (B)', 'WASD 移动 · 空格 (A) · Shift (B)')
               : keyboardProfile === 'arrows'
-              ? 'Arrows · Enter (A) · Shift (B)'
-              : 'Everyone must press Ready to start!'}
+              ? t('Arrows · Enter (A) · Shift (B)', '方向键 · 回车 (A) · Shift (B)')
+              : t('Everyone must press Ready to start!', '需要全员点击准备后才能开始！')}
           </span>
         </div>
       </div>
@@ -1320,27 +1736,151 @@ export function PhoneController({
   }
 
   // =====================================================================
-  // STATE 4: RESULTS SUMMARY ON PHONE (Full-screen landscape-ready)
+  // STATE 4: RESULTS SUMMARY ON PHONE (With Host Remote Controls!)
   // =====================================================================
   if (room.status === 'RESULTS') {
     const myRank = room.rankings.find((r) => r.playerId === me.id);
+    const resultsOptionLabel =
+      room.remoteFocus.modalIndex === 0 ? t('Play Again', '再来一局') : t('Game Room', '返回游戏厅');
+
     return renderConnectedShell(
-      <div className="flex flex-col items-center justify-center h-full text-center px-4">
+      <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3">
+        {passHostOverlay}
+        {!embedded && (
+          <div className="absolute top-1 right-1">
+            <LanguageToggle compact />
+          </div>
+        )}
         <div
           className="w-14 h-14 rounded-2xl flex items-center justify-center font-display text-2xl font-extrabold"
           style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
         >
           #{myRank?.rank ?? '-'}
         </div>
-        <h2 className="font-display text-2xl font-extrabold mt-2.5">
-          {myRank?.rank === 1 ? 'Victory!' : 'Match Complete'}
+        <div>
+          <h2 className="font-display text-2xl font-extrabold">
+            {myRank?.rank === 1 ? t('Victory!', '胜利！') : t('Match Complete', '本局结束')}
+          </h2>
+          <p className="text-sm text-[#A5AEBD] mt-0.5">
+            {me.name} · {myRank?.score ?? me.score} {t('pts', '分')}
+            {myRank?.highlight ? ` · ${translateGameText(myRank.highlight, lang)}` : ''}
+          </p>
+        </div>
+
+        {isRoomHost ? (
+          <div className="w-full max-w-md space-y-2.5">
+            <div className="text-xs font-bold text-[#FFB800]">
+              {t('TV Highlighted:', '大屏当前选中：')}{' '}
+              <span className="text-white">{resultsOptionLabel}</span>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => sendRemote('left')}
+                aria-label={t('Remote Left', '遥控器左')}
+                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button
+                type="button"
+                onClick={() => sendRemote('ok')}
+                className="tactile-btn h-12 px-8 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
+              >
+                OK · {resultsOptionLabel}
+              </button>
+              <button
+                type="button"
+                onClick={() => sendRemote('right')}
+                aria-label={t('Remote Right', '遥控器右')}
+                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+            {otherConnectedHumans.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setPassHostOpen(true)}
+                className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                {t('Pass Host', '移交房主')}
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-[#9CA3AF]">
+            {t('Waiting for', '等待')}{' '}
+            <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+            {t("'s remote to play again or switch games.", ' 遥控选择再来一局或切换游戏。')}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // =====================================================================
+  // STATE 4C: PAUSED SCREEN ON PHONE (Host Remote Controls!)
+  // =====================================================================
+  if (room.status === 'PAUSED') {
+    const pauseLabels = [
+      t('Resume Match', '继续比赛'),
+      t('Restart', '重新开始'),
+      t('Switch Game', '切换游戏'),
+    ];
+    const activePauseLabel = pauseLabels[room.remoteFocus.modalIndex] ?? pauseLabels[0];
+
+    return renderConnectedShell(
+      <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3">
+        {passHostOverlay}
+        {!embedded && (
+          <div className="absolute top-1 right-1">
+            <LanguageToggle compact />
+          </div>
+        )}
+        <Pause className="w-10 h-10 text-[#FFB800]" />
+        <h2 className="font-display text-2xl font-extrabold text-white">
+          {t('Game Paused', '游戏已暂停')}
         </h2>
-        <p className="text-sm text-[#A5AEBD] mt-1">
-          {me.name} · {myRank?.score ?? me.score} pts · {myRank?.highlight ?? ''}
-        </p>
-        <p className="text-xs text-[#6B7280] mt-3">
-          Waiting for the host to start a rematch or switch games.
-        </p>
+        {isRoomHost ? (
+          <div className="w-full max-w-md space-y-2.5">
+            <div className="text-xs font-bold text-[#FFB800]">
+              {t('TV Highlighted:', '大屏当前选中：')}{' '}
+              <span className="text-white">{activePauseLabel}</span>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => sendRemote('left')}
+                aria-label={t('Remote Left', '遥控器左')}
+                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button
+                type="button"
+                onClick={() => sendRemote('ok')}
+                className="tactile-btn h-12 px-7 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
+              >
+                OK · {activePauseLabel}
+              </button>
+              <button
+                type="button"
+                onClick={() => sendRemote('right')}
+                aria-label={t('Remote Right', '遥控器右')}
+                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-[#9CA3AF]">
+            {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
+            <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+          </p>
+        )}
       </div>
     );
   }
@@ -1363,11 +1903,14 @@ export function PhoneController({
             <span className="font-display font-bold text-base text-white truncate">
               {gameMeta.name}
             </span>
-            <span className="text-xs text-[#9CA3AF] truncate">· How to Play</span>
+            <span className="text-xs text-[#9CA3AF] truncate">· {t('How to Play', '玩法说明')}</span>
           </div>
-          <span className="font-mono text-xs font-bold text-[#10D98B] shrink-0 tabular-nums">
-            {readyHumans.length}/{connectedHumans.length} Ready
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            {!embedded && <LanguageToggle compact />}
+            <span className="font-mono text-xs font-bold text-[#10D98B] shrink-0 tabular-nums">
+              {readyHumans.length}/{connectedHumans.length} {t('Ready', '已准备')}
+            </span>
+          </div>
         </div>
 
         <div
@@ -1375,24 +1918,24 @@ export function PhoneController({
             embedded ? 'grid-cols-1 gap-2.5 my-2' : 'grid-cols-2 gap-4 my-2 items-center'
           }`}
         >
-          <div className="p-3.5 rounded-xl bg-[#1A1E27] border border-[#2A3142] space-y-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#38BDF8]">
-              How to Win
+          <div className="p-3.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
+              {t('How to Win', '获胜方式')}
             </div>
             <p className="text-sm font-bold text-white leading-snug">{gameMeta.tagline}</p>
-            <div className="pt-1.5 border-t border-[#2A3142] space-y-1 text-xs">
+            <div className="pt-1.5 border-t border-[#262C38] space-y-1 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Joystick</span>
+                <span className="text-[#9CA3AF]">{t('Joystick', '摇杆')}</span>
                 <span className="font-bold text-white">{schema.joystickLabel}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Button A</span>
+                <span className="text-[#9CA3AF]">{t('Button A', 'A 键')}</span>
                 <span className="font-bold" style={{ color: schema.actionA.colorHex }}>
                   {schema.actionA.label} · {schema.actionA.sublabel}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">Button B</span>
+                <span className="text-[#9CA3AF]">{t('Button B', 'B 键')}</span>
                 <span className="font-bold" style={{ color: schema.actionB.colorHex }}>
                   {schema.actionB.label} · {schema.actionB.sublabel}
                 </span>
@@ -1434,20 +1977,53 @@ export function PhoneController({
             >
               <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
               {me.ready && <Check className="w-6 h-6" />}
-              <span>{me.ready ? "Ready! Waiting for Others" : "I'm Ready!"}</span>
+              <span>
+                {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
+              </span>
             </label>
 
             <p className="text-[11px] text-center text-[#A5AEBD] leading-snug">
               {me.ready
-                ? `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`
-                : 'Read the rules at your own pace — game starts once everyone taps Ready!'}
+                ? t(
+                    `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
+                    `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
+                  )
+                : t(
+                    'Read the rules at your own pace — game starts once everyone taps Ready!',
+                    '慢慢看规则 — 所有人点击「我准备好了」后即刻开始！'
+                  )}
             </p>
           </div>
         </div>
 
-        <div className="text-center text-[11px] text-[#8B95A7] shrink-0">
-          Your gamepad opens automatically as soon as everyone is Ready!
-        </div>
+        {isRoomHost ? (
+          <div className="flex items-center justify-between gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
+              className="h-8 px-3 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#D1D5DB] cursor-pointer"
+            >
+              {t('Back to Game Room', '返回游戏厅')}
+            </button>
+            <span className="text-[11px] text-[#9CA3AF] truncate hidden sm:inline">
+              {t('Starts automatically when all tap Ready', '全员准备后自动开始')}
+            </span>
+            <button
+              type="button"
+              onClick={() => wsRef.current?.send({ type: 'game:dismiss-briefing' })}
+              className="h-8 px-3 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[11px] font-extrabold text-[#14120B] cursor-pointer"
+            >
+              {t('Host Start Now', '房主直接开始')}
+            </button>
+          </div>
+        ) : (
+          <div className="text-center text-[11px] text-[#9CA3AF] shrink-0">
+            {t(
+              'Your gamepad opens automatically as soon as everyone is Ready!',
+              '全员准备后手柄将自动切换为游戏模式！'
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -1490,17 +2066,30 @@ export function PhoneController({
           <div className="min-w-0 leading-tight">
             <div className="text-xs font-bold text-white truncate">{me.name}</div>
             <div className="text-[11px] font-mono text-[#9CA3AF] truncate tabular-nums">
-              {me.statText}
+              {translateGameText(me.statText, lang)}
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] font-semibold text-[#9CA3AF]">
-            {gameMeta.name}
-          </span>
+          <span className="text-[11px] font-semibold text-[#9CA3AF]">{gameMeta.name}</span>
+          {!embedded && <LanguageToggle compact />}
+          {isRoomHost && room.status === 'PLAYING' && (
+            <button
+              type="button"
+              onClick={() => wsRef.current?.send({ type: 'game:pause', paused: true })}
+              aria-label={t('Pause game', '暂停游戏')}
+              title={t('Pause Game (Host)', '暂停游戏（房主）')}
+              className="min-h-[34px] px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#FFB800] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+            >
+              <Pause className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t('Pause', '暂停')}</span>
+            </button>
+          )}
           {!wsConnected && (
-            <span className="text-[11px] font-semibold text-[#FFB800]">Reconnecting...</span>
+            <span className="text-[11px] font-semibold text-[#FFB800]">
+              {t('Reconnecting...', '正在重连...')}
+            </span>
           )}
           {!embedded && (
             <button
@@ -1518,12 +2107,12 @@ export function PhoneController({
                   });
                 }
               }}
-              aria-label={hapticsEnabled ? 'Disable haptics' : 'Enable haptics'}
-              title={hapticsEnabled ? 'Haptics On' : 'Haptics Off'}
+              aria-label={hapticsEnabled ? t('Disable haptics', '关闭震动') : t('Enable haptics', '开启震动')}
+              title={hapticsEnabled ? t('Haptics On', '震动已开启') : t('Haptics Off', '震动已关闭')}
               className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer ${
                 hapticsEnabled
-                  ? 'bg-[#202531] text-[#10D98B]'
-                  : 'bg-[#202531] text-[#6B7280]'
+                  ? 'bg-[#1E232D] hover:bg-[#242A36] text-[#10D98B]'
+                  : 'bg-[#1E232D] hover:bg-[#242A36] text-[#6B7280]'
               }`}
             >
               <Vibrate className="w-4 h-4" />
@@ -1533,8 +2122,8 @@ export function PhoneController({
             <button
               type="button"
               onClick={toggleFullscreen}
-              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              className="min-h-[34px] min-w-[34px] rounded-lg bg-[#202531] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
+              aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+              className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
@@ -1542,8 +2131,8 @@ export function PhoneController({
           <button
             type="button"
             onClick={handleLeave}
-            aria-label="Leave room"
-            className="min-h-[34px] min-w-[34px] rounded-lg bg-[#202531] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
+            aria-label={t('Leave room', '退出房间')}
+            className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -1564,11 +2153,11 @@ export function PhoneController({
         >
           <div
             ref={stickZoneRef}
-            className={`relative rounded-full bg-[#0D0F14] border-2 flex items-center justify-center pointer-events-none ${
+            className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center pointer-events-none ${
               embedded ? 'w-32 h-32' : 'w-44 h-44 sm:w-48 sm:h-48'
             }`}
             style={{
-              borderColor: stickActive ? me.color.hex : '#2B3240',
+              borderColor: stickActive ? me.color.hex : '#2A303D',
               boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
             }}
           >
@@ -1687,15 +2276,16 @@ export function PhoneController({
       {/* Subtle Bottom Helper Strip */}
       <div className="text-center text-[11px] text-[#6B7280] shrink-0">
         {room.status === 'COUNTDOWN'
-          ? `Match starting in ${room.countdownValue}...`
-          : room.status === 'PAUSED'
-          ? 'Game paused on monitor'
+          ? t(`Match starting in ${room.countdownValue}...`, `比赛即将在 ${room.countdownValue} 秒后开始...`)
           : !me.alive
-          ? 'Knocked out — watch the monitor for next round or respawn'
+          ? t(
+              'Knocked out — watch the monitor for next round or respawn',
+              '已被淘汰 — 请观看大屏等待复活或下一回合'
+            )
           : keyboardProfile === 'wasd'
-          ? 'Keys: W A S D · Space (A) · Left Shift (B)'
+          ? t('Keys: W A S D · Space (A) · Left Shift (B)', '按键：W A S D · 空格 (A) · 左 Shift (B)')
           : keyboardProfile === 'arrows'
-          ? 'Keys: Arrows · Enter (A) · Right Shift (B)'
+          ? t('Keys: Arrows · Enter (A) · Right Shift (B)', '按键：方向键 · 回车 (A) · 右 Shift (B)')
           : schema.controlTip}
       </div>
     </div>

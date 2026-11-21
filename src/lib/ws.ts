@@ -5,12 +5,15 @@ export function getWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-export function getJoinUrl(roomCode: string): string {
+export function getJoinUrl(roomCode: string, lang?: 'en' | 'zh'): string {
   const url = new URL(window.location.href);
   url.search = '';
   url.hash = '';
   url.searchParams.set('mode', 'controller');
   url.searchParams.set('room', roomCode.toUpperCase());
+  if (lang === 'zh') {
+    url.searchParams.set('lang', 'zh');
+  }
   return url.toString();
 }
 
