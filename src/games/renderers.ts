@@ -8,6 +8,15 @@ import {
 } from '../shared/types';
 import { Language, translateGameText } from '../lib/i18n';
 import {
+  drawCharacterPod3D,
+  drawExtrudedCylinder3D,
+  drawExtrudedDiscStage,
+  drawShadowOval,
+  drawSphere3D,
+  drawStudioBackdrop,
+  shadeHex,
+} from './render25d';
+import {
   renderFusePass,
   renderGridRunners,
   renderHexDrop,
@@ -79,7 +88,7 @@ export function drawNameplate(
   const rx = x - w / 2;
   const ry = y - h / 2;
 
-  ctx.fillStyle = 'rgba(13, 15, 20, 0.84)';
+  ctx.fillStyle = 'rgba(13, 15, 20, 0.86)';
   ctx.beginPath();
   ctx.roundRect(rx, ry, w, h, 5);
   ctx.fill();
@@ -96,34 +105,16 @@ export function drawNameplate(
 }
 
 // ============================================================
-// 1. BUMPER BRAWL RENDERER
+// 1. BUMPER BRAWL RENDERER (2.5D Extruded Steel Arena)
 // ============================================================
 function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnapshot): void {
-  // Deep mechanical workshop drop-off pit
-  ctx.fillStyle = '#0D0F14';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
-
-  // Subtle recessed metal grating grid
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= ARENA_WIDTH; x += 40) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, ARENA_HEIGHT);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= ARENA_HEIGHT; y += 40) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(ARENA_WIDTH, y);
-    ctx.stroke();
-  }
+  drawStudioBackdrop(ctx, '#0A0C12', 'rgba(255, 184, 0, 0.08)', 'rgba(255,255,255,0.03)', 44);
 
   const { ringCenterX: cx, ringCenterY: cy, ringRadius: r, maxRingRadius: maxR } = snap;
 
   // Ghost outer maximum boundary
   ctx.save();
-  ctx.strokeStyle = 'rgba(255, 184, 0, 0.14)';
+  ctx.strokeStyle = 'rgba(255, 184, 0, 0.16)';
   ctx.lineWidth = 2;
   ctx.setLineDash([8, 8]);
   ctx.beginPath();
@@ -131,26 +122,15 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
   ctx.stroke();
   ctx.restore();
 
-  // Drop shadow beneath steel arena platform
-  ctx.save();
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-  ctx.beginPath();
-  ctx.arc(cx, cy + 12, r + 8, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // Main matte steel arena ring
-  const floorGrad = ctx.createRadialGradient(cx, cy, 20, cx, cy, r);
-  floorGrad.addColorStop(0, '#272C37');
-  floorGrad.addColorStop(0.84, '#1C2029');
-  floorGrad.addColorStop(1, '#151820');
-  ctx.fillStyle = floorGrad;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
+  // Raised 2.5D circular steel arena slab with thick cliff wall
+  const floorGrad = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.25, 20, cx, cy, r);
+  floorGrad.addColorStop(0, '#313846');
+  floorGrad.addColorStop(0.75, '#1F242F');
+  floorGrad.addColorStop(1, '#161A22');
+  drawExtrudedDiscStage(ctx, cx, cy, r, 22, floorGrad, '#222835', '#475569');
 
   // Inner concentric tactical rings & crosshairs
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2);
@@ -162,19 +142,19 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
   ctx.lineTo(cx, cy + r * 0.85);
   ctx.stroke();
 
-  // Bold hazard amber rim
+  // Bold hazard amber bevel rim
   ctx.save();
   ctx.strokeStyle = '#FFB800';
   ctx.lineWidth = 8;
   ctx.beginPath();
-  ctx.arc(cx, cy, r - 4, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r - 5, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.strokeStyle = '#121419';
   ctx.lineWidth = 8;
   ctx.setLineDash([14, 14]);
   ctx.beginPath();
-  ctx.arc(cx, cy, r - 4, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r - 5, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 
@@ -190,83 +170,80 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
     ctx.restore();
   }
 
-  // Spring bumper pylons
-  for (const pylon of snap.pylons) {
-    ctx.save();
-    ctx.fillStyle = '#0B0D12';
-    ctx.beginPath();
-    ctx.arc(pylon.x, pylon.y + 3, pylon.r + 3, 0, Math.PI * 2);
-    ctx.fill();
+  // Y-sort pylons and players for authentic 2.5D overlap
+  type Item =
+    | { kind: 'pylon'; y: number; pylon: (typeof snap.pylons)[number] }
+    | { kind: 'player'; y: number; player: (typeof snap.players)[number] };
+  const items: Item[] = [
+    ...snap.pylons.map((pylon) => ({ kind: 'pylon' as const, y: pylon.y, pylon })),
+    ...snap.players.filter((p) => p.alive).map((player) => ({ kind: 'player' as const, y: player.y, player })),
+  ];
+  items.sort((a, b) => a.y - b.y);
 
-    ctx.fillStyle = '#333A48';
-    ctx.beginPath();
-    ctx.arc(pylon.x, pylon.y, pylon.r, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#FFB800';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    ctx.fillStyle = '#FFB800';
-    ctx.beginPath();
-    ctx.arc(pylon.x, pylon.y, 4.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // Bumper pods
-  for (const p of snap.players) {
-    if (!p.alive) continue;
-    ctx.save();
-    ctx.translate(p.x, p.y);
-
-    // Dash trail glow
-    if (p.dashTimer > 0) {
+  for (const item of items) {
+    if (item.kind === 'pylon') {
+      const { pylon } = item;
+      drawExtrudedCylinder3D(
+        ctx,
+        pylon.x,
+        pylon.y,
+        pylon.r,
+        14,
+        '#394254',
+        '#202633',
+        '#FFB800',
+        '#FFB800'
+      );
+    } else {
+      const p = item.player;
       ctx.save();
-      ctx.fillStyle = p.colorHex;
-      ctx.globalAlpha = 0.28;
+      // Dash trail glow
+      if (p.dashTimer > 0) {
+        ctx.save();
+        ctx.fillStyle = p.colorHex;
+        ctx.globalAlpha = 0.28;
+        ctx.beginPath();
+        ctx.arc(p.x - Math.cos(p.angle) * 14, p.y - Math.sin(p.angle) * 14 - 5, p.radius * 1.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Ground shadow
+      drawShadowOval(ctx, p.x + 2, p.y + p.radius * 0.48, p.radius * 1.12, p.radius * 0.78, 0.48);
+
+      // Thick dark outer rubber bumper skirt (extruded 7px)
+      ctx.fillStyle = '#0D1017';
       ctx.beginPath();
-      ctx.arc(-Math.cos(p.angle) * 14, -Math.sin(p.angle) * 14, p.radius * 1.15, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.radius + 3, 0, Math.PI);
+      ctx.lineTo(p.x - p.radius - 3, p.y - 7);
+      ctx.arc(p.x, p.y - 7, p.radius + 3, Math.PI, 0, true);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#1B212D';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 7, p.radius + 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Colored 3D bumper chassis sitting above rubber ring
+      drawCharacterPod3D(ctx, p.x, p.y - 4, p.radius - 2, p.angle, p.colorHex, {
+        height: 8,
+        rimColor: '#F8FAFC',
+        visorColor: '#FFFFFF',
+      });
+
+      // Front headlights on top face
+      ctx.translate(p.x, p.y - 12);
+      ctx.rotate(p.angle);
+      ctx.fillStyle = '#FEF08A';
+      ctx.beginPath();
+      ctx.roundRect(p.radius - 7, -8, 5, 5, 2);
+      ctx.roundRect(p.radius - 7, 3, 5, 5, 2);
       ctx.fill();
       ctx.restore();
+
+      drawNameplate(ctx, p.x, p.y - p.radius - 26, p.slotIndex, p.name, p.colorHex);
     }
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.beginPath();
-    ctx.arc(0, 5, p.radius + 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.rotate(p.angle);
-
-    // Outer rubber bumper ring
-    ctx.fillStyle = '#0F1117';
-    ctx.beginPath();
-    ctx.arc(0, 0, p.radius + 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Colored tactile chassis
-    ctx.fillStyle = p.colorHex;
-    ctx.beginPath();
-    ctx.arc(0, 0, p.radius - 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Inner cabin detail
-    ctx.fillStyle = 'rgba(15, 17, 23, 0.35)';
-    ctx.beginPath();
-    ctx.roundRect(-10, -10, 17, 20, 5);
-    ctx.fill();
-
-    // Front bumper bar & headlights
-    ctx.fillStyle = '#F8FAFC';
-    ctx.beginPath();
-    ctx.roundRect(p.radius - 7, -9, 5, 6, 2);
-    ctx.roundRect(p.radius - 7, 3, 5, 6, 2);
-    ctx.fill();
-
-    ctx.restore();
-
-    drawNameplate(ctx, p.x, p.y - p.radius - 16, p.slotIndex, p.name, p.colorHex);
   }
 
   // Top-left round counter
@@ -311,16 +288,17 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
 }
 
 // ============================================================
-// 2. ASTRO BLASTER RENDERER
+// 2. ASTRO BLASTER RENDERER (2.5D Depth Cosmos)
 // ============================================================
-const STATIC_STARS = Array.from({ length: 85 }, (_, i) => ({
-  x: ((i * 197 + 43) % ARENA_WIDTH),
-  y: ((i * 131 + 29) % ARENA_HEIGHT),
-  r: (i % 3) * 0.6 + 0.8,
-  alpha: 0.25 + ((i * 17) % 50) / 100,
+const STATIC_STARS = Array.from({ length: 100 }, (_, i) => ({
+  x: (i * 197 + 43) % ARENA_WIDTH,
+  y: (i * 131 + 29) % ARENA_HEIGHT,
+  r: (i % 3) * 0.7 + 0.7,
+  layer: i % 3,
+  alpha: 0.22 + ((i * 17) % 55) / 100,
 }));
 
-function drawPolygonAsteroid(
+function drawPolygonAsteroid3D(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -328,92 +306,99 @@ function drawPolygonAsteroid(
   seed: number
 ): void {
   const sides = 8;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.beginPath();
+  const pts: [number, number][] = [];
   for (let i = 0; i < sides; i++) {
     const a = (i / sides) * Math.PI * 2;
     const jitter = 0.82 + (((seed * (i + 3) * 19) % 30) / 100);
-    const px = Math.cos(a) * r * jitter;
-    const py = Math.sin(a) * r * jitter;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
+    pts.push([Math.cos(a) * r * jitter, Math.sin(a) * r * jitter]);
   }
-  ctx.closePath();
-  ctx.fillStyle = '#252B36';
+
+  const tracePoly = (ox: number, oy: number) => {
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const px = pts[i][0] + ox;
+      const py = pts[i][1] + oy;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  };
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Shaded underside rock extrusion (depth = 10px)
+  tracePoly(2, 9);
+  ctx.fillStyle = '#11151E';
   ctx.fill();
-  ctx.strokeStyle = '#475569';
-  ctx.lineWidth = 2.5;
+
+  // Main rock body with directional gradient
+  tracePoly(0, 0);
+  const grad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+  grad.addColorStop(0, '#475569');
+  grad.addColorStop(0.55, '#2A3241');
+  grad.addColorStop(1, '#191F2A');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = '#64748B';
+  ctx.lineWidth = 2.2;
   ctx.stroke();
 
-  // Inner facet highlight
+  // Recessed crater & top-left facet highlight
+  ctx.fillStyle = 'rgba(10, 14, 22, 0.42)';
   ctx.beginPath();
-  ctx.arc(-r * 0.2, -r * 0.2, r * 0.35, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+  ctx.arc(r * 0.2, r * 0.18, r * 0.26, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.beginPath();
+  ctx.arc(-r * 0.26, -r * 0.26, r * 0.32, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
 
 function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSnapshot): void {
-  ctx.fillStyle = '#0B0E14';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+  drawStudioBackdrop(ctx, '#080B12', 'rgba(0, 194, 255, 0.08)', 'rgba(0, 194, 255, 0.04)', 60);
 
-  // Subtle sector grid
-  ctx.strokeStyle = 'rgba(0, 194, 255, 0.04)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= ARENA_WIDTH; x += 60) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, ARENA_HEIGHT);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= ARENA_HEIGHT; y += 60) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(ARENA_WIDTH, y);
-    ctx.stroke();
-  }
-
-  // Stars
+  // Multi-layer depth starfield
+  const now = Date.now() * 0.001;
   for (const s of STATIC_STARS) {
+    const drift = (now * (s.layer + 1) * 5) % ARENA_WIDTH;
+    const sx = (s.x + drift) % ARENA_WIDTH;
     ctx.fillStyle = `rgba(226, 232, 240, ${s.alpha})`;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.arc(sx, s.y, s.r, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Arena frame border
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-  ctx.lineWidth = 4;
+  // Beveled arena boundary frame
+  ctx.strokeStyle = 'rgba(0, 194, 255, 0.18)';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(10, 10, ARENA_WIDTH - 20, ARENA_HEIGHT - 20);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  ctx.lineWidth = 2;
   ctx.strokeRect(10, 10, ARENA_WIDTH - 20, ARENA_HEIGHT - 20);
 
-  // Pickups
-  const pulse = 0.85 + Math.sin(Date.now() / 180) * 0.15;
+  // Pickups (3D hovering orbs)
+  const tNow = Date.now() * 0.004;
   for (const pk of snap.pickups) {
     const color =
       pk.kind === 'shield' ? '#00C2FF' : pk.kind === 'rapid' ? '#FFB800' : '#10D98B';
     const label = pk.kind === 'shield' ? 'S' : pk.kind === 'rapid' ? 'R' : '+';
+    const bob = Math.sin(tNow + pk.x) * 4;
+    drawSphere3D(ctx, pk.x, pk.y, 16, color, '#FFFFFF', 5 + bob, true);
     ctx.save();
-    ctx.translate(pk.x, pk.y);
-    ctx.scale(pulse, pulse);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-    ctx.beginPath();
-    ctx.arc(0, 0, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.font = '800 14px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#0B0E14';
+    ctx.font = '800 13px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, 0, 1);
+    ctx.fillText(label, pk.x, pk.y - (5 + bob) + 0.5);
     ctx.restore();
   }
 
-  // Asteroids
+  // 3D Asteroids
   for (const ast of snap.asteroids) {
-    drawPolygonAsteroid(ctx, ast.x, ast.y, ast.r, ast.seed);
+    drawPolygonAsteroid3D(ctx, ast.x, ast.y, ast.r, ast.seed);
   }
 
   // Plasma bolts
@@ -422,38 +407,59 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
     const angle = Math.atan2(b.vy, b.vx);
     ctx.translate(b.x, b.y);
     ctx.rotate(angle);
+    ctx.fillStyle = shadeHex(b.colorHex, -0.35);
+    ctx.beginPath();
+    ctx.roundRect(-11, -3.5, 20, 8, 4);
+    ctx.fill();
     ctx.fillStyle = b.colorHex;
     ctx.beginPath();
-    ctx.roundRect(-10, -3, 18, 6, 3);
+    ctx.roundRect(-10, -4, 18, 6, 3);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.roundRect(-4, -1.5, 10, 3, 1.5);
+    ctx.roundRect(-4, -2, 10, 3, 1.5);
     ctx.fill();
     ctx.restore();
   }
 
-  // Ships
-  for (const ship of snap.players) {
-    if (!ship.alive) continue;
+  // 2.5D Starfighters (Y-sorted)
+  const ships = [...snap.players].filter((s) => s.alive).sort((a, b) => a.y - b.y);
+  for (const ship of ships) {
+    // Ground/space shadow beneath hovering ship
+    drawShadowOval(ctx, ship.x + 3, ship.y + 16, 20, 11, 0.38);
+
     ctx.save();
-    ctx.translate(ship.x, ship.y);
+    ctx.translate(ship.x, ship.y - 4);
 
     // Shield halo
     if (ship.shieldTimer > 0 || ship.boostTimer > 0) {
       ctx.strokeStyle = ship.boostTimer > 0 ? '#10D98B' : '#00C2FF';
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.8;
       ctx.beginPath();
-      ctx.arc(0, 0, 27, 0, Math.PI * 2);
+      ctx.arc(0, 0, 28, 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    // Extruded underside wing thickness (offset downward before rotating!)
+    ctx.save();
+    ctx.translate(0, 5);
+    ctx.rotate(ship.angle);
+    ctx.fillStyle = shadeHex(ship.colorHex, -0.58);
+    ctx.beginPath();
+    ctx.moveTo(22, 0);
+    ctx.lineTo(-14, -16);
+    ctx.lineTo(-8, 0);
+    ctx.lineTo(-14, 16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
 
     ctx.rotate(ship.angle);
 
     // Thruster flame
     const speed = Math.hypot(ship.vx, ship.vy);
     if (speed > 45 || ship.boostTimer > 0) {
-      const flameLen = ship.boostTimer > 0 ? 28 : Math.min(18, speed / 18);
+      const flameLen = ship.boostTimer > 0 ? 30 : Math.min(20, speed / 18);
       ctx.fillStyle = ship.boostTimer > 0 ? '#10D98B' : '#FFB800';
       ctx.beginPath();
       ctx.moveTo(-14, -5);
@@ -463,8 +469,12 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
       ctx.fill();
     }
 
-    // Starfighter hull
-    ctx.fillStyle = ship.colorHex;
+    // Top starfighter hull with wing bevel gradient
+    const hullGrad = ctx.createLinearGradient(-14, -16, 18, 16);
+    hullGrad.addColorStop(0, shadeHex(ship.colorHex, 0.35));
+    hullGrad.addColorStop(0.5, ship.colorHex);
+    hullGrad.addColorStop(1, shadeHex(ship.colorHex, -0.25));
+    ctx.fillStyle = hullGrad;
     ctx.beginPath();
     ctx.moveTo(22, 0);
     ctx.lineTo(-14, -16);
@@ -472,14 +482,27 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
     ctx.lineTo(-14, 16);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = '#0B0E14';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1.6;
     ctx.stroke();
 
-    // Cockpit glass
-    ctx.fillStyle = '#E2E8F0';
+    // Raised fuselage spine
+    ctx.fillStyle = shadeHex(ship.colorHex, 0.25);
     ctx.beginPath();
-    ctx.ellipse(4, 0, 6, 3.2, 0, 0, Math.PI * 2);
+    ctx.moveTo(20, 0);
+    ctx.lineTo(-9, -6);
+    ctx.lineTo(-9, 6);
+    ctx.closePath();
+    ctx.fill();
+
+    // 3D Cockpit glass dome
+    ctx.fillStyle = '#BAE6FD';
+    ctx.beginPath();
+    ctx.ellipse(4, 0, 6.5, 3.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.ellipse(5, -1, 2.5, 1.2, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
@@ -492,7 +515,7 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
       ctx.fillRect(ship.x - totalW / 2 + i * (pipWidth + 3), ship.y + 24, pipWidth, 4);
     }
 
-    drawNameplate(ctx, ship.x, ship.y - 32, ship.slotIndex, ship.name, ship.colorHex);
+    drawNameplate(ctx, ship.x, ship.y - 36, ship.slotIndex, ship.name, ship.colorHex);
   }
 
   // Explosions
@@ -507,7 +530,7 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
     ctx.restore();
   }
 
-  // Timer pill-less readout
+  // Timer readout
   ctx.save();
   ctx.fillStyle = 'rgba(18, 20, 25, 0.85)';
   ctx.beginPath();
@@ -528,7 +551,7 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
 }
 
 // ============================================================
-// 3. TURBO DRIFT RENDERER
+// 3. TURBO DRIFT RENDERER (2.5D Elevated Sky-Track Viaduct)
 // ============================================================
 function strokeClosedSpline(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]): void {
   if (pts.length === 0) return;
@@ -545,25 +568,7 @@ function renderTurboDrift(
   snap: TurboDriftSnapshot,
   fx: RenderFxState
 ): void {
-  // Deep elevated sky-track drop-off abyss
-  ctx.fillStyle = '#0B0E14';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
-
-  // Subtle recessed chasm grid below the elevated track
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.032)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= ARENA_WIDTH; x += 48) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, ARENA_HEIGHT);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= ARENA_HEIGHT; y += 48) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(ARENA_WIDTH, y);
-    ctx.stroke();
-  }
+  drawStudioBackdrop(ctx, '#090C12', 'rgba(0, 194, 255, 0.06)', 'rgba(255, 255, 255, 0.03)', 48);
 
   const pts = snap.trackPoints;
   const roadW = snap.trackHalfWidth * 2;
@@ -572,18 +577,29 @@ function renderTurboDrift(
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
-  // Elevated track drop shadow cast onto the pit below
+  // Deep abyss shadow cast by elevated viaduct
   ctx.save();
-  ctx.translate(0, 14);
+  ctx.translate(4, 24);
   strokeClosedSpline(ctx, pts);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
-  ctx.lineWidth = roadW + 20;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.62)';
+  ctx.lineWidth = roadW + 24;
   ctx.stroke();
   ctx.restore();
 
+  // Thick 2.5D concrete/steel viaduct deck wall underneath track
+  for (let layer = 14; layer >= 4; layer -= 5) {
+    ctx.save();
+    ctx.translate(0, layer);
+    strokeClosedSpline(ctx, pts);
+    ctx.strokeStyle = layer === 14 ? '#161B25' : '#242B3A';
+    ctx.lineWidth = roadW + 20;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Outer steel deck rim
   strokeClosedSpline(ctx, pts);
-  ctx.strokeStyle = '#313847';
+  ctx.strokeStyle = '#3B4457';
   ctx.lineWidth = roadW + 20;
   ctx.stroke();
 
@@ -603,14 +619,14 @@ function renderTurboDrift(
 
   // Dark matte asphalt
   strokeClosedSpline(ctx, pts);
-  ctx.strokeStyle = '#1E222B';
+  ctx.strokeStyle = '#1E232D';
   ctx.lineWidth = roadW;
   ctx.stroke();
 
   // Center dashed lane marker
   ctx.save();
   strokeClosedSpline(ctx, pts);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
   ctx.lineWidth = 2;
   ctx.setLineDash([14, 18]);
   ctx.stroke();
@@ -646,14 +662,18 @@ function renderTurboDrift(
     ctx.save();
     ctx.translate(pad.x, pad.y);
     ctx.rotate(pad.angle);
+    ctx.fillStyle = 'rgba(255, 184, 0, 0.14)';
+    ctx.beginPath();
+    ctx.roundRect(-24, -20, 48, 40, 6);
+    ctx.fill();
     ctx.strokeStyle = '#FFB800';
     ctx.lineWidth = 4;
     for (let c = -1; c <= 1; c++) {
       const ox = c * 14;
       ctx.beginPath();
-      ctx.moveTo(ox - 6, -16);
+      ctx.moveTo(ox - 6, -15);
       ctx.lineTo(ox + 6, 0);
-      ctx.lineTo(ox - 6, 16);
+      ctx.lineTo(ox - 6, 15);
       ctx.stroke();
     }
     ctx.restore();
@@ -683,11 +703,16 @@ function renderTurboDrift(
     ctx.fill();
   }
 
-  // Cars (render falling cars beneath on-track cars with shrink + tumble animation)
-  const orderedCars = [...snap.players].sort((a, b) => Number(b.falling) - Number(a.falling));
+  // Cars (falling cars drop below deck; on-track cars Y-sorted)
+  const orderedCars = [...snap.players].sort((a, b) => {
+    if (a.falling !== b.falling) return Number(b.falling) - Number(a.falling);
+    return a.y - b.y;
+  });
+
   for (const car of orderedCars) {
     ctx.save();
-    ctx.translate(car.x, car.y);
+    const fallDropY = car.falling ? car.fallProgress * 44 : 0;
+    ctx.translate(car.x, car.y + fallDropY);
 
     if (car.falling) {
       const scale = Math.max(0.28, 1 - car.fallProgress * 0.72);
@@ -699,37 +724,58 @@ function renderTurboDrift(
         const blink = Math.floor(Date.now() / 90) % 2 === 0;
         ctx.globalAlpha = blink ? 0.55 : 1;
       }
-      ctx.rotate(car.angle);
+      // Track shadow
+      drawShadowOval(ctx, 2, 7, 20, 13, 0.46);
     }
 
     // Nitro exhaust flame
     if (car.boosting && !car.falling) {
+      ctx.save();
+      ctx.translate(0, -4);
+      ctx.rotate(car.angle);
       ctx.fillStyle = '#FFB800';
       ctx.beginPath();
       ctx.moveTo(-17, -5);
-      ctx.lineTo(-36, 0);
+      ctx.lineTo(-38, 0);
       ctx.lineTo(-17, 5);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
     }
 
-    // Shadow (hidden when falling into the drop-off)
+    // Lower 2.5D chassis skirt (world-space offset +3px down)
     if (!car.falling) {
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.save();
+      ctx.rotate(car.angle);
+      ctx.fillStyle = '#0D0F14';
+      ctx.fillRect(-13, -12, 8, 4);
+      ctx.fillRect(6, -12, 8, 4);
+      ctx.fillRect(-13, 8, 8, 4);
+      ctx.fillRect(6, 8, 8, 4);
+      ctx.fillStyle = shadeHex(car.colorHex, -0.52);
       ctx.beginPath();
-      ctx.roundRect(-16, -10, 34, 24, 6);
+      ctx.roundRect(-17, -9, 34, 21, 6);
       ctx.fill();
+      ctx.restore();
     }
+
+    // Upper sculpted car body lifted -5px
+    ctx.translate(0, car.falling ? 0 : -5);
+    if (!car.falling) ctx.rotate(car.angle);
 
     // Tires
-    ctx.fillStyle = '#0D0F14';
+    ctx.fillStyle = '#141820';
     ctx.fillRect(-13, -12, 8, 4);
     ctx.fillRect(6, -12, 8, 4);
     ctx.fillRect(-13, 8, 8, 4);
     ctx.fillRect(6, 8, 8, 4);
 
-    // Body
-    ctx.fillStyle = car.colorHex;
+    // Main glossy car shell
+    const carGrad = ctx.createLinearGradient(-17, -10, 17, 10);
+    carGrad.addColorStop(0, shadeHex(car.colorHex, 0.32));
+    carGrad.addColorStop(0.55, car.colorHex);
+    carGrad.addColorStop(1, shadeHex(car.colorHex, -0.25));
+    ctx.fillStyle = carGrad;
     ctx.beginPath();
     ctx.roundRect(-17, -10, 34, 20, 6);
     ctx.fill();
@@ -737,13 +783,15 @@ function renderTurboDrift(
     ctx.lineWidth = car.respawnBlink > 0 ? 2.5 : 1.5;
     ctx.stroke();
 
-    // Racing stripe & windshield
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    // Racing stripe & raised windshield canopy
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
     ctx.fillRect(-15, -2, 30, 4);
-    ctx.fillStyle = '#121419';
+    ctx.fillStyle = '#0F172A';
     ctx.beginPath();
-    ctx.roundRect(1, -7, 8, 14, 2);
+    ctx.roundRect(1, -7, 9, 14, 3);
     ctx.fill();
+    ctx.fillStyle = 'rgba(186, 230, 253, 0.45)';
+    ctx.fillRect(4, -5, 4, 10);
 
     ctx.restore();
 
@@ -759,7 +807,7 @@ function renderTurboDrift(
     drawNameplate(
       ctx,
       car.x,
-      car.y - 26,
+      car.y + fallDropY - 30,
       car.slotIndex,
       car.name,
       car.falling ? '#FF4D2E' : car.colorHex,

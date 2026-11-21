@@ -8,6 +8,18 @@ import {
   type TreasureDigSnapshot,
 } from '../shared/types';
 import { drawNameplate, tCanvas } from './renderers';
+import {
+  drawArenaSlab,
+  drawCharacterPod3D,
+  drawDie3D,
+  drawExtrudedBox3D,
+  drawExtrudedCylinder3D,
+  drawShadowOval,
+  drawSphere3D,
+  drawSpinningGem3D,
+  drawStudioBackdrop,
+  shadeHex,
+} from './render25d';
 
 function drawChip(
   ctx: CanvasRenderingContext2D,
@@ -57,46 +69,14 @@ function drawCenterBanner(ctx: CanvasRenderingContext2D, text: string, accent = 
   ctx.restore();
 }
 
-function drawDieFace(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, value: number, rolling: boolean): void {
-  ctx.save();
-  ctx.translate(x, y);
-  if (rolling) ctx.rotate(Math.sin(performance.now() * 0.04) * 0.28);
-  ctx.fillStyle = '#F8FAFC';
-  ctx.beginPath();
-  ctx.roundRect(-size / 2, -size / 2, size, size, 10);
-  ctx.fill();
-  ctx.strokeStyle = '#94A3B8';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  const off = size * 0.25;
-  const r = size * 0.085;
-  const pips: Record<number, [number, number][]> = {
-    1: [[0, 0]],
-    2: [[-off, -off], [off, off]],
-    3: [[-off, -off], [0, 0], [off, off]],
-    4: [[-off, -off], [off, -off], [-off, off], [off, off]],
-    5: [[-off, -off], [off, -off], [0, 0], [-off, off], [off, off]],
-    6: [[-off, -off], [off, -off], [-off, 0], [off, 0], [-off, off], [off, off]],
-  };
-  ctx.fillStyle = value === 1 || value === 6 ? '#FF4D2E' : '#11141B';
-  for (const [px, py] of pips[Math.max(1, Math.min(6, value))] ?? pips[1]) {
-    ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 // ============================================================
-// 21. RICH STREET (Monopoly-Style Fast City Board)
+// 21. RICH STREET (2.5D Monopoly-Style Tabletop & 3D Towers)
 // ============================================================
 function getRichTileRect(idx: number): { x: number; y: number; w: number; h: number } {
-  // 24 tiles around a 7x7 perimeter loop (indices 0..23 clockwise from bottom-left)
   const boardSize = 650;
   const left = 56;
   const top = Math.floor((ARENA_HEIGHT - boardSize) / 2);
-  const cell = boardSize / 7; // ~92.8px
+  const cell = boardSize / 7;
 
   let col = 0;
   let row = 6;
@@ -116,7 +96,7 @@ function getRichTileRect(idx: number): { x: number; y: number; w: number; h: num
   return { x: left + col * cell, y: top + row * cell, w: cell - 3, h: cell - 3 };
 }
 
-function getRichVisualPos(visualTile: number): { x: number; y: number } {
+function getRichVisualPos(visualTile: number): { x: number; y: number; hopZ: number } {
   const n = 24;
   const base = Math.floor(visualTile) % n;
   const next = (base + 1) % n;
@@ -129,29 +109,52 @@ function getRichVisualPos(visualTile: number): { x: number; y: number } {
   const y2 = r2.y + r2.h / 2;
   return {
     x: x1 + (x2 - x1) * frac,
-    y: y1 + (y2 - y1) * frac - Math.sin(frac * Math.PI) * 14,
+    y: y1 + (y2 - y1) * frac,
+    hopZ: Math.sin(frac * Math.PI) * 18,
   };
 }
 
-export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreetSnapshot): void {
-  ctx.fillStyle = '#0F131A';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+function drawPropertyBuilding3D(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  level: number,
+  colorHex: string
+): void {
+  if (level <= 0) return;
+  const w = level >= 3 ? 22 : level === 2 ? 20 : 18;
+  const h = level >= 3 ? 14 : 13;
+  const depth = level >= 3 ? 22 : level === 2 ? 14 : 8;
+  const topCol = level >= 3 ? '#FDE047' : shadeHex(colorHex, 0.18);
+  const frontCol = level >= 3 ? '#B45309' : shadeHex(colorHex, -0.35);
+  drawExtrudedBox3D(ctx, cx - w / 2, cy - h / 2, w, h, depth, 3, topCol, frontCol, '#FFFFFF', true);
 
-  // Subtle tabletop grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x < ARENA_WIDTH; x += 48) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, ARENA_HEIGHT);
-    ctx.stroke();
+  // Tiny window detail on front facade
+  ctx.fillStyle = level >= 3 ? '#FFFBEB' : 'rgba(255,255,255,0.75)';
+  if (level >= 2) {
+    ctx.fillRect(cx - 5, cy - 6, 3, 4);
+    ctx.fillRect(cx + 2, cy - 6, 3, 4);
   }
+  if (level >= 3) {
+    ctx.fillRect(cx - 5, cy - 13, 3, 4);
+    ctx.fillRect(cx + 2, cy - 13, 3, 4);
+  }
+}
 
-  // Board center felt panel
-  const cLeft = 56 + 650 / 7 + 8;
-  const cTop = Math.floor((ARENA_HEIGHT - 650) / 2) + 650 / 7 + 8;
-  const cSize = (650 / 7) * 5 - 19;
-  ctx.fillStyle = '#142029';
+export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreetSnapshot): void {
+  drawStudioBackdrop(ctx, '#0B0E14', 'rgba(255, 184, 0, 0.06)', 'rgba(255,255,255,0.025)', 48);
+
+  // Thick 2.5D Monopoly board tabletop slab
+  const boardSize = 650;
+  const bLeft = 56;
+  const bTop = Math.floor((ARENA_HEIGHT - boardSize) / 2);
+  drawArenaSlab(ctx, bLeft - 10, bTop - 10, boardSize + 18, boardSize + 18, 18, 16, '#141B25', '#0D121A', '#334155', 3);
+
+  // Board center recessed felt panel
+  const cLeft = bLeft + boardSize / 7 + 8;
+  const cTop = bTop + boardSize / 7 + 8;
+  const cSize = (boardSize / 7) * 5 - 19;
+  ctx.fillStyle = '#121E27';
   ctx.beginPath();
   ctx.roundRect(cLeft, cTop, cSize, cSize, 16);
   ctx.fill();
@@ -159,31 +162,25 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Draw all 24 tiles
-  for (const t of snap.tiles) {
+  // Draw all 24 3D beveled tiles (sorted top-to-bottom by row so overlap is seamless)
+  const sortedTiles = [...snap.tiles].sort((a, b) => getRichTileRect(a.index).y - getRichTileRect(b.index).y);
+  for (const t of sortedTiles) {
     const r = getRichTileRect(t.index);
     const isDecision = snap.phase === 'decision' && snap.decisionTileIndex === t.index;
 
-    ctx.fillStyle = isDecision ? '#263244' : '#1B202B';
-    ctx.beginPath();
-    ctx.roundRect(r.x, r.y, r.w, r.h, 8);
-    ctx.fill();
-    ctx.strokeStyle = isDecision ? '#FFB800' : t.ownerColor ?? '#2E3646';
-    ctx.lineWidth = isDecision ? 3 : t.ownerColor ? 2.5 : 1.2;
-    ctx.stroke();
+    const tileTop = isDecision ? '#28364A' : '#1E2431';
+    const tileBorder = isDecision ? '#FFB800' : t.ownerColor ?? '#344054';
+    drawExtrudedBox3D(ctx, r.x, r.y, r.w, r.h, 5, 8, tileTop, '#111620', tileBorder, false);
 
-    // Top color bar
+    // Top color bar on lifted face (y - 5)
     ctx.fillStyle = t.groupColor;
     ctx.beginPath();
-    ctx.roundRect(r.x + 3, r.y + 3, r.w - 6, 13, 5);
+    ctx.roundRect(r.x + 3, r.y - 2, r.w - 6, 13, 5);
     ctx.fill();
 
-    // Property level stars / towers
+    // Actual 3D extruded building on owned properties!
     if (t.level > 0) {
-      for (let i = 0; i < t.level; i++) {
-        ctx.fillStyle = '#FFB800';
-        ctx.fillRect(r.x + 8 + i * 14, r.y + 21, 10, 10);
-      }
+      drawPropertyBuilding3D(ctx, r.x + r.w - 18, r.y + 18, t.level, t.ownerColor ?? '#FFB800');
     }
 
     // Tile name
@@ -192,26 +189,26 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const shortName = tCanvas(t.name);
-    ctx.fillText(shortName.slice(0, 12), r.x + r.w / 2, r.y + r.h * 0.56);
+    ctx.fillText(shortName.slice(0, 12), r.x + r.w / 2, r.y + r.h * 0.56 - 5);
 
     // Price or rent tag
     if (t.kind === 'property') {
       ctx.font = '700 10px "JetBrains Mono", monospace';
       ctx.fillStyle = t.ownerColor ? '#FFB800' : '#94A3B8';
       const rent = t.level <= 1 ? t.baseRent : t.level === 2 ? Math.round(t.baseRent * 1.9) : Math.round(t.baseRent * 3.1);
-      ctx.fillText(t.ownerId ? `R:$${rent}` : `$${t.price}`, r.x + r.w / 2, r.y + r.h - 12);
+      ctx.fillText(t.ownerId ? `R:$${rent}` : `$${t.price}`, r.x + r.w / 2, r.y + r.h - 16);
     } else if (t.kind === 'tax') {
       ctx.font = '700 10px "JetBrains Mono", monospace';
       ctx.fillStyle = '#FF7A1A';
-      ctx.fillText(`-$${t.baseRent}`, r.x + r.w / 2, r.y + r.h - 12);
+      ctx.fillText(`-$${t.baseRent}`, r.x + r.w / 2, r.y + r.h - 16);
     } else if (t.kind === 'jackpot') {
       ctx.font = '700 10px "JetBrains Mono", monospace';
       ctx.fillStyle = '#FFB800';
-      ctx.fillText(`$${snap.jackpotPool}`, r.x + r.w / 2, r.y + r.h - 12);
+      ctx.fillText(`$${snap.jackpotPool}`, r.x + r.w / 2, r.y + r.h - 16);
     }
   }
 
-  // Center table showcase: Title, Jackpot, Dice, Event Log
+  // Center table showcase: Title, Jackpot, 3D Twin Dice, Event Log
   const cx = cLeft + cSize / 2;
   const cy = cTop + cSize / 2;
 
@@ -222,14 +219,14 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
 
   drawChip(ctx, cx, cTop + 68, `ROUND ${snap.round}/${snap.totalRounds} · POT $${snap.jackpotPool}`, '#FFB800', 'center');
 
-  // Twin Dice
-  drawDieFace(ctx, cx - 44, cy - 18, 62, snap.dice[0], snap.diceRolling);
-  drawDieFace(ctx, cx + 44, cy - 18, 62, snap.dice[1], snap.diceRolling);
+  // 3D Twin Dice
+  drawDie3D(ctx, cx - 44, cy - 20, 62, snap.dice[0], snap.diceRolling);
+  drawDie3D(ctx, cx + 44, cy - 20, 62, snap.dice[1], snap.diceRolling);
 
   // Active turn / decision box inside center
   const active = snap.players.find((p) => p.id === snap.activePlayerId);
   if (active) {
-    ctx.fillStyle = 'rgba(13, 15, 20, 0.85)';
+    ctx.fillStyle = 'rgba(13, 15, 20, 0.88)';
     ctx.beginPath();
     ctx.roundRect(cLeft + 24, cy + 44, cSize - 48, 124, 12);
     ctx.fill();
@@ -257,51 +254,50 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
     }
   }
 
-  // Draw player tokens on the board
-  snap.players.forEach((p, idx) => {
-    if (p.bankrupt) return;
-    const pos = getRichVisualPos(p.visualTile);
+  // Draw 3D player pawn tokens on the board
+  const tokenEntries = snap.players
+    .map((p, idx) => ({ p, idx, pos: getRichVisualPos(p.visualTile) }))
+    .filter((e) => !e.p.bankrupt)
+    .sort((a, b) => a.pos.y - b.pos.y);
+
+  for (const { p, idx, pos } of tokenEntries) {
     const ox = ((idx % 3) - 1) * 16;
     const oy = (Math.floor(idx / 3) - 0.5) * 16;
     const px = pos.x + ox;
     const py = pos.y + oy;
 
-    ctx.save();
     if (p.id === snap.activePlayerId) {
+      ctx.save();
       ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.arc(px, py, 16 + Math.sin(performance.now() * 0.01) * 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py - 4, 17 + Math.sin(performance.now() * 0.01) * 2.5, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
     }
-    ctx.fillStyle = p.colorHex;
-    ctx.beginPath();
-    ctx.arc(px, py, 12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#0D0F14';
-    ctx.lineWidth = 2;
-    ctx.stroke();
 
+    drawCharacterPod3D(ctx, px, py - 4, 12, 0, p.colorHex, {
+      height: 10,
+      zHeight: pos.hopZ,
+      rimColor: '#FFFFFF',
+      showVisor: false,
+    });
+
+    ctx.save();
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 10px "JetBrains Mono", monospace';
+    ctx.font = '800 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`P${p.slotIndex + 1}`, px, py + 0.5);
+    ctx.fillText(`P${p.slotIndex + 1}`, px, py - 14 - pos.hopZ);
     ctx.restore();
-  });
+  }
 
-  // Right-side Wealth Leaderboard Panel
+  // Right-side Wealth Leaderboard 3D Panel
   const panelX = 740;
-  const panelY = 38;
+  const panelY = 36;
   const panelW = 418;
-  const panelH = ARENA_HEIGHT - 76;
-  ctx.fillStyle = '#161A23';
-  ctx.beginPath();
-  ctx.roundRect(panelX, panelY, panelW, panelH, 16);
-  ctx.fill();
-  ctx.strokeStyle = '#2A3140';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  const panelH = ARENA_HEIGHT - 74;
+  drawArenaSlab(ctx, panelX, panelY, panelW, panelH, 16, 12, '#161B25', '#0D1017', '#2F384A', 2);
 
   ctx.fillStyle = '#F8FAFC';
   ctx.font = '800 17px "Plus Jakarta Sans", sans-serif';
@@ -320,7 +316,6 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
     ctx.lineWidth = isAct ? 2.2 : 1;
     ctx.stroke();
 
-    // Color dot
     ctx.fillStyle = p.colorHex;
     ctx.beginPath();
     ctx.arc(panelX + 36, ry + 30, 10, 0, Math.PI * 2);
@@ -335,13 +330,11 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
     const sub = `$${p.cash} · ${p.propertiesOwned} ${tCanvas('shops')}${p.rentShield ? ' · SHIELD' : ''}`;
     ctx.fillText(sub, panelX + 56, ry + 43);
 
-    // Net worth right-aligned
     ctx.textAlign = 'right';
     ctx.fillStyle = '#FFB800';
     ctx.font = '800 16px "JetBrains Mono", monospace';
     ctx.fillText(`$${p.netWorth}`, panelX + panelW - 28, ry + 28);
 
-    // Lucky charge mini bar
     const bw = 72;
     ctx.fillStyle = '#0F131A';
     ctx.fillRect(panelX + panelW - 28 - bw, ry + 40, bw, 6);
@@ -356,7 +349,7 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
 }
 
 // ============================================================
-// 22. JUNGLE LADDERS (Snakes & Ladders Party)
+// 22. JUNGLE LADDERS (2.5D Carved Wood Board & 3D Ladders/Snakes)
 // ============================================================
 function getJungleTileCenter(tileNum: number, targetTile: number): { x: number; y: number; w: number; h: number } {
   const cols = 10;
@@ -383,74 +376,65 @@ function getJungleTileCenter(tileNum: number, targetTile: number): { x: number; 
 }
 
 export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleLaddersSnapshot): void {
-  ctx.fillStyle = '#0E1714';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+  drawStudioBackdrop(ctx, '#0A120F', 'rgba(16, 217, 139, 0.08)', 'rgba(255,255,255,0.02)', 52);
 
   const cols = 10;
-  const rows = snap.targetTile === 50 ? 5 : 10;
   const boardW = 730;
   const boardH = 640;
   const left = 46;
   const top = Math.floor((ARENA_HEIGHT - boardH) / 2);
 
-  // Wooden frame
-  ctx.fillStyle = '#1D2923';
-  ctx.beginPath();
-  ctx.roundRect(left - 10, top - 10, boardW + 20, boardH + 20, 14);
-  ctx.fill();
-  ctx.strokeStyle = '#31493C';
-  ctx.lineWidth = 3;
-  ctx.stroke();
+  // Thick carved wooden 2.5D frame slab
+  drawArenaSlab(ctx, left - 12, top - 12, boardW + 24, boardH + 24, 16, 18, '#233329', '#2E2014', '#4A6B56', 3.5);
 
-  // Draw numbered tiles
-  for (let n = 1; n <= snap.targetTile; n++) {
+  // Draw raised 3D numbered tiles
+  for (let n = snap.targetTile; n >= 1; n--) {
     const c = getJungleTileCenter(n, snap.targetTile);
     const isMystery = snap.mysteryTiles.includes(n);
     const isGoal = n === snap.targetTile;
     const alt = ((n - 1) + Math.floor((n - 1) / cols)) % 2 === 0;
 
-    ctx.fillStyle = isGoal
-      ? '#4A360D'
-      : isMystery
-        ? '#1C3545'
-        : alt
-          ? '#1A2D24'
-          : '#21382C';
-    ctx.beginPath();
-    ctx.roundRect(c.x - c.w / 2 + 2, c.y - c.h / 2 + 2, c.w - 4, c.h - 4, 6);
-    ctx.fill();
+    const tileTop = isGoal ? '#59410E' : isMystery ? '#1E3C4F' : alt ? '#1E3529' : '#254133';
+    const tileBorder = isGoal ? '#FFB800' : isMystery ? '#00C2FF' : '#355B47';
 
-    if (isGoal || isMystery) {
-      ctx.strokeStyle = isGoal ? '#FFB800' : '#00C2FF';
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
-    }
+    drawExtrudedBox3D(
+      ctx,
+      c.x - c.w / 2 + 2,
+      c.y - c.h / 2 + 2,
+      c.w - 4,
+      c.h - 4,
+      4,
+      6,
+      tileTop,
+      shadeHex(tileTop, -0.35),
+      tileBorder,
+      false
+    );
 
-    ctx.fillStyle = isGoal ? '#FFB800' : isMystery ? '#7DD3FC' : 'rgba(241,245,249,0.72)';
+    ctx.fillStyle = isGoal ? '#FFB800' : isMystery ? '#7DD3FC' : 'rgba(241,245,249,0.78)';
     ctx.font = isGoal ? '800 15px "JetBrains Mono", monospace' : '700 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(String(n), c.x - c.w / 2 + 6, c.y - c.h / 2 + 5);
+    ctx.fillText(String(n), c.x - c.w / 2 + 7, c.y - c.h / 2 + 2);
 
     if (isMystery) {
       ctx.fillStyle = '#00C2FF';
       ctx.font = '800 18px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('?', c.x, c.y + 4);
+      ctx.fillText('?', c.x, c.y + 1);
     }
 
     if (snap.bananas.includes(n)) {
-      ctx.fillStyle = '#FFB800';
-      ctx.beginPath();
-      ctx.arc(c.x + 10, c.y + 8, 9, 0.2, Math.PI * 1.15);
       ctx.strokeStyle = '#FFB800';
       ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(c.x + 10, c.y + 5, 9, 0.2, Math.PI * 1.15);
       ctx.stroke();
     }
   }
 
-  // Draw bamboo ladders
+  // Draw 3D bamboo ladders with cast shadows
   for (const lad of snap.ladders) {
     const a = getJungleTileCenter(lad.from, snap.targetTile);
     const b = getJungleTileCenter(lad.to, snap.targetTile);
@@ -459,25 +443,36 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
     const len = Math.hypot(dx, dy) || 1;
     const px = (-dy / len) * 9;
     const py = (dx / len) * 9;
+    const rungs = Math.max(3, Math.floor(len / 24));
 
     ctx.save();
-    ctx.strokeStyle = '#D99B38';
-    ctx.lineWidth = 5;
     ctx.lineCap = 'round';
+    // Ladder shadow
+    ctx.strokeStyle = 'rgba(0,0,0,0.38)';
+    ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.moveTo(a.x + px, a.y + py);
-    ctx.lineTo(b.x + px, b.y + py);
-    ctx.moveTo(a.x - px, a.y - py);
-    ctx.lineTo(b.x - px, b.y - py);
+    ctx.moveTo(a.x + px + 4, a.y + py + 5);
+    ctx.lineTo(b.x + px + 4, b.y + py + 5);
+    ctx.moveTo(a.x - px + 4, a.y - py + 5);
+    ctx.lineTo(b.x - px + 4, b.y - py + 5);
     ctx.stroke();
 
-    const rungs = Math.max(3, Math.floor(len / 24));
-    ctx.strokeStyle = '#F6C86E';
+    // Bamboo side rails (lifted -4px)
+    ctx.strokeStyle = '#D99B38';
+    ctx.lineWidth = 5.5;
+    ctx.beginPath();
+    ctx.moveTo(a.x + px, a.y + py - 4);
+    ctx.lineTo(b.x + px, b.y + py - 4);
+    ctx.moveTo(a.x - px, a.y - py - 4);
+    ctx.lineTo(b.x - px, b.y - py - 4);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#FDE68A';
     ctx.lineWidth = 3;
     for (let i = 1; i < rungs; i++) {
       const t = i / rungs;
       const rx = a.x + dx * t;
-      const ry = a.y + dy * t;
+      const ry = a.y + dy * t - 4;
       ctx.beginPath();
       ctx.moveTo(rx + px, ry + py);
       ctx.lineTo(rx - px, ry - py);
@@ -486,7 +481,7 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
     ctx.restore();
   }
 
-  // Draw playful snakes
+  // Draw 3D shaded snakes with shadows and raised heads
   for (const sn of snap.snakes) {
     const head = getJungleTileCenter(sn.from, snap.targetTile);
     const tail = getJungleTileCenter(sn.to, snap.targetTile);
@@ -496,48 +491,54 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
     const perpY = (tail.x - head.x) * 0.22;
 
     ctx.save();
-    ctx.strokeStyle = sn.colorHex;
-    ctx.lineWidth = 9;
     ctx.lineCap = 'round';
+    // Snake shadow
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 10;
     ctx.beginPath();
-    ctx.moveTo(head.x, head.y);
-    ctx.bezierCurveTo(
-      mx + perpX,
-      my + perpY,
-      mx - perpX,
-      my - perpY,
-      tail.x,
-      tail.y
-    );
+    ctx.moveTo(head.x + 3, head.y + 4);
+    ctx.bezierCurveTo(mx + perpX + 3, my + perpY + 4, mx - perpX + 3, my - perpY + 4, tail.x + 3, tail.y + 4);
     ctx.stroke();
 
-    // Snake head + eyes
-    ctx.fillStyle = sn.colorHex;
+    // Dark outline body
+    ctx.strokeStyle = shadeHex(sn.colorHex, -0.45);
+    ctx.lineWidth = 11;
     ctx.beginPath();
-    ctx.arc(head.x, head.y, 11, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(head.x, head.y - 3);
+    ctx.bezierCurveTo(mx + perpX, my + perpY - 3, mx - perpX, my - perpY - 3, tail.x, tail.y - 3);
+    ctx.stroke();
+
+    // Bright upper ridge
+    ctx.strokeStyle = sn.colorHex;
+    ctx.lineWidth = 7;
+    ctx.stroke();
+
+    // 3D Snake head
+    drawSphere3D(ctx, head.x, head.y, 11.5, sn.colorHex, '#FFFFFF', 6, true);
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc(head.x - 4, head.y - 3, 2.8, 0, Math.PI * 2);
-    ctx.arc(head.x + 4, head.y - 3, 2.8, 0, Math.PI * 2);
+    ctx.arc(head.x - 4, head.y - 9, 2.8, 0, Math.PI * 2);
+    ctx.arc(head.x + 4, head.y - 9, 2.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#0D0F14';
     ctx.beginPath();
-    ctx.arc(head.x - 4, head.y - 3, 1.3, 0, Math.PI * 2);
-    ctx.arc(head.x + 4, head.y - 3, 1.3, 0, Math.PI * 2);
+    ctx.arc(head.x - 4, head.y - 9, 1.3, 0, Math.PI * 2);
+    ctx.arc(head.x + 4, head.y - 9, 1.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
 
-  // Draw player pawns
-  snap.players.forEach((p, idx) => {
+  // Draw 3D player pawns
+  const pawnList = snap.players.map((p, idx) => {
     let px = 0;
     let py = 0;
+    let hopZ = 0;
     if (p.slideFrom !== null && p.slideTo !== null) {
       const c1 = getJungleTileCenter(p.slideFrom, snap.targetTile);
       const c2 = getJungleTileCenter(p.slideTo, snap.targetTile);
       px = c1.x + (c2.x - c1.x) * p.slideProgress;
       py = c1.y + (c2.y - c1.y) * p.slideProgress;
+      hopZ = Math.sin(p.slideProgress * Math.PI) * 14;
     } else {
       const base = Math.floor(p.visualTile);
       const next = Math.min(snap.targetTile, base + 1);
@@ -545,58 +546,54 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       const c1 = getJungleTileCenter(base, snap.targetTile);
       const c2 = getJungleTileCenter(next, snap.targetTile);
       px = c1.x + (c2.x - c1.x) * frac;
-      py = c1.y + (c2.y - c1.y) * frac - Math.sin(frac * Math.PI) * 14;
+      py = c1.y + (c2.y - c1.y) * frac;
+      hopZ = Math.sin(frac * Math.PI) * 16;
     }
-
     const ox = ((idx % 3) - 1) * 13;
     const oy = (Math.floor(idx / 3) - 0.5) * 12;
-    px += ox;
-    py += oy;
+    return { p, px: px + ox, py: py + oy, hopZ };
+  });
+  pawnList.sort((a, b) => a.py - b.py);
 
-    ctx.save();
+  for (const { p, px, py, hopZ } of pawnList) {
     if (p.id === snap.activePlayerId) {
+      ctx.save();
       ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.arc(px, py, 16 + Math.sin(performance.now() * 0.01) * 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py - 4, 16 + Math.sin(performance.now() * 0.01) * 2.5, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
     }
-    ctx.fillStyle = p.colorHex;
-    ctx.beginPath();
-    ctx.arc(px, py, 12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#0B1210';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
+    drawCharacterPod3D(ctx, px, py - 4, 12, 0, p.colorHex, {
+      height: 10,
+      zHeight: hopZ,
+      rimColor: '#FFFFFF',
+      showVisor: false,
+    });
+    ctx.save();
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 10px "JetBrains Mono", monospace';
+    ctx.font = '800 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`P${p.slotIndex + 1}`, px, py + 0.5);
+    ctx.fillText(`P${p.slotIndex + 1}`, px, py - 14 - hopZ);
     ctx.restore();
-  });
+  }
 
-  // Right-side Dice & Standings Panel
+  // Right-side 3D Dice & Standings Panel
   const px = 804;
-  const py = 40;
+  const py = 38;
   const pw = 356;
-  const ph = ARENA_HEIGHT - 80;
-  ctx.fillStyle = '#15201C';
-  ctx.beginPath();
-  ctx.roundRect(px, py, pw, ph, 16);
-  ctx.fill();
-  ctx.strokeStyle = '#2A3F36';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  const ph = ARENA_HEIGHT - 76;
+  drawArenaSlab(ctx, px, py, pw, ph, 16, 12, '#16231D', '#0D1512', '#2E473B', 2);
 
   ctx.fillStyle = '#10D98B';
   ctx.font = '800 20px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(tCanvas('JUNGLE LADDERS'), px + pw / 2, py + 36);
 
-  // Giant Die
-  drawDieFace(ctx, px + pw / 2, py + 106, 78, snap.diceValue, snap.diceRolling);
+  // Giant 3D Die
+  drawDie3D(ctx, px + pw / 2, py + 106, 78, snap.diceValue, snap.diceRolling);
 
   // Oscillating Power-Dice Bar
   const barX = px + 28;
@@ -626,7 +623,6 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
     ctx.fillText(tCanvas(snap.eventText).slice(0, 38), px + pw / 2, barY + 60);
   }
 
-  // Player positions list
   const sorted = [...snap.players].sort((a, b) => b.tile - a.tile);
   sorted.forEach((p, idx) => {
     const ry = barY + 86 + idx * 52;
@@ -663,7 +659,7 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
 }
 
 // ============================================================
-// 25. COLOR MATCH DANCE (Memory Floor Party)
+// 25. COLOR MATCH DANCE (2.5D Extruded Disco Tiles)
 // ============================================================
 const MATCH_PALETTE = [
   { bg: '#C62828', border: '#FF6B57', name: 'RED' },
@@ -710,7 +706,6 @@ function drawSymbol(
     ctx.closePath();
     ctx.fill();
   } else {
-    // Moon crescent
     ctx.arc(0, 0, size * 0.82, 0.35 * Math.PI, 1.75 * Math.PI);
     ctx.arc(size * 0.32, -size * 0.1, size * 0.65, 1.65 * Math.PI, 0.45 * Math.PI, true);
     ctx.closePath();
@@ -720,15 +715,7 @@ function drawSymbol(
 }
 
 export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatchSnapshot): void {
-  ctx.fillStyle = '#0D0F16';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
-
-  // Subtle disco pit radial backdrop
-  const pit = ctx.createRadialGradient(ARENA_WIDTH / 2, ARENA_HEIGHT / 2 + 40, 40, ARENA_WIDTH / 2, ARENA_HEIGHT / 2, 560);
-  pit.addColorStop(0, '#1B1F30');
-  pit.addColorStop(1, '#090B10');
-  ctx.fillStyle = pit;
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+  drawStudioBackdrop(ctx, '#090B12', 'rgba(82, 139, 255, 0.1)', 'rgba(255,255,255,0.03)', 56);
 
   // Top Target Marquee (Color + Symbol + Timer)
   const targetCol = MATCH_PALETTE[snap.targetColorIndex] ?? MATCH_PALETTE[0];
@@ -766,22 +753,28 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
   );
   ctx.restore();
 
-  // Tiles
-  for (const t of snap.tiles) {
-    if (t.dropped) continue;
+  // 2.5D Extruded Disco Tiles sorted top-to-bottom
+  const tiles = [...snap.tiles].filter((t) => !t.dropped).sort((a, b) => a.y - b.y);
+  for (const t of tiles) {
     const pal = MATCH_PALETTE[t.colorIndex] ?? MATCH_PALETTE[0];
-    const shake = t.warning ? (Math.sin(performance.now() * 0.06 + t.id) * 3) : 0;
+    const shake = t.warning ? Math.sin(performance.now() * 0.06 + t.id) * 3 : 0;
+    const depth = t.warning ? 6 : 12;
 
     ctx.save();
-    ctx.fillStyle = pal.bg;
-    ctx.globalAlpha = t.warning ? 0.62 : 0.94;
-    ctx.beginPath();
-    ctx.roundRect(t.x + shake, t.y, t.w, t.h, 12);
-    ctx.fill();
-    ctx.strokeStyle = pal.border;
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    drawSymbol(ctx, t.symbol, t.x + t.w / 2 + shake, t.y + t.h / 2, 24, 'rgba(255,255,255,0.88)');
+    ctx.globalAlpha = t.warning ? 0.68 : 0.96;
+    drawExtrudedBox3D(
+      ctx,
+      t.x + shake,
+      t.y,
+      t.w,
+      t.h,
+      depth,
+      12,
+      pal.bg,
+      shadeHex(pal.bg, -0.45),
+      pal.border
+    );
+    drawSymbol(ctx, t.symbol, t.x + t.w / 2 + shake, t.y + t.h / 2 - depth, 24, 'rgba(255,255,255,0.92)');
     ctx.restore();
   }
 
@@ -797,32 +790,30 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
     ctx.restore();
   }
 
-  // Players
-  for (const p of snap.players) {
-    if (!p.alive) continue;
-    const hopScale = p.hopTimer > 0 ? 1 + Math.sin((p.hopTimer / p.hopDuration) * Math.PI) * 0.45 : 1;
-    const fallScale = p.falling ? Math.max(0.15, 1 - p.fallProgress * 0.85) : 1;
-    const scale = hopScale * fallScale;
+  // Players (falling first, then Y-sorted)
+  const dancers = [...snap.players]
+    .filter((p) => p.alive)
+    .sort((a, b) => {
+      if (a.falling !== b.falling) return Number(b.falling) - Number(a.falling);
+      return a.y - b.y;
+    });
 
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.scale(scale, scale);
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.beginPath();
-    ctx.arc(0, 7, 20, 0, Math.PI * 2);
-    ctx.fill();
+  for (const p of dancers) {
+    const hopZ = p.hopTimer > 0 ? Math.sin((p.hopTimer / p.hopDuration) * Math.PI) * 26 : 0;
+    const fallDrop = p.falling ? p.fallProgress * 50 : 0;
+    const scale = p.falling ? Math.max(0.2, 1 - p.fallProgress * 0.8) : 1 + (hopZ > 0 ? 0.12 : 0);
 
-    ctx.fillStyle = p.colorHex;
-    ctx.beginPath();
-    ctx.arc(0, 0, 20, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.restore();
+    drawCharacterPod3D(ctx, p.x, p.y - 6 + fallDrop, 19, 0, p.colorHex, {
+      height: 11,
+      zHeight: hopZ,
+      scale,
+      alpha: p.falling ? Math.max(0.15, 1 - p.fallProgress) : 1,
+      rimColor: '#FFFFFF',
+      showVisor: false,
+    });
 
     if (!p.falling) {
-      drawNameplate(ctx, p.x, p.y - 34, p.slotIndex, p.name, p.colorHex);
+      drawNameplate(ctx, p.x, p.y - hopZ - 42, p.slotIndex, p.name, p.colorHex);
     }
   }
 
@@ -832,39 +823,70 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
 }
 
 // ============================================================
-// 27. TREASURE ISLAND DIG (Hot-or-Cold Pirate Hunt)
+// 27. TREASURE ISLAND DIG (2.5D Raised Sandy Island & Crabs)
 // ============================================================
 export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureDigSnapshot): void {
   // Tropical turquoise ocean
-  ctx.fillStyle = '#0D4A5E';
+  ctx.fillStyle = '#0A3E52';
   ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
   const tNow = performance.now() * 0.002;
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.16)';
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.2)';
   ctx.lineWidth = 3;
   for (let i = 0; i < 4; i++) {
     ctx.beginPath();
-    ctx.roundRect(70 - i * 16 + Math.sin(tNow + i) * 6, 56 - i * 12, ARENA_WIDTH - 140 + i * 32, ARENA_HEIGHT - 112 + i * 24, 90);
+    ctx.roundRect(
+      70 - i * 16 + Math.sin(tNow + i) * 6,
+      56 - i * 12,
+      ARENA_WIDTH - 140 + i * 32,
+      ARENA_HEIGHT - 112 + i * 24,
+      90
+    );
     ctx.stroke();
   }
 
-  // Sandy island
-  ctx.fillStyle = '#E0B973';
-  ctx.beginPath();
-  ctx.roundRect(96, 78, ARENA_WIDTH - 192, ARENA_HEIGHT - 156, 72);
-  ctx.fill();
-  ctx.fillStyle = '#EBC886';
-  ctx.beginPath();
-  ctx.roundRect(114, 94, ARENA_WIDTH - 228, ARENA_HEIGHT - 188, 60);
-  ctx.fill();
+  // Thick 2.5D raised sandy island shelf with wet-sand cliff skirt
+  drawArenaSlab(
+    ctx,
+    96,
+    72,
+    ARENA_WIDTH - 192,
+    ARENA_HEIGHT - 150,
+    72,
+    22,
+    '#DFB76F',
+    '#8B6632',
+    '#FDE68A',
+    3
+  );
+  // Inner elevated dry-sand plateau
+  drawArenaSlab(
+    ctx,
+    114,
+    88,
+    ARENA_WIDTH - 228,
+    ARENA_HEIGHT - 182,
+    60,
+    8,
+    '#ECC988',
+    '#C49B54',
+    'rgba(255,255,255,0.2)',
+    1.5
+  );
 
-  // Dug holes
+  // Sunken 3D Dug holes
   for (const h of snap.dugHoles) {
     ctx.save();
     ctx.globalAlpha = Math.max(0, h.alpha);
-    ctx.fillStyle = h.success ? '#5C3D18' : '#A6834D';
+    // Dirt rim highlight
+    ctx.fillStyle = '#B89152';
     ctx.beginPath();
-    ctx.ellipse(h.x, h.y, 20, 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(h.x, h.y + 2, 24, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Recessed crater
+    ctx.fillStyle = h.success ? '#4D3111' : '#856534';
+    ctx.beginPath();
+    ctx.ellipse(h.x, h.y, 19, 12, 0, 0, Math.PI * 2);
     ctx.fill();
     if (h.success) {
       ctx.strokeStyle = '#FFB800';
@@ -902,53 +924,66 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
     ctx.restore();
   }
 
-  // Crabs
-  for (const c of snap.crabs) {
-    ctx.save();
-    ctx.translate(c.x, c.y);
-    ctx.fillStyle = c.stunTimer > 0 ? '#94A3B8' : '#EF4444';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 18, 13, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Claws
-    ctx.beginPath();
-    ctx.arc(-16, -11, 6, 0, Math.PI * 2);
-    ctx.arc(16, -11, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(-6, -4, 3, 0, Math.PI * 2);
-    ctx.arc(6, -4, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
+  // Y-sort Crabs and Hunters
+  type DigItem =
+    | { kind: 'crab'; y: number; c: (typeof snap.crabs)[number] }
+    | { kind: 'player'; y: number; p: (typeof snap.players)[number] };
+  const items: DigItem[] = [
+    ...snap.crabs.map((c) => ({ kind: 'crab' as const, y: c.y, c })),
+    ...snap.players.map((p) => ({ kind: 'player' as const, y: p.y, p })),
+  ];
+  items.sort((a, b) => a.y - b.y);
 
-  // Hunters with hot-or-cold ring!
-  for (const p of snap.players) {
-    ctx.save();
-    const heatColor = p.heat > 0.75 ? '#FF4D2E' : p.heat > 0.42 ? '#FFB800' : '#00C2FF';
-    const ringR = 28 + p.heat * 18 + Math.sin(performance.now() * (0.008 + p.heat * 0.02)) * 4;
-    ctx.strokeStyle = heatColor;
-    ctx.lineWidth = 3 + p.heat * 3;
-    ctx.globalAlpha = 0.4 + p.heat * 0.55;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+  for (const it of items) {
+    if (it.kind === 'crab') {
+      const { c } = it;
+      const crabCol = c.stunTimer > 0 ? '#94A3B8' : '#EF4444';
+      drawShadowOval(ctx, c.x + 2, c.y + 6, 19, 11, 0.36);
+      ctx.save();
+      ctx.translate(c.x, c.y - 3);
+      // Shell thickness
+      ctx.fillStyle = shadeHex(crabCol, -0.45);
+      ctx.beginPath();
+      ctx.ellipse(0, 4, 18, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Top shell
+      ctx.fillStyle = crabCol;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 18, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Claws
+      ctx.beginPath();
+      ctx.arc(-16, -11, 6, 0, Math.PI * 2);
+      ctx.arc(16, -11, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(-6, -4, 3.2, 0, Math.PI * 2);
+      ctx.arc(6, -4, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      const { p } = it;
+      ctx.save();
+      const heatColor = p.heat > 0.75 ? '#FF4D2E' : p.heat > 0.42 ? '#FFB800' : '#00C2FF';
+      const ringR = 28 + p.heat * 18 + Math.sin(performance.now() * (0.008 + p.heat * 0.02)) * 4;
+      ctx.strokeStyle = heatColor;
+      ctx.lineWidth = 3 + p.heat * 3;
+      ctx.globalAlpha = 0.45 + p.heat * 0.55;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
 
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.fillStyle = p.stunTimer > 0 ? '#64748B' : p.colorHex;
-    ctx.beginPath();
-    ctx.arc(0, 0, 19, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.restore();
+      drawCharacterPod3D(ctx, p.x, p.y, 19, 0, p.stunTimer > 0 ? '#64748B' : p.colorHex, {
+        height: 11,
+        rimColor: '#FFFFFF',
+        showVisor: false,
+      });
 
-    const tag = p.heat > 0.76 ? 'HOT!' : undefined;
-    drawNameplate(ctx, p.x, p.y - 34, p.slotIndex, p.name, p.colorHex, tag);
+      const tag = p.heat > 0.76 ? 'HOT!' : undefined;
+      drawNameplate(ctx, p.x, p.y - 40, p.slotIndex, p.name, p.colorHex, tag);
+    }
   }
 
   // Score popups
@@ -968,20 +1003,10 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
 }
 
 // ============================================================
-// 29. LUCKY AUCTION (Mystery Chest Game Show)
+// 29. LUCKY AUCTION (2.5D Velvet Stage, 3D Pedestal & Chest)
 // ============================================================
 export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuctionSnapshot): void {
-  // Deep velvet stage
-  ctx.fillStyle = '#110F18';
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
-
-  // Overhead warm game-show spotlight
-  const spot = ctx.createRadialGradient(ARENA_WIDTH / 2, 160, 20, ARENA_WIDTH / 2, 260, 440);
-  spot.addColorStop(0, 'rgba(255, 184, 0, 0.24)');
-  spot.addColorStop(0.6, 'rgba(82, 139, 255, 0.08)');
-  spot.addColorStop(1, 'rgba(17, 15, 24, 0)');
-  ctx.fillStyle = spot;
-  ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+  drawStudioBackdrop(ctx, '#0F0D16', 'rgba(255, 184, 0, 0.16)', 'rgba(255,255,255,0.02)', 56);
 
   // Top round + timer HUD
   drawChip(
@@ -993,88 +1018,99 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
     'center'
   );
 
-  // Center Stage Pedestal
+  // 2.5D Extruded Cylindrical Center Stage Pedestal
   const cx = ARENA_WIDTH / 2;
   const cy = 248;
-  ctx.fillStyle = '#1D1A2B';
+  drawShadowOval(ctx, cx, cy + 92, 178, 36, 0.55);
+  ctx.save();
+  // Pedestal side wall
+  ctx.fillStyle = '#151221';
   ctx.beginPath();
-  ctx.ellipse(cx, cy + 78, 170, 34, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy + 84, 170, 34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(cx - 170, cy + 66, 340, 18);
+  // Pedestal top disc
+  ctx.fillStyle = '#252036';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 66, 170, 34, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = '#FFB800';
   ctx.lineWidth = 3;
   ctx.stroke();
+  ctx.restore();
 
-  // Mystery Chest or Revealed Prize
+  // 3D Mystery Chest or Revealed 3D Prize
   if (snap.phase === 'bidding') {
     const bob = Math.sin(performance.now() * 0.004) * 5;
     const chestColors = {
-      royal: '#7C2D12',
-      wooden: '#6B4423',
-      mystery: '#3B1D5E',
-      crystal: '#0F4C75',
+      royal: '#8B3314',
+      wooden: '#7A4E28',
+      mystery: '#4C247A',
+      crystal: '#12598A',
     };
+    const cCol = chestColors[snap.chestVisual];
+    drawShadowOval(ctx, cx, cy + 64, 92, 18, 0.42);
+
     ctx.save();
     ctx.translate(cx, cy + bob);
-    ctx.fillStyle = chestColors[snap.chestVisual];
+
+    // 3D chest side/front depth
+    drawExtrudedBox3D(ctx, -84, -46, 168, 96, 16, 14, cCol, shadeHex(cCol, -0.42), '#FFB800', true);
+
+    // Domed chest lid bevel
+    const lidGrad = ctx.createLinearGradient(-84, -68, 84, -22);
+    lidGrad.addColorStop(0, shadeHex(cCol, 0.25));
+    lidGrad.addColorStop(1, shadeHex(cCol, -0.25));
+    ctx.fillStyle = lidGrad;
     ctx.beginPath();
-    ctx.roundRect(-84, -64, 168, 118, 16);
+    ctx.roundRect(-84, -68, 168, 44, 14);
     ctx.fill();
     ctx.strokeStyle = '#FFB800';
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 4;
     ctx.stroke();
-    // Horizontal golden strap
+
+    // Vertical & horizontal golden straps
     ctx.fillStyle = '#FFB800';
-    ctx.fillRect(-84, -10, 168, 14);
-    ctx.fillStyle = '#14120B';
-    ctx.beginPath();
-    ctx.roundRect(-18, -22, 36, 38, 8);
-    ctx.fill();
+    ctx.fillRect(-84, -14, 168, 13);
+    ctx.fillRect(-52, -68, 12, 118);
+    ctx.fillRect(40, -68, 12, 118);
+
+    // 3D Lock clasp
+    drawExtrudedBox3D(ctx, -18, -22, 36, 36, 5, 8, '#1E1B12', '#0D0B07', '#FFB800', false);
     ctx.fillStyle = '#FFB800';
     ctx.font = '800 24px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('?', 0, -2);
+    ctx.fillText('?', 0, -9);
     ctx.restore();
   } else {
-    // Reveal prize!
+    // 3D Reveal prize!
+    const now = performance.now() * 0.004;
     ctx.save();
-    ctx.translate(cx, cy - 6);
     if (snap.revealedPrize === 'duck') {
-      ctx.fillStyle = '#FACC15';
-      ctx.beginPath();
-      ctx.arc(0, 14, 42, 0, Math.PI * 2);
-      ctx.arc(16, -24, 24, 0, Math.PI * 2);
-      ctx.fill();
+      drawSphere3D(ctx, cx, cy + 12, 40, '#FACC15', '#FEF08A', 8, true);
+      drawSphere3D(ctx, cx + 18, cy - 26, 23, '#FACC15', '#FEF08A', 10, false);
       ctx.fillStyle = '#FF7A1A';
       ctx.beginPath();
-      ctx.ellipse(40, -20, 14, 7, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + 42, cy - 30, 14, 7, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#111827';
       ctx.beginPath();
-      ctx.arc(24, -30, 4, 0, Math.PI * 2);
+      ctx.arc(cx + 26, cy - 40, 4, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      ctx.fillStyle =
+      const gemCol =
         snap.revealedPrize === 'diamond'
           ? '#38BDF8'
           : snap.revealedPrize === 'ruby'
             ? '#FF3B9A'
             : '#FFB800';
-      ctx.beginPath();
-      ctx.moveTo(0, -56);
-      ctx.lineTo(54, -8);
-      ctx.lineTo(0, 56);
-      ctx.lineTo(-54, -8);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3;
-      ctx.stroke();
+      drawSpinningGem3D(ctx, cx, cy, 52, gemCol, now, 12);
     }
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '800 24px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`$${snap.revealedValue}`, 0, 72);
+    ctx.fillText(`$${snap.revealedValue}`, cx, cy + 68);
     ctx.restore();
   }
 
@@ -1088,14 +1124,20 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
   ctx.font = '700 15px "Plus Jakarta Sans", sans-serif';
   ctx.fillText(`"${tCanvas(snap.chestClue)}"`, cx, 124);
 
-  // Current Top Bid Display
-  ctx.fillStyle = 'rgba(20, 24, 34, 0.92)';
-  ctx.beginPath();
-  ctx.roundRect(cx - 210, 356, 420, 68, 14);
-  ctx.fill();
-  ctx.strokeStyle = snap.highestBidderColor ?? '#334155';
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
+  // Current Top Bid Display (3D beveled plaque)
+  drawArenaSlab(
+    ctx,
+    cx - 210,
+    354,
+    420,
+    68,
+    14,
+    8,
+    '#141824',
+    '#0B0D14',
+    snap.highestBidderColor ?? '#334155',
+    2.5
+  );
 
   ctx.fillStyle = '#9CA3AF';
   ctx.font = '700 12px "JetBrains Mono", monospace';
@@ -1108,7 +1150,7 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
     : tCanvas('NO BIDS YET — PRESS A!');
   ctx.fillText(topLabel, cx, 404);
 
-  // Player Bidding Podiums across bottom
+  // 3D Raised Player Bidding Podiums across bottom
   const count = Math.max(1, snap.players.length);
   const cardW = Math.min(220, Math.floor((ARENA_WIDTH - 80 - (count - 1) * 14) / count));
   const totalW = count * cardW + (count - 1) * 14;
@@ -1116,15 +1158,11 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
 
   snap.players.forEach((p, idx) => {
     const rx = startX + idx * (cardW + 14);
-    const ry = 468;
+    const ry = 464;
     const isTop = snap.highestBidderId === p.id;
-    ctx.fillStyle = p.passed ? '#161922' : isTop ? '#242B3A' : '#1B202C';
-    ctx.beginPath();
-    ctx.roundRect(rx, ry, cardW, 206, 14);
-    ctx.fill();
-    ctx.strokeStyle = isTop ? p.colorHex : p.passed ? '#282E3A' : '#333D4F';
-    ctx.lineWidth = isTop ? 3 : 1.5;
-    ctx.stroke();
+    const topFill = p.passed ? '#161922' : isTop ? '#242B3A' : '#1B202C';
+    const borderCol = isTop ? p.colorHex : p.passed ? '#282E3A' : '#333D4F';
+    drawArenaSlab(ctx, rx, ry, cardW, 204, 14, 12, topFill, '#0E1118', borderCol, isTop ? 3 : 1.5);
 
     ctx.fillStyle = p.colorHex;
     ctx.fillRect(rx + 12, ry + 12, cardW - 24, 6);
@@ -1146,7 +1184,6 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
     ctx.font = '700 12px "JetBrains Mono", monospace';
     ctx.fillText(`${tCanvas('WORTH')} $${p.totalWorth}`, rx + cardW / 2, ry + 130);
 
-    // Status footer
     const statusText = p.passed
       ? tCanvas('PASSED')
       : isTop
