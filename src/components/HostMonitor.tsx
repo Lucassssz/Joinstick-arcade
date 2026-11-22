@@ -3711,7 +3711,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         </span>
                         {isFinaleGame && (
                           <span className="ml-1 px-1.5 py-0.5 rounded bg-[#FF4D2E] text-white text-[10px]">
-                            1.5× MARKS
+                            {t('1.5× MARKS', '1.5× 积分')}
                           </span>
                         )}
                       </div>

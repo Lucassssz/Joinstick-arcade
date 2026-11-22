@@ -1641,6 +1641,7 @@ interface WolfSeat {
   alive: boolean;
   nightTargetId: string | null;
   seerIntel: string | null;
+  seerIntelZh: string | null;
   voteTargetId: string | null;
   score: number;
 }
@@ -1716,6 +1717,7 @@ export const midnightWerewolfModule: ServerGameModule<MidnightWerewolfState, Mid
         alive: true,
         nightTargetId: null,
         seerIntel: null,
+        seerIntelZh: null,
         voteTargetId: null,
         score: 0,
       })),
@@ -1731,11 +1733,17 @@ export const midnightWerewolfModule: ServerGameModule<MidnightWerewolfState, Mid
   },
   getPrivateStates(state): Record<string, CardPrivateState> {
     const out: Record<string, CardPrivateState> = {};
-    const roleLabel: Record<WolfRole, string> = {
-      werewolf: 'WEREWOLF 狼人',
-      seer: 'SEER 预言家',
-      guard: 'GUARD 守卫',
-      villager: 'VILLAGER 村民',
+    const roleLabelEn: Record<WolfRole, string> = {
+      werewolf: 'WEREWOLF',
+      seer: 'SEER',
+      guard: 'GUARD',
+      villager: 'VILLAGER',
+    };
+    const roleLabelZh: Record<WolfRole, string> = {
+      werewolf: '狼人',
+      seer: '预言家',
+      guard: '守卫',
+      villager: '村民',
     };
     for (const seat of state.seats) {
       const canActNight =
@@ -1773,21 +1781,21 @@ export const midnightWerewolfModule: ServerGameModule<MidnightWerewolfState, Mid
         isActionRequired: canActNight || canVote,
         turnTimeLeft: state.turnTimeLeft,
         turnTotal: state.turnTotal,
-        badgeText: roleLabel[seat.role],
+        badgeText: roleLabelEn[seat.role],
         badgeColorHex: seat.role === 'werewolf' ? '#EF4444' : seat.role === 'seer' ? '#A855F7' : '#38BDF8',
         statusHint: seat.seerIntel
           ? `SEER VISION: ${seat.seerIntel}`
           : canActNight
-          ? `Night Action (${roleLabel[seat.role]}): Tap a player!`
+          ? `Night Action (${roleLabelEn[seat.role]}): Tap a player!`
           : canVote
           ? 'Day Vote: Tap who you want to exile!'
           : !seat.alive
           ? 'Eliminated — Watch the village debate!'
           : 'Waiting for the village...',
-        statusHintZh: seat.seerIntel
-          ? `预言家查验：${seat.seerIntel}`
+        statusHintZh: seat.seerIntelZh
+          ? `预言家查验：${seat.seerIntelZh}`
           : canActNight
-          ? `黑夜行动（${roleLabel[seat.role]}）：点击目标玩家！`
+          ? `黑夜行动（${roleLabelZh[seat.role]}）：点击目标玩家！`
           : canVote
           ? '白天投票：点击你想放逐的玩家！'
           : !seat.alive
@@ -1807,7 +1815,10 @@ export const midnightWerewolfModule: ServerGameModule<MidnightWerewolfState, Mid
       seat.nightTargetId = targetId;
       if (seat.role === 'seer') {
         const tgt = state.seats.find((s) => s.id === targetId);
-        if (tgt) seat.seerIntel = `${tgt.name} IS ${tgt.role === 'werewolf' ? 'WEREWOLF! 狼人' : 'GOOD! 好人'}`;
+        if (tgt) {
+          seat.seerIntel = `${tgt.name} IS ${tgt.role === 'werewolf' ? 'WEREWOLF!' : 'GOOD!'}`;
+          seat.seerIntelZh = `${tgt.name} 是${tgt.role === 'werewolf' ? '狼人！' : '好人！'}`;
+        }
       }
       state.pendingSounds.push({ type: 'tick', playerId: seat.id });
     } else if (state.phase === 'vote' && !seat.voteTargetId) {

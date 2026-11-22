@@ -212,7 +212,7 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
       ctx.fillStyle = t.monopoly ? '#10D98B' : t.ownerColor ? '#FFB800' : '#94A3B8';
       const baseRent = t.level <= 1 ? t.baseRent : t.level === 2 ? Math.round(t.baseRent * 1.9) : Math.round(t.baseRent * 3.1);
       const rent = t.monopoly ? baseRent * 2 : baseRent;
-      ctx.fillText(t.ownerId ? `R:$${rent}${t.monopoly ? '★' : ''}` : `$${t.price}`, r.x + r.w / 2, r.y + r.h - 16);
+      ctx.fillText(t.ownerId ? `${tCanvas('RENT')}:$${rent}${t.monopoly ? '★' : ''}` : `$${t.price}`, r.x + r.w / 2, r.y + r.h - 16);
     } else if (t.kind === 'tax') {
       ctx.font = '700 10px "JetBrains Mono", monospace';
       ctx.fillStyle = '#FF7A1A';
@@ -344,7 +344,7 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
 
     ctx.fillStyle = '#9CA3AF';
     ctx.font = '600 12px "JetBrains Mono", monospace';
-    const sub = `$${p.cash} · ${p.propertiesOwned} ${tCanvas('shops')}${p.rentShield ? ' · SHIELD' : ''}`;
+    const sub = `$${p.cash} · ${p.propertiesOwned} ${tCanvas('shops')}${p.rentShield ? ` · ${tCanvas('SHIELD')}` : ''}`;
     ctx.fillText(sub, panelX + 56, ry + 43);
 
     ctx.textAlign = 'right';
@@ -852,7 +852,7 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
     ctx.font = '800 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(ob.kind === 'speed' ? 'SPD' : 'SHK', ob.x, ob.y - 6);
+    ctx.fillText(tCanvas(ob.kind === 'speed' ? 'SPD' : 'SHK'), ob.x, ob.y - 6);
     ctx.restore();
   }
 
@@ -1019,7 +1019,7 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
     ctx.font = '800 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(pk.kind === 'map' ? 'MAP' : 'MAG', pk.x, pk.y - 5);
+    ctx.fillText(tCanvas(pk.kind === 'map' ? 'MAP' : 'MAG'), pk.x, pk.y - 5);
     ctx.restore();
   }
 

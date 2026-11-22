@@ -203,7 +203,7 @@ export function ChaosWheelModal({
                         textAnchor="middle"
                         dominantBaseline="middle"
                       >
-                        CHAOS
+                        {t('CHAOS', '混沌')}
                       </text>
                     </svg>
                   </div>

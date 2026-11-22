@@ -27,6 +27,7 @@ import {
   drawSphere3D,
   drawStudioBackdrop,
   shadeHex,
+  tCanvas,
 } from './packRenderHelpers';
 import { getMotionTime } from './arcadeMotion';
 
@@ -243,7 +244,7 @@ export function renderArcheryWind(ctx: CanvasRenderingContext2D, snap: ArcheryWi
   ctx.fillStyle = '#E2E8F0';
   ctx.font = '800 11px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('WIND', wx, wy + 34);
+  ctx.fillText(tCanvas('WIND'), wx, wy + 34);
   ctx.restore();
 
   // Player crosshairs

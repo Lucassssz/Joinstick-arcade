@@ -118,35 +118,38 @@ function drawCardFace(
   ctx.stroke();
 
   if (badge) {
+    const bTxt = tCanvas(badge);
     ctx.fillStyle = 'rgba(10,14,22,0.72)';
     ctx.beginPath();
-    ctx.roundRect(-w / 2 + 9, -h / 2 + 9, Math.min(w - 18, 52), 18, 5);
+    ctx.roundRect(-w / 2 + 9, -h / 2 + 9, Math.min(w - 18, Math.max(52, ctx.measureText(bTxt).width + 14)), 18, 5);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '800 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(badge, -w / 2 + 14, -h / 2 + 18);
+    ctx.fillText(bTxt, -w / 2 + 14, -h / 2 + 18);
   }
 
+  const titleTxt = tCanvas(title);
+  const subTxt = subtitle ? tCanvas(subtitle) : undefined;
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font =
-    title.length <= 3
+    titleTxt.length <= 3
       ? '900 34px "Bricolage Grotesque", sans-serif'
-      : title.length <= 8
+      : titleTxt.length <= 8
         ? '900 18px "Bricolage Grotesque", sans-serif'
         : '900 14px "Plus Jakarta Sans", sans-serif';
   ctx.lineWidth = 3.5;
   ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-  ctx.strokeText(title, 0, subtitle ? -6 : 2);
-  ctx.fillText(title, 0, subtitle ? -6 : 2);
+  ctx.strokeText(titleTxt, 0, subTxt ? -6 : 2);
+  ctx.fillText(titleTxt, 0, subTxt ? -6 : 2);
 
-  if (subtitle) {
+  if (subTxt) {
     ctx.fillStyle = 'rgba(255,255,255,0.88)';
     ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(subtitle, 0, h / 2 - 20);
+    ctx.fillText(subTxt, 0, h / 2 - 20);
   }
 
   ctx.restore();
@@ -176,7 +179,7 @@ function drawCardDeckStack(
   ctx.font = '900 12px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, x, y - 14);
+  ctx.fillText(tCanvas(label), x, y - 14);
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '900 22px "Bricolage Grotesque", sans-serif';
   ctx.fillText(`${count}`, x, y + 14);
@@ -282,7 +285,7 @@ function drawSeatShell(
   ctx.fillStyle = '#CBD5E1';
   ctx.font = '700 11px "JetBrains Mono", monospace';
   ctx.textAlign = 'right';
-  ctx.fillText(subText, x + w / 2 - 12, y - h / 2 + 22);
+  ctx.fillText(tCanvas(subText), x + w / 2 - 12, y - h / 2 + 22);
 
   if (lastAction) {
     ctx.fillStyle = colorHex;
@@ -359,7 +362,7 @@ export function renderBoomKittens(ctx: CanvasRenderingContext2D, snap: BoomKitte
       ctx.fillStyle = '#EF4444';
       ctx.font = '900 18px "Bricolage Grotesque", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('EXPLODED!', seat.x, seat.y + 8);
+      ctx.fillText(tCanvas('EXPLODED!'), seat.x, seat.y + 8);
     } else {
       const fanCount = Math.min(7, p.cardCount);
       for (let i = 0; i < fanCount; i++) {
@@ -375,7 +378,7 @@ export function renderBoomKittens(ctx: CanvasRenderingContext2D, snap: BoomKitte
       ctx.fillStyle = p.defuseCount > 0 ? '#10D98B' : '#64748B';
       ctx.font = '800 11px "JetBrains Mono", monospace';
       ctx.textAlign = 'right';
-      ctx.fillText(`DEFUSE x${p.defuseCount}`, seat.x + 88, seat.y + 8);
+      ctx.fillText(tCanvas(`DEFUSE x${p.defuseCount}`), seat.x + 88, seat.y + 8);
     }
     ctx.restore();
   });
@@ -448,7 +451,7 @@ export function renderPropertyDeal(ctx: CanvasRenderingContext2D, snap: Property
       ctx.fillStyle = '#64748B';
       ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('No deeds placed yet', seat.x, seat.y + 6);
+      ctx.fillText(tCanvas('No deeds placed yet'), seat.x, seat.y + 6);
     } else {
       const startX = seat.x - ((props.length - 1) * 44) / 2;
       props.forEach((pr, pi) => {
@@ -555,7 +558,7 @@ export function renderFlipSeven(ctx: CanvasRenderingContext2D, snap: FlipSevenSn
       ctx.fillStyle = p.hasMultiplier ? '#C084FC' : '#10D98B';
       ctx.font = '900 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'right';
-      const tags = [p.hasSecondChance ? 'SHIELD' : '', p.hasMultiplier ? 'x2' : ''].filter(Boolean).join(' ');
+      const tags = [p.hasSecondChance ? tCanvas('SHIELD') : '', p.hasMultiplier ? 'x2' : ''].filter(Boolean).join(' ');
       ctx.fillText(tags, seat.x + 106, seat.y + 34);
     }
     ctx.restore();
@@ -599,16 +602,16 @@ export function renderRoyalBluff(ctx: CanvasRenderingContext2D, snap: RoyalBluff
     ctx.fillStyle = '#FFB800';
     ctx.font = '800 13px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`${snap.pendingClaim.actorName.toUpperCase()} CLAIMS`, TABLE_CENTER_X, TABLE_CENTER_Y - 38);
+    ctx.fillText(tCanvas(`${snap.pendingClaim.actorName.toUpperCase()} CLAIMS`), TABLE_CENTER_X, TABLE_CENTER_Y - 38);
 
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 30px "Bricolage Grotesque", sans-serif';
-    ctx.fillText(snap.pendingClaim.claimedRole, TABLE_CENTER_X, TABLE_CENTER_Y - 2);
+    ctx.fillText(tCanvas(snap.pendingClaim.claimedRole), TABLE_CENTER_X, TABLE_CENTER_Y - 2);
 
     ctx.fillStyle = '#F87171';
     ctx.font = '800 13px "Plus Jakarta Sans", sans-serif';
     ctx.fillText(
-      `${snap.pendingClaim.actionName}${snap.pendingClaim.targetName ? ` -> ${snap.pendingClaim.targetName}` : ''} · ${Math.ceil(snap.turnTimeLeft)}s`,
+      `${tCanvas(snap.pendingClaim.actionName)}${snap.pendingClaim.targetName ? ` -> ${snap.pendingClaim.targetName}` : ''} · ${Math.ceil(snap.turnTimeLeft)}s`,
       TABLE_CENTER_X,
       TABLE_CENTER_Y + 34
     );
@@ -623,10 +626,10 @@ export function renderRoyalBluff(ctx: CanvasRenderingContext2D, snap: RoyalBluff
     ctx.font = '900 22px "Bricolage Grotesque", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('ROYAL', TABLE_CENTER_X, TABLE_CENTER_Y - 12);
+    ctx.fillText(tCanvas('ROYAL'), TABLE_CENTER_X, TABLE_CENTER_Y - 12);
     ctx.fillStyle = '#E9D5FF';
     ctx.font = '800 14px "JetBrains Mono", monospace';
-    ctx.fillText('BLUFF COURT', TABLE_CENTER_X, TABLE_CENTER_Y + 14);
+    ctx.fillText(tCanvas('BLUFF COURT'), TABLE_CENTER_X, TABLE_CENTER_Y + 14);
   }
   ctx.restore();
 
@@ -667,9 +670,9 @@ export function renderRoyalBluff(ctx: CanvasRenderingContext2D, snap: RoyalBluff
         ctx.font = '800 10px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('SECRET', cx, cy);
+        ctx.fillText(tCanvas('SECRET'), cx, cy);
       } else {
-        const rev = p.revealedRoles[i - p.influenceLeft] ?? 'EXILED';
+        const rev = tCanvas(p.revealedRoles[i - p.influenceLeft] ?? 'EXILED');
         ctx.fillStyle = 'rgba(127, 29, 29, 0.72)';
         ctx.beginPath();
         ctx.roundRect(cx - 32, cy - 16, 64, 30, 6);
@@ -865,10 +868,10 @@ export function renderSushiDraft(ctx: CanvasRenderingContext2D, snap: SushiDraft
   ctx.font = '900 20px "Bricolage Grotesque", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('SUSHI BAR', TABLE_CENTER_X, TABLE_CENTER_Y - 6);
+  ctx.fillText(tCanvas('SUSHI BAR'), TABLE_CENTER_X, TABLE_CENTER_Y - 6);
   ctx.fillStyle = '#FDBA74';
   ctx.font = '800 11px "JetBrains Mono", monospace';
-  ctx.fillText(`STEP ${snap.pickStep}/${snap.totalPickSteps}`, TABLE_CENTER_X, TABLE_CENTER_Y + 14);
+  ctx.fillText(tCanvas(`STEP ${snap.pickStep}/${snap.totalPickSteps}`), TABLE_CENTER_X, TABLE_CENTER_Y + 14);
   ctx.restore();
 
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
@@ -897,7 +900,7 @@ export function renderSushiDraft(ctx: CanvasRenderingContext2D, snap: SushiDraft
       ctx.fillStyle = '#94A3B8';
       ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(p.pickedThisStep ? 'Dish chosen!' : 'Picking sushi...', seat.x, seat.y + 6);
+      ctx.fillText(tCanvas(p.pickedThisStep ? 'Dish chosen!' : 'Picking sushi...'), seat.x, seat.y + 6);
     } else {
       const step = Math.min(34, 200 / Math.max(cards.length, 1));
       const startX = seat.x - ((cards.length - 1) * step) / 2;
@@ -915,7 +918,7 @@ export function renderSushiDraft(ctx: CanvasRenderingContext2D, snap: SushiDraft
         ctx.font = '900 9px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(c.badge.slice(0, 4), cx, cy + 1);
+        ctx.fillText(tCanvas(c.badge).slice(0, 4), cx, cy + 1);
       });
     }
     ctx.restore();

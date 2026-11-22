@@ -23,6 +23,7 @@ import {
   drawShadowOval,
   drawSphere3D,
   drawStudioBackdrop,
+  getActiveCanvasLang,
   shadeHex,
 } from './packRenderHelpers';
 import { getMotionTime } from './arcadeMotion';
@@ -605,13 +606,22 @@ export function renderGeoPinRush(ctx: CanvasRenderingContext2D, snap: GeoPinRush
   ctx.strokeStyle = '#38BDF8';
   ctx.lineWidth = 2;
   ctx.stroke();
+  const isZh = getActiveCanvasLang() === 'zh';
   ctx.fillStyle = '#F8FAFC';
   ctx.font = '900 28px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(`${snap.clueEmoji} ${snap.clueTitle} · ${snap.clueTitleZh}`, ARENA_WIDTH / 2, 62);
+  ctx.fillText(
+    isZh ? `${snap.clueEmoji} ${snap.clueTitleZh}` : `${snap.clueEmoji} ${snap.clueTitle} · ${snap.clueTitleZh}`,
+    ARENA_WIDTH / 2,
+    62
+  );
   ctx.fillStyle = '#94A3B8';
   ctx.font = '600 16px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(`${snap.clueHint}  |  ${snap.clueHintZh}`, ARENA_WIDTH / 2, 100);
+  ctx.fillText(
+    isZh ? snap.clueHintZh : `${snap.clueHint}  |  ${snap.clueHintZh}`,
+    ARENA_WIDTH / 2,
+    100
+  );
   ctx.restore();
 
   if (snap.phase === 'reveal') {
@@ -695,11 +705,12 @@ export function renderWavelengthSync(ctx: CanvasRenderingContext2D, snap: Wavele
   drawExtrudedBox3D(ctx, 64, 560, 290, 82, 10, '#0284C7', '#075985', 14);
   drawExtrudedBox3D(ctx, ARENA_WIDTH - 354, 560, 290, 82, 10, '#DB2777', '#9D174D', 14);
   ctx.save();
+  const isZh = getActiveCanvasLang() === 'zh';
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '900 22px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(`${snap.leftLabel} · ${snap.leftLabelZh}`, 209, 608);
-  ctx.fillText(`${snap.rightLabel} · ${snap.rightLabelZh}`, ARENA_WIDTH - 209, 608);
+  ctx.fillText(isZh ? snap.leftLabelZh : `${snap.leftLabel} · ${snap.leftLabelZh}`, 209, 608);
+  ctx.fillText(isZh ? snap.rightLabelZh : `${snap.rightLabel} · ${snap.rightLabelZh}`, ARENA_WIDTH - 209, 608);
 
   // Center clue card
   ctx.fillStyle = '#0F172A';
@@ -711,7 +722,7 @@ export function renderWavelengthSync(ctx: CanvasRenderingContext2D, snap: Wavele
   ctx.stroke();
   ctx.fillStyle = '#FACC15';
   ctx.font = '900 30px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(`${snap.clueText} · ${snap.clueTextZh}`, ARENA_WIDTH / 2, 112);
+  ctx.fillText(isZh ? snap.clueTextZh : `${snap.clueText} · ${snap.clueTextZh}`, ARENA_WIDTH / 2, 112);
   ctx.restore();
 
   drawHudChip(ctx, 24, 24, `R${snap.round}/${snap.maxRounds} · ${Math.ceil(snap.timeLeft)}s`, '#EC4899');

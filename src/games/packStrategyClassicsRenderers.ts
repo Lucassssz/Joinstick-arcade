@@ -26,6 +26,7 @@ import {
   drawSphere3D,
   drawStudioBackdrop,
   shadeHex,
+  tCanvas,
 } from './packRenderHelpers';
 
 function drawScoreFooter(
@@ -51,7 +52,7 @@ function drawScoreFooter(
     ctx.fillText(p.name, x + w / 2, ARENA_HEIGHT - 51);
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 14px "JetBrains Mono", monospace';
-    ctx.fillText(`${p.score} PTS${p.badge ? ` · ${p.badge}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
+    ctx.fillText(`${tCanvas(`${p.score} PTS`)}${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
     ctx.restore();
   });
 }
@@ -455,7 +456,7 @@ export function renderPokerShowdown(ctx: CanvasRenderingContext2D, snap: PokerSh
     ctx.textAlign = 'left';
     ctx.fillText(`${p.name} · ${p.score}`, x + 16, y + 28);
     ctx.fillStyle = p.locked ? '#10D98B' : '#94A3B8';
-    ctx.fillText(p.handRankLabel ?? (p.locked ? 'LOCKED' : 'DRAWING...'), x + 16, y + 54);
+    ctx.fillText(tCanvas(p.handRankLabel ?? (p.locked ? 'LOCKED' : 'DRAWING...')), x + 16, y + 54);
     p.revealedCards.forEach((c, ci) => {
       const cx = x + 220 + ci * 42;
       ctx.fillStyle = '#F8FAFC';
@@ -491,7 +492,7 @@ export function renderTarotArcana(ctx: CanvasRenderingContext2D, snap: TarotArca
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 22px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(p.element ?? (p.picked ? 'READY' : '...'), x + w / 2, y + 108);
+    ctx.fillText(tCanvas(p.element ?? (p.picked ? 'READY' : '...')), x + w / 2, y + 108);
     drawNameplate(ctx, x + w / 2, y + 218, `${p.name} · ${p.score}`, p.colorHex);
   });
 

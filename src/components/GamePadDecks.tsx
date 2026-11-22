@@ -268,7 +268,7 @@ export function EasyArrowsDeck({
                 : 'bg-[#171B24] border-[#2E3646] text-[#9CA3AF] hover:text-white'
             }`}
           >
-            {strictFourWay ? '4-WAY' : '8-WAY'}
+            {strictFourWay ? t('4-WAY', '四向') : t('8-WAY', '八向')}
           </button>
           {renderArrowBtn('right', <ArrowRight className="w-7 h-7 stroke-[2.6]" />, t('Right', '右'))}
 

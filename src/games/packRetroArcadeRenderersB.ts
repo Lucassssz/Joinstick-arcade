@@ -19,6 +19,7 @@ import {
   drawSphere3D,
   drawStudioBackdrop,
   shadeHex,
+  tCanvas,
 } from './packRenderHelpers';
 
 // 9. CLAY SKEET (Duck Hunt)
@@ -277,7 +278,7 @@ export function renderPinStrike(ctx: CanvasRenderingContext2D, snap: PinStrikeSn
       ctx.fillStyle = '#FACC15';
       ctx.font = '900 14px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(p.aimSpin < 0 ? '↺ HOOK' : '↻ HOOK', p.laneX, 608);
+      ctx.fillText(tCanvas(p.aimSpin < 0 ? '↺ HOOK' : '↻ HOOK'), p.laneX, 608);
     }
     if (p.charging) {
       ctx.fillStyle = '#FACC15';

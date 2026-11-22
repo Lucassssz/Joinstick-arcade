@@ -21,6 +21,7 @@ import {
   drawSphere3D,
   drawStudioBackdrop,
   shadeHex,
+  tCanvas,
 } from './packRenderHelpers';
 import { getMotionTime } from './arcadeMotion';
 
@@ -106,7 +107,7 @@ export function renderBrickClash(ctx: CanvasRenderingContext2D, snap: BrickClash
       ctx.fillStyle = '#FFFFFF';
       ctx.font = '900 13px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('×2 BALL', br.x + br.w / 2, br.y + 19);
+      ctx.fillText(tCanvas('×2 BALL'), br.x + br.w / 2, br.y + 19);
     }
   }
 
@@ -396,9 +397,9 @@ export function renderRhythmPulse(ctx: CanvasRenderingContext2D, snap: RhythmPul
     ctx.fillText(p.name, sideX + 16, sideY + 32);
     ctx.fillStyle = p.judgeColor;
     ctx.font = '900 16px "JetBrains Mono", monospace';
-    ctx.fillText(`${p.lastJudge}  ×${p.combo}`, sideX + 16, sideY + 60);
+    ctx.fillText(`${tCanvas(p.lastJudge)}  ×${p.combo}`, sideX + 16, sideY + 60);
     ctx.fillStyle = '#FACC15';
-    ctx.fillText(`${p.score} PTS`, sideX + 16, sideY + 84);
+    ctx.fillText(tCanvas(`${p.score} PTS`), sideX + 16, sideY + 84);
     ctx.restore();
   });
 

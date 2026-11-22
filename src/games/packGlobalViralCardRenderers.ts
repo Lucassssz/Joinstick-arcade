@@ -11,7 +11,9 @@ import {
   drawExtrudedBox3D,
   drawHudChip,
   drawStudioBackdrop,
+  getActiveCanvasLang,
   shadeHex,
+  tCanvas,
 } from './packRenderHelpers';
 
 function drawPlayerBar(
@@ -38,7 +40,7 @@ function drawPlayerBar(
     ctx.fillText(p.name, x + w / 2, ARENA_HEIGHT - 51);
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 14px "JetBrains Mono", monospace';
-    ctx.fillText(`${p.score} PTS${p.badge ? ` · ${p.badge}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
+    ctx.fillText(`${tCanvas(`${p.score} PTS`)}${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
     ctx.restore();
   });
 }
@@ -58,7 +60,12 @@ export function renderWordPulse(ctx: CanvasRenderingContext2D, snap: WordPulseSn
   ctx.fillStyle = '#FACC15';
   ctx.font = '900 20px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(`HINT: ${snap.categoryHint} · ${snap.categoryHintZh}`, ARENA_WIDTH / 2, 115);
+  const isZh = getActiveCanvasLang() === 'zh';
+  ctx.fillText(
+    `${tCanvas('HINT')}: ${isZh ? snap.categoryHintZh : `${snap.categoryHint} · ${snap.categoryHintZh}`}`,
+    ARENA_WIDTH / 2,
+    115
+  );
   ctx.restore();
 
   // 6x5 Wordle board
@@ -115,13 +122,14 @@ export function renderTriviaBlitz(ctx: CanvasRenderingContext2D, snap: TriviaBli
   ctx.fillStyle = '#A78BFA';
   ctx.font = '900 16px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(snap.category, ARENA_WIDTH / 2, 128);
+  const isZh = getActiveCanvasLang() === 'zh';
+  ctx.fillText(tCanvas(snap.category), ARENA_WIDTH / 2, 128);
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '900 28px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(snap.question, ARENA_WIDTH / 2, 178, ARENA_WIDTH - 220);
+  ctx.fillText(isZh ? snap.questionZh : snap.question, ARENA_WIDTH / 2, 178, ARENA_WIDTH - 220);
   ctx.fillStyle = '#CBD5E1';
   ctx.font = '700 22px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(snap.questionZh, ARENA_WIDTH / 2, 224, ARENA_WIDTH - 220);
+  ctx.fillText(isZh ? snap.question : snap.questionZh, ARENA_WIDTH / 2, 224, ARENA_WIDTH - 220);
   ctx.restore();
 
   // 2x2 Colored Answer Cards
@@ -146,9 +154,9 @@ export function renderTriviaBlitz(ctx: CanvasRenderingContext2D, snap: TriviaBli
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 26px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`${letters[i]}  ${opt.label}`, x + 28, y + 54);
+    ctx.fillText(`${letters[i]}  ${isZh ? opt.labelZh : opt.label}`, x + 28, y + 54);
     ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(opt.labelZh, x + 64, y + 96);
+    ctx.fillText(isZh ? opt.label : opt.labelZh, x + 64, y + 96);
     ctx.restore();
   });
 
@@ -180,7 +188,12 @@ export function renderCodeGrid(ctx: CanvasRenderingContext2D, snap: CodeGridSnap
   ctx.fillStyle = '#5EEAD4';
   ctx.font = '900 30px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(`CLUE: ${snap.clueWord} (${snap.clueWordZh}) · ${snap.foundCount}/${snap.clueCount}`, ARENA_WIDTH / 2, 66);
+  const isZh = getActiveCanvasLang() === 'zh';
+  ctx.fillText(
+    `${tCanvas('CLUE')}: ${isZh ? snap.clueWordZh : `${snap.clueWord} (${snap.clueWordZh})`} · ${snap.foundCount}/${snap.clueCount}`,
+    ARENA_WIDTH / 2,
+    66
+  );
   ctx.restore();
 
   // 4x3 Codename Cards
@@ -212,10 +225,10 @@ export function renderCodeGrid(ctx: CanvasRenderingContext2D, snap: CodeGridSnap
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 24px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(c.word, x + cw / 2, y + 66);
+    ctx.fillText(isZh ? c.wordZh : c.word, x + cw / 2, y + 66);
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.font = '700 18px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(c.wordZh, x + cw / 2, y + 104);
+    ctx.fillText(isZh ? c.word : c.wordZh, x + cw / 2, y + 104);
     ctx.restore();
   });
 
@@ -237,10 +250,11 @@ export function renderFibParty(ctx: CanvasRenderingContext2D, snap: FibPartySnap
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '900 26px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(snap.prompt, ARENA_WIDTH / 2, 162, ARENA_WIDTH - 220);
+  const isZh = getActiveCanvasLang() === 'zh';
+  ctx.fillText(isZh ? snap.promptZh : snap.prompt, ARENA_WIDTH / 2, 162, ARENA_WIDTH - 220);
   ctx.fillStyle = '#FDA4AF';
   ctx.font = '700 21px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(snap.promptZh, ARENA_WIDTH / 2, 212, ARENA_WIDTH - 220);
+  ctx.fillText(isZh ? snap.prompt : snap.promptZh, ARENA_WIDTH / 2, 212, ARENA_WIDTH - 220);
   ctx.restore();
 
   if (snap.phase === 'write-fib') {
@@ -248,7 +262,7 @@ export function renderFibParty(ctx: CanvasRenderingContext2D, snap: FibPartySnap
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 30px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('CHECK YOUR PHONE · PICK A SNEAKY LIE!', ARENA_WIDTH / 2, 420);
+    ctx.fillText(tCanvas('CHECK YOUR PHONE · PICK A SNEAKY LIE!'), ARENA_WIDTH / 2, 420);
     ctx.restore();
   } else {
     const cols = 2;
@@ -265,15 +279,15 @@ export function renderFibParty(ctx: CanvasRenderingContext2D, snap: FibPartySnap
       ctx.fillStyle = '#FFFFFF';
       ctx.font = '900 22px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(`${c.text} · ${c.textZh}`, x + 22, y + 48, bw - 44);
+      ctx.fillText(isZh ? c.textZh : `${c.text} · ${c.textZh}`, x + 22, y + 48, bw - 44);
       if (c.isTruth) {
         ctx.fillStyle = '#FEF08A';
         ctx.font = '900 15px "JetBrains Mono", monospace';
-        ctx.fillText('✓ REAL TRUTH', x + 22, y + 80);
+        ctx.fillText(tCanvas('✓ REAL TRUTH'), x + 22, y + 80);
       } else if (c.authorName) {
         ctx.fillStyle = '#FDA4AF';
         ctx.font = '800 14px "JetBrains Mono", monospace';
-        ctx.fillText(`LIE BY ${c.authorName}`, x + 22, y + 80);
+        ctx.fillText(tCanvas(`LIE BY ${c.authorName}`), x + 22, y + 80);
       }
       // Voter dots
       c.voterColors.forEach((vc, vi) => {

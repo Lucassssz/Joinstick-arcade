@@ -562,9 +562,9 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
   ctx.font = '900 13px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('1. GRAB ▶', 255, 110);
-  ctx.fillText('2. CHOP 🔪 ▶', 555, 110);
-  ctx.fillText('3. GRILL 🍳 ▶', 865, 110);
+  ctx.fillText(tCanvas('1. GRAB ▶'), 255, 110);
+  ctx.fillText(tCanvas('2. CHOP 🔪 ▶'), 555, 110);
+  ctx.fillText(tCanvas('3. GRILL 🍳 ▶'), 865, 110);
   ctx.restore();
 
   // Top Order Tickets Strip & Team Star Scoreboard
@@ -603,14 +603,14 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
       ctx.fillStyle = '#FFB800';
       ctx.font = '800 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'right';
-      ctx.fillText('VIP ★', ox + 180, oy + 22);
+      ctx.fillText(tCanvas('VIP ★'), ox + 180, oy + 22);
     }
 
     // Mini Switch-style Recipe Step Icons on ticket: [🔪 CHOP] -> [🍳 GRILL] -> [🍽️]
     ctx.fillStyle = '#94A3B8';
     ctx.font = '700 9.5px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('🔪CHOP → 🍳COOK', ox + 60, oy + 38);
+    ctx.fillText(tCanvas('🔪CHOP → 🍳COOK'), ox + 60, oy + 38);
 
     ctx.fillStyle = '#0E1117';
     ctx.fillRect(ox + 60, oy + 49, 118, 8);
@@ -634,7 +634,7 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
     ctx.font = '800 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('SPD', bt.x, bt.y - 5);
+    ctx.fillText(tCanvas('SPD'), bt.x, bt.y - 5);
     ctx.restore();
   }
 
@@ -785,7 +785,7 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
           }
           ctx.fillStyle = '#FFFFFF';
           ctx.font = '900 10px "JetBrains Mono", monospace';
-          ctx.fillText('🔥 TAP A/B!', cx, st.y + st.h - stDepth - 10);
+          ctx.fillText(tCanvas('🔥 TAP A/B!'), cx, st.y + st.h - stDepth - 10);
         } else if (st.cookingDish) {
           const isDone = st.cookProgress >= 1;
           const burnP = st.burnProgress ?? 0;
@@ -815,7 +815,7 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
             ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, (st.w - 32) * burnP, 8);
             ctx.fillStyle = '#FF4D2E';
             ctx.font = '900 10px "JetBrains Mono", monospace';
-            ctx.fillText('⚠ BURNING!', cx, st.y - stDepth + 10);
+            ctx.fillText(tCanvas('⚠ BURNING!'), cx, st.y - stDepth + 10);
           } else {
             ctx.fillStyle = '#10D98B';
             ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, st.w - 32, 8);
@@ -844,7 +844,7 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
         const clean = st.cleanPlates ?? 0;
         ctx.fillStyle = '#E0F2FE';
         ctx.font = '800 10.5px "JetBrains Mono", monospace';
-        ctx.fillText(dirty > 0 ? `WASH (${dirty}) +45` : `PLATES: ${clean}`, cx, cy + 22);
+        ctx.fillText(tCanvas(dirty > 0 ? `WASH (${dirty}) +45` : `PLATES: ${clean}`), cx, cy + 22);
         if (dirty > 0) {
           ctx.fillStyle = '#11141B';
           ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, st.w - 32, 7);
@@ -995,7 +995,7 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
       ctx.font = '800 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('MAG', it.x, it.y);
+      ctx.fillText(tCanvas('MAG'), it.x, it.y);
     } else {
       ctx.translate(it.x, it.y);
       ctx.rotate(it.rot);

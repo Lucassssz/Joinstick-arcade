@@ -163,7 +163,7 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
     ctx.font = '800 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(glyph, orb.x, orb.y - (5 + bob) + 0.5);
+    ctx.fillText(tCanvas(glyph), orb.x, orb.y - (5 + bob) + 0.5);
     ctx.restore();
   }
 

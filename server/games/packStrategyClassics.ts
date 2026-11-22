@@ -1966,6 +1966,12 @@ export const tarotArcanaModule: CompactGameModule<TarotState, TarotArcanaSnapsho
       FROST: '#38BDF8',
       SUN: '#FACC15',
     };
+    const elZh: Record<ElementType, string> = {
+      FIRE: '火',
+      NATURE: '自然',
+      FROST: '冰',
+      SUN: '太阳',
+    };
     const out: Record<string, CardPrivateState> = {};
     for (const p of state.players) {
       const hand: CardPrivateHandItem[] = p.hand.map((el) => ({
@@ -1988,7 +1994,7 @@ export const tarotArcanaModule: CompactGameModule<TarotState, TarotArcanaSnapsho
         turnTimeLeft: state.timeLeft,
         turnTotal: state.totalTime,
         statusHint: p.picked ? `Cast ${p.picked}! Waiting for Clash...` : 'Tap Fire, Nature, Frost, or Sun on your phone!',
-        statusHintZh: p.picked ? `已锁定 ${p.picked}！等待结算...` : '在手机点击选择火、自然、冰或太阳元素！',
+        statusHintZh: p.picked ? `已锁定「${elZh[p.picked]}」元素！等待结算...` : '在手机点击选择火、自然、冰或太阳元素！',
       };
     }
     return out;

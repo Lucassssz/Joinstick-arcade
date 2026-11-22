@@ -1,5 +1,5 @@
 import { ARENA_WIDTH } from '../shared/types';
-import { drawHudChip, drawPopupTexts, tCanvas } from './canvasHelpers';
+import { drawHudChip, drawPopupTexts, getActiveCanvasLang, tCanvas } from './canvasHelpers';
 import {
   drawArenaSlab as coreDrawArenaSlab,
   drawCharacterPod3D as coreDrawCharacterPod3D,
@@ -10,7 +10,16 @@ import {
   shadeHex,
 } from './render25d';
 
-export { drawHudChip, drawPopupTexts, drawShadowOval, drawSphere3D, drawStudioBackdrop, shadeHex };
+export {
+  drawHudChip,
+  drawPopupTexts,
+  drawShadowOval,
+  drawSphere3D,
+  drawStudioBackdrop,
+  getActiveCanvasLang,
+  shadeHex,
+  tCanvas,
+};
 
 export function drawArenaSlab(
   ctx: CanvasRenderingContext2D,

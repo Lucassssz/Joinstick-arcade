@@ -1,6 +1,7 @@
 import { ARENA_HEIGHT, ARENA_WIDTH, type GameId, type GameSnapshot } from '../shared/types';
 import { getGameMeta } from '../shared/games';
 import { drawStudioBackdrop } from './render25d';
+import { tCanvas } from './canvasHelpers';
 
 type ModularRendererFn = (ctx: CanvasRenderingContext2D, snap: any) => void;
 
@@ -212,7 +213,7 @@ export function renderModularGame(
     ctx.font = '800 18px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('LOADING ARENA MODULE...', ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+    ctx.fillText(tCanvas('LOADING ARENA MODULE...'), ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
     ctx.restore();
     return true;
   }

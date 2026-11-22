@@ -1247,7 +1247,7 @@ export function renderColorClash(
   ctx.font = '800 11px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(snap.activeColor.toUpperCase(), pileX, pileY + 83);
+  ctx.fillText(tCanvas(snap.activeColor.toUpperCase()), pileX, pileY + 83);
   ctx.restore();
 
   if (snap.drawPenalty > 0) {
@@ -1310,7 +1310,7 @@ export function renderColorClash(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(
-    `${snap.direction === 1 ? '↻' : '↺'}  ${Math.ceil(snap.turnTimeLeft)}s TURN · #${snap.turnCount + 1}`,
+    tCanvas(`${snap.direction === 1 ? '↻' : '↺'}  ${Math.ceil(snap.turnTimeLeft)}s TURN · #${snap.turnCount + 1}`),
     36,
     37
   );
@@ -1360,7 +1360,7 @@ export function renderLiarsDeck(
   ctx.font = '800 11px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(`${tCanvas('TARGET')} · ★ JOKER = WILD`, TABLE_CENTER_X, targetY - 12);
+  ctx.fillText(`${tCanvas('TARGET')} · ★ ${tCanvas('JOKER = WILD')}`, TABLE_CENTER_X, targetY - 12);
 
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '900 22px "Bricolage Grotesque", sans-serif';
@@ -1512,9 +1512,11 @@ export function renderLiarsDeck(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(
-    snap.phase === 'challenge'
-      ? `ROUND ${snap.round} · BLUFF CHECK ${Math.ceil(snap.turnTimeLeft)}s`
-      : `ROUND ${snap.round} · ${Math.ceil(snap.turnTimeLeft)}s TURN`,
+    tCanvas(
+      snap.phase === 'challenge'
+        ? `ROUND ${snap.round} · BLUFF CHECK ${Math.ceil(snap.turnTimeLeft)}s`
+        : `ROUND ${snap.round} · ${Math.ceil(snap.turnTimeLeft)}s TURN`
+    ),
     36,
     37
   );

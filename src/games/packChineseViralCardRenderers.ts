@@ -13,7 +13,7 @@ import {
   type SpeedMahjongSnapshot,
   type UndercoverWordSnapshot,
 } from '../shared/types';
-import { drawBoardBanner, drawHudChip, drawPopupTexts, tCanvas } from './canvasHelpers';
+import { drawBoardBanner, drawHudChip, drawPopupTexts, getActiveCanvasLang, tCanvas } from './canvasHelpers';
 import { drawStudioBackdrop, shadeHex } from './render25d';
 import { clamp01, easeOutCubic } from './arcadeMotion';
 
@@ -159,7 +159,7 @@ function drawLandlordCard(ctx: CanvasRenderingContext2D, x: number, y: number, w
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `900 ${Math.round(w * 0.34)}px "JetBrains Mono", monospace`;
-  ctx.fillText(c.rank === 'JOKER' ? (c.jokerKind === 'big' ? 'BIG' : 'SM') : c.rank, 0, -h * 0.18);
+  ctx.fillText(c.rank === 'JOKER' ? tCanvas(c.jokerKind === 'big' ? 'BIG' : 'SM') : c.rank, 0, -h * 0.18);
   ctx.font = `800 ${Math.round(w * 0.44)}px sans-serif`;
   ctx.fillText(symMap[c.suit], 0, h * 0.16);
   ctx.restore();
@@ -330,9 +330,11 @@ export function renderLiarsDiceTavern(ctx: CanvasRenderingContext2D, snap: Liars
     ctx.fillStyle = '#CBD5E1';
     ctx.font = '700 12px "JetBrains Mono", monospace';
     ctx.fillText(
-      snap.totalMatchingDice !== null
-        ? `ACTUAL MATCHING: ${snap.totalMatchingDice} DICE`
-        : `${snap.lastBidderName ?? ''} · ${snap.pureMode ? 'PURE 齋' : '1s WILD'}`,
+      tCanvas(
+        snap.totalMatchingDice !== null
+          ? `ACTUAL MATCHING: ${snap.totalMatchingDice} DICE`
+          : `${snap.lastBidderName ?? ''} · ${snap.pureMode ? 'PURE 齋' : '1s WILD'}`
+      ),
       TABLE_CENTER_X,
       TABLE_CENTER_Y + 32
     );
@@ -410,13 +412,13 @@ export function renderUndercoverWord(ctx: CanvasRenderingContext2D, snap: Underc
   if (snap.phase === 'reveal' && snap.civilianWordRevealed) {
     ctx.fillStyle = '#4ADE80';
     ctx.font = '800 15px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(`CIVILIAN: ${snap.civilianWordRevealed}`, TABLE_CENTER_X, TABLE_CENTER_Y - 16);
+    ctx.fillText(tCanvas(`CIVILIAN: ${snap.civilianWordRevealed}`), TABLE_CENTER_X, TABLE_CENTER_Y - 16);
     ctx.fillStyle = '#F87171';
-    ctx.fillText(`SPY: ${snap.spyWordRevealed}`, TABLE_CENTER_X, TABLE_CENTER_Y + 20);
+    ctx.fillText(tCanvas(`SPY: ${snap.spyWordRevealed}`), TABLE_CENTER_X, TABLE_CENTER_Y + 20);
   } else {
     ctx.fillStyle = '#C4B5FD';
     ctx.font = '900 22px "Bricolage Grotesque", sans-serif';
-    ctx.fillText(snap.phase === 'clue' ? 'CLUE PHASE' : 'VOTE OUT THE SPY!', TABLE_CENTER_X, TABLE_CENTER_Y - 10);
+    ctx.fillText(tCanvas(snap.phase === 'clue' ? 'CLUE PHASE' : 'VOTE OUT THE SPY!'), TABLE_CENTER_X, TABLE_CENTER_Y - 10);
     ctx.fillStyle = '#94A3B8';
     ctx.font = '700 12px "JetBrains Mono", monospace';
     ctx.fillText(tCanvas('CHECK YOUR SECRET WORD ON YOUR PHONE'), TABLE_CENTER_X, TABLE_CENTER_Y + 24);
@@ -482,7 +484,7 @@ export function renderMidnightWerewolf(ctx: CanvasRenderingContext2D, snap: Midn
   ctx.fillText(isNight ? '🌕' : '☀️', TABLE_CENTER_X, TABLE_CENTER_Y - 14);
   ctx.fillStyle = '#F8FAFC';
   ctx.font = '900 14px "JetBrains Mono", monospace';
-  ctx.fillText(isNight ? `NIGHT ${snap.dayNumber}` : `DAY ${snap.dayNumber} VOTE`, TABLE_CENTER_X, TABLE_CENTER_Y + 34);
+  ctx.fillText(tCanvas(isNight ? `NIGHT ${snap.dayNumber}` : `DAY ${snap.dayNumber} VOTE`), TABLE_CENTER_X, TABLE_CENTER_Y + 34);
   ctx.restore();
 
   const n = snap.players.length;
@@ -544,10 +546,13 @@ export function renderIdiomChain(ctx: CanvasRenderingContext2D, snap: IdiomChain
   ctx.fillText(snap.anchorEn, TABLE_CENTER_X, TABLE_CENTER_Y + 18);
 
   // Highlighted link target badge
+  const isZh = getActiveCanvasLang() === 'zh';
   ctx.fillStyle = '#FACC15';
   ctx.font = '900 13px "JetBrains Mono", monospace';
   ctx.fillText(
-    `NEXT STARTS WITH: "${snap.linkHintZh}"  /  "${snap.linkHintEn}"`,
+    isZh
+      ? `下一棒接龙字：「${snap.linkHintZh}」 / "${snap.linkHintEn}"`
+      : `NEXT STARTS WITH: "${snap.linkHintZh}"  /  "${snap.linkHintEn}"`,
     TABLE_CENTER_X,
     TABLE_CENTER_Y + 52
   );

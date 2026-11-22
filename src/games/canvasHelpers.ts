@@ -8,6 +8,10 @@ export function setActiveCanvasLang(lang: Language): void {
   activeCanvasLang = lang;
 }
 
+export function getActiveCanvasLang(): Language {
+  return activeCanvasLang;
+}
+
 export function tCanvas(text: string): string {
   return translateGameText(text, activeCanvasLang);
 }

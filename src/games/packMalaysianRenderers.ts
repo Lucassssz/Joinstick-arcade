@@ -1417,7 +1417,7 @@ export function renderTenPairShowdown(
   ctx.font = '900 20px "Bricolage Grotesque", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('NGAU', TABLE_CENTER_X, TABLE_CENTER_Y - 8);
+  ctx.fillText(tCanvas('NGAU'), TABLE_CENTER_X, TABLE_CENTER_Y - 8);
   ctx.font = '800 11px "JetBrains Mono", monospace';
   ctx.fillStyle = '#A7F3D0';
   ctx.fillText(tCanvas(snap.phase.toUpperCase()), TABLE_CENTER_X, TABLE_CENTER_Y + 15);

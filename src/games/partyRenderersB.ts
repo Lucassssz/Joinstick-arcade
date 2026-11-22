@@ -816,7 +816,7 @@ export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFl
     ctx.font = '900 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(pk.kind === 'magnet' ? 'MAG' : 'OVR', pk.x, pk.y - 4);
+    ctx.fillText(tCanvas(pk.kind === 'magnet' ? 'MAG' : 'OVR'), pk.x, pk.y - 4);
     ctx.restore();
   }
 

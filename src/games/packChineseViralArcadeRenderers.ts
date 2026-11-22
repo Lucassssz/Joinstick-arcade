@@ -12,7 +12,7 @@ import {
   type TileTripleSnapshot,
   type TruthBombSnapshot,
 } from '../shared/types';
-import { drawBoardBanner, drawHudChip, drawNameplate, drawPopupTexts, tCanvas } from './canvasHelpers';
+import { drawBoardBanner, drawHudChip, drawNameplate, drawPopupTexts, getActiveCanvasLang, tCanvas } from './canvasHelpers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -121,7 +121,7 @@ export function renderMelonMerge(ctx: CanvasRenderingContext2D, snap: MelonMerge
     ctx.fillText(p.name.slice(0, 10), tx + 14, ty + cellH - 17);
     ctx.fillStyle = '#4ADE80';
     ctx.textAlign = 'right';
-    ctx.fillText(`${p.score} PTS`, tx + cellW - 14, ty + cellH - 17);
+    ctx.fillText(tCanvas(`${p.score} PTS`), tx + cellW - 14, ty + cellH - 17);
     ctx.restore();
   });
 
@@ -230,7 +230,7 @@ export function renderTileTriple(ctx: CanvasRenderingContext2D, snap: TileTriple
     ctx.fillText(p.name.slice(0, 10), bx + 12, by + ch - 10);
     ctx.fillStyle = '#A3E635';
     ctx.textAlign = 'right';
-    ctx.fillText(`${p.score} PTS`, bx + cw - 12, by + ch - 10);
+    ctx.fillText(tCanvas(`${p.score} PTS`), bx + cw - 12, by + ch - 10);
   });
 
   drawHudChip(ctx, 20, 16, 'TILE TRIPLE', '#A3E635', 'left');
@@ -786,21 +786,28 @@ export function renderTruthBomb(ctx: CanvasRenderingContext2D, snap: TruthBombSn
     ctx.fill();
     ctx.stroke();
 
+    const isZh = getActiveCanvasLang() === 'zh';
     ctx.fillStyle = snap.challengeKind === 'DARE' ? '#FF4D2E' : '#00C2FF';
     ctx.font = '900 18px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(
-      `${snap.challengeKind}${snap.doubleStakes ? ' ×2 STAKES!' : ''} · VOTES ${snap.votesDone}/${snap.votesNeeded}`,
+      tCanvas(`${snap.challengeKind}${snap.doubleStakes ? ' ×2 STAKES!' : ''} · VOTES ${snap.votesDone}/${snap.votesNeeded}`),
       cx,
       cy - 54
     );
 
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 16px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(snap.challengeEn.slice(0, 56), cx, cy - 8);
-    ctx.fillStyle = '#FDE047';
-    ctx.font = '700 15px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(snap.challengeZh ?? '', cx, cy + 26);
+    if (isZh && snap.challengeZh) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 19px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(snap.challengeZh, cx, cy + 4);
+    } else {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 16px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(snap.challengeEn.slice(0, 56), cx, cy - 8);
+      ctx.fillStyle = '#FDE047';
+      ctx.font = '700 15px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText(snap.challengeZh ?? '', cx, cy + 26);
+    }
     ctx.fillStyle = '#9CA3AF';
     ctx.font = '700 12px "JetBrains Mono", monospace';
     ctx.fillText(tCanvas('OTHER PLAYERS: PRESS A TO VOTE DONE!'), cx, cy + 62);
@@ -873,13 +880,14 @@ export function renderDrawGuessRelay(ctx: CanvasRenderingContext2D, snap: DrawGu
     ctx.fill();
     ctx.stroke();
 
+    const isZh = getActiveCanvasLang() === 'zh';
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '800 18px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`${i + 1}. ${opt.en}`, 806, oy + 36);
+    ctx.fillText(`${i + 1}. ${isZh ? opt.zh : opt.en}`, 806, oy + 36);
     ctx.fillStyle = '#FDE047';
     ctx.font = '700 15px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(opt.zh, 806, oy + 64);
+    ctx.fillText(isZh ? opt.en : opt.zh, 806, oy + 64);
 
     // Picker color dots
     pickers.forEach((pk, k) => {

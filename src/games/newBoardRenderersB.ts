@@ -568,7 +568,7 @@ export function renderDungeonCrawlBoard(
       : tile.kind === 'chest'
       ? `💎 +${tile.reward}G`
       : tile.kind === 'camp'
-      ? `🔥 HEAL`
+      ? `🔥 ${tCanvas('HEAL')}`
       : tile.kind === 'trap'
       ? `⚠ -${tile.power}HP`
       : tCanvas(tile.name);

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { CardClientAction, CardColor, CardPrivateHandItem, CardPrivateState } from '../shared/types';
 import type { CardSortMode, CardViewMode } from '../shared/padProfiles';
-import { useLanguage } from '../lib/i18n';
+import { useLanguage, translateGameText } from '../lib/i18n';
 
 interface CardControllerDeckProps {
   cardState: CardPrivateState | null;
@@ -243,12 +243,14 @@ export function CardControllerDeck({
               className="px-2 py-0.5 rounded-md font-mono text-[10px] font-black shrink-0 text-[#0B1219]"
               style={{ backgroundColor: cardState.badgeColorHex ?? '#FFB800' }}
             >
-              {cardState.badgeText}
+              {translateGameText(cardState.badgeText, lang)}
             </span>
           ) : null}
 
           <span className="text-xs sm:text-sm font-bold text-white truncate">
-            {lang === 'zh' ? cardState.statusHintZh : cardState.statusHint}
+            {lang === 'zh'
+              ? translateGameText(cardState.statusHintZh || cardState.statusHint, lang)
+              : cardState.statusHint}
           </span>
 
           {isColorClash && (cardState.drawPenalty ?? 0) > 0 && (
@@ -441,6 +443,8 @@ export function CardControllerDeck({
                     ? `translate3d(0, ${fanDrop - 3}px, 0) rotate(${fanRot * 0.5}deg)`
                     : `translate3d(0, ${fanDrop}px, 0) rotate(${fanRot}deg)`;
 
+                  const displayVal = lang === 'zh' ? translateGameText(val, lang) : val;
+                  const isZhTranslated = lang === 'zh' && displayVal !== val;
                   return (
                     <div
                       key={card.id}
@@ -483,11 +487,15 @@ export function CardControllerDeck({
                         }}
                       >
                         <span className="self-start font-mono text-[10px] font-black leading-none drop-shadow">
-                          {val}
+                          {displayVal}
                         </span>
                         <span
                           className={`font-display font-black leading-none drop-shadow text-center ${
-                            val.length >= 6
+                            isZhTranslated
+                              ? displayVal.length >= 4
+                                ? 'text-xs sm:text-sm'
+                                : 'text-sm sm:text-base'
+                              : val.length >= 6
                               ? 'text-[11px] sm:text-xs'
                               : val.length >= 4
                               ? 'text-xs sm:text-sm'
@@ -496,10 +504,10 @@ export function CardControllerDeck({
                               : 'text-2xl sm:text-3xl'
                           }`}
                         >
-                          {val}
+                          {displayVal}
                         </span>
                         <span className="self-end font-mono text-[10px] font-black leading-none drop-shadow">
-                          {val}
+                          {displayVal}
                         </span>
                       </button>
                     </div>
@@ -557,13 +565,13 @@ export function CardControllerDeck({
                         }}
                       >
                         <span className="self-start px-1.5 py-0.5 rounded bg-black/45 font-mono text-[9px] font-black leading-none">
-                          {card.badge ?? 'CARD'}
+                          {translateGameText(card.badge ?? 'CARD', lang)}
                         </span>
                         <span className="font-display font-black text-[11px] sm:text-xs leading-tight drop-shadow px-0.5">
-                          {card.title ?? ''}
+                          {translateGameText(card.title ?? '', lang)}
                         </span>
                         <span className="font-sans text-[9px] font-bold text-white/85 leading-tight line-clamp-2">
-                          {card.subtitle ?? ''}
+                          {translateGameText(card.subtitle ?? '', lang)}
                         </span>
                       </button>
                     </div>
@@ -680,7 +688,11 @@ export function CardControllerDeck({
                       boxShadow: '0 3px 0 rgba(0,0,0,0.45)',
                     }}
                   >
-                    <span className="truncate">{lang === 'zh' ? btn.labelZh : btn.label}</span>
+                    <span className="truncate">
+                      {lang === 'zh'
+                        ? translateGameText(btn.labelZh || btn.label, lang)
+                        : btn.label}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -699,7 +711,9 @@ export function CardControllerDeck({
                     }}
                   >
                     <span>
-                      {lang === 'zh' ? cardState.primaryBtn.labelZh : cardState.primaryBtn.label}
+                      {lang === 'zh'
+                        ? translateGameText(cardState.primaryBtn.labelZh || cardState.primaryBtn.label, lang)
+                        : cardState.primaryBtn.label}
                     </span>
                   </button>
                 )}
@@ -716,7 +730,9 @@ export function CardControllerDeck({
                     }}
                   >
                     <span>
-                      {lang === 'zh' ? cardState.secondaryBtn.labelZh : cardState.secondaryBtn.label}
+                      {lang === 'zh'
+                        ? translateGameText(cardState.secondaryBtn.labelZh || cardState.secondaryBtn.label, lang)
+                        : cardState.secondaryBtn.label}
                     </span>
                   </button>
                 )}

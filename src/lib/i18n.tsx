@@ -1561,7 +1561,7 @@ export function translateServerMessage(msg: string, lang: Language): string {
     return '房主已关闭本次游戏房间。';
   }
 
-  return msg;
+  return translateGameText(msg, lang);
 }
 
 const EXACT_GAME_TEXT_ZH: Record<string, string> = {
@@ -1819,6 +1819,672 @@ const EXACT_GAME_TEXT_ZH: Record<string, string> = {
   'JACKPOT +80 GIANT!': '大奖 +80 巨型弹板！',
   GIANT: '巨型',
   VIP: '贵宾',
+
+  // Server room / live alert strings
+  'HOST REMOTE ACTIVE': '房主手机遥控已激活',
+  'GAME ROOM': '游戏厅',
+  'MATCH PAUSED': '比赛已暂停',
+  'MATCH RESUMED': '比赛已恢复',
+  'RULES BRIEFING': '规则说明',
+  'GO! GO! GO!': '出发！冲啊！',
+  'FRENZY GO!': '狂热开局！',
+  '2X FRENZY MODE!': '2× 狂热模式！',
+  'MATCH COMPLETE!': '比赛结束！',
+  'TURN CHANGED': '回合切换',
+  'YOUR TURN!': '轮到你了！',
+  'CHALLENGE OR TRUST!': '质疑或信任！',
+  'FEVER TIME!': '狂热水果雨！',
+  'YELLOW LIGHT — SLOW!': '黄灯 — 准备急停！',
+  'CHEST REVEAL!': '宝箱揭晓！',
+  'LOADING ARENA MODULE...': '正在加载竞技场模块...',
+  'Pick Next Game!': '选择下一局游戏！',
+  'Voting...': '投票中...',
+
+  // Canvas & Powerup badges
+  MAG: '磁铁',
+  OVR: '超载',
+  BIG: '巨化',
+  ZAP: '震波',
+  SPD: '加速',
+  SHK: '震波',
+  MAP: '藏宝图',
+  HEAL: '治疗',
+  SHIELD: '护盾',
+  'BANK 2X': '2倍金库',
+  '×2 BALL': '双倍球',
+  WIND: '风向',
+  '↺ HOOK': '↺ 弧线',
+  '↻ HOOK': '↻ 弧线',
+  'HOOK+': '长爪',
+  'SPD+': '加速',
+  TRASH: '垃圾桶',
+  CHOP: '切菜台',
+  STOVE: '灶台',
+  'READY ★': '可出餐 ★',
+  CHOPPED: '已切好',
+  RAW: '生肉',
+  'VIP ★': '贵宾 ★',
+  '1. GRAB ▶': '1. 拿食材 ▶',
+  '2. CHOP 🔪 ▶': '2. 切配 🔪 ▶',
+  '3. GRILL 🍳 ▶': '3. 煎烤 🍳 ▶',
+  '🔪CHOP → 🍳COOK': '🔪切菜 → 🍳下锅',
+  '🔥 TAP A/B!': '🔥 连按 A/B 灭火!',
+  '⚠ BURNING!': '⚠ 快烧焦了!',
+
+  // Clash / Card Values & Colors
+  SKIP: '跳过',
+  REV: '反转',
+  WILD: '万能',
+  FLIP: '翻转',
+  'SKIP ALL': '全员跳过',
+  'WILD +3': '万能+3',
+  'DRAW +1': '罚抽+1',
+  'DRAW +2': '罚抽+2',
+  'DRAW +4': '罚抽+4',
+  GOLD: '金色',
+  GREEN: '绿色',
+  PURPLE: '紫色',
+  TEAL: '青色',
+  PINK: '粉色',
+  ORANGE: '橙色',
+  DARK: '暗黑面',
+  LIGHT: '光明面',
+  'JOKER = WILD': '大小王 = 万能牌',
+  TURN: '出牌',
+  RENT: '收租',
+  CW: '顺时针',
+  CCW: '逆时针',
+  'DARK SIDE ACTIVE (+5 / SKIP ALL)': '暗黑面激活（+5 / 全员跳过）',
+  'LIGHT SIDE ACTIVE': '光明面激活',
+  'PICK 1 & PASS': '选1张传牌',
+
+  // Boom Kittens, Property Deal, Flip 7, Royal Bluff, Sushi Draft
+  SAFE: '安全',
+  ATK: '攻击',
+  KO: '淘汰',
+  MIX: '洗牌',
+  PEEK: '偷看',
+  STEAL: '偷牌',
+  BOOM: '炸弹',
+  PROP: '地产',
+  HEIST: '大劫',
+  GUARD: '防御',
+  HIT: '袭击',
+  SWAP: '换牌',
+  TAX: '征税',
+  DEFUSE: '拆弹',
+  'DEFUSE!': '拆弹成功！',
+  'Saves from Boom': '可拆炸弹保命',
+  'End turn no draw': '结束回合免摸牌',
+  'ATTACK x2': '攻击 x2',
+  'Next draws +2': '下家多摸2张',
+  'SEE FUTURE': '预见未来',
+  'Peek top 3 cards': '偷看牌顶3张',
+  SHUFFLE: '洗乱牌堆',
+  'Mix the deck': '打乱牌堆顺序',
+  FAVOR: '强索手牌',
+  'Steal rival card': '抢走对手1张牌',
+  TACOCAT: '玉米卷猫',
+  '+60 bonus pts': '额外 +60 分',
+  'BOOM!': '轰炸！',
+  'Explodes!': '抽到直接爆炸！',
+  'PEEKED!': '已偷看牌顶！',
+  'STOLEN!': '偷牌成功！',
+  '+60 TACOCAT!': '+60 玉米卷猫！',
+  'DEFUSED!': '拆弹成功！',
+  'DEFUSED! +150': '拆弹成功！+150',
+  'BOOM!!': '轰！！炸弹引爆！',
+  'DREW SAFE': '安全摸牌',
+  'SAFE DRAW': '安全摸牌',
+  'EXPLODED!': '已爆炸出局！',
+  'AVOID THE BOOM KITTENS!': '躲避炸弹猫，活到最后！',
+  'BOOM DECK': '炸弹牌堆',
+  ACTION: '行动卡',
+  'DISCARD PILE': '弃牌堆',
+  'LAST ACTION': '最近行动',
+  'PLAY SELECTED': '打出选中牌',
+  'RED AVE': '红霓大街',
+  'BLUE PLAZA': '蓝调广场',
+  'GOLD TOWER': '黄金大厦',
+  'EMERALD PARK': '翡翠公园',
+  '2 = Full Set': '2张即成套',
+  'WILD DEED': '万能地契',
+  'Fits any set': '可配任意套组',
+  'Cash Vault': '现金金库',
+  'PASS GO': '经过起点',
+  'Draw +2 cards': '立即摸2张牌',
+  'COLLECT RENT': '全员收租',
+  'Tax all rivals': '向所有对手收租',
+  'SLY DEAL': '暗度陈仓',
+  'Steal 1 deed': '偷取对手1张地契',
+  'DEBT COLLECT': '强力催债',
+  'Take $4M cash': '收取 $4M 现金',
+  $4M: '$4M 资金',
+  'DEAL BREAKER': '强制夺套',
+  'Heist top deed!': '抢夺对手整套地产！',
+  DEEDS: '地契',
+  PROPERTY: '地产区',
+  'PLAY UP TO 3/TURN': '每回合最多出3张',
+  DEAL: '交易',
+  'No deeds placed yet': '暂未摆出地契',
+  'END TURN': '结束回合',
+  'PLAY CARD': '打出卡牌',
+  'PASS GO +2': '经过起点 +2张',
+  'DEED STOLEN!': '地契被偷走！',
+  'BANKED $2M': '存入 $2M',
+  'DEAL BREAKER!!': '强制夺走全套！',
+  'BANKED $5M': '存入 $5M',
+  'FLIP 7': '翻牌 7',
+  GOAL: '目标',
+  'NO DUPLICATES!': '切忌重复数字！',
+  'BUSTED!': '爆牌了！',
+  'x2 MULT!': '积分翻倍！',
+  'DOUBLE SCORE': '本轮得分翻倍',
+  x2: '×2',
+  'x2 MULTIPLIER!': '×2 积分倍率！',
+  '2ND CHANCE': '复活护盾',
+  '2ND CHANCE!': '获得护盾免爆！',
+  'BONUS MOD': '加分卡',
+  'FLIP 7!! +35!': '凑齐7张不重！+35！',
+  'FLIP 7 UNIQUE CARDS WITHOUT DUPLICATES!': '翻出7张不重复数字即获大奖！',
+  DUKE: '公爵',
+  ASSASSIN: '刺客',
+  AMBASSADOR: '大使',
+  CAPTAIN: '船长',
+  CONTESSA: '女伯爵',
+  INCOME: '基础收入',
+  COUP: '政变',
+  ROYAL: '皇家',
+  'BLUFF COURT': '宫廷吹牛',
+  SECRET: '暗牌',
+  EXILED: '已被放逐',
+  'CHALLENGE WINDOW OPEN!': '质疑窗口开启！',
+  'ROYAL COURT IN SESSION': '宫廷议政进行中',
+  'Tax +3 Coins': '收税 +3 金币',
+  'Steal 2 Coins': '抢劫 2 金币',
+  'Pay 3: Strike': '付3金币暗杀',
+  'Swap +1 Coin': '换牌 +1 金币',
+  'Blocks Assassin': '抵挡刺客暗杀',
+  'DUKE +3 COINS': '公爵征税 +3 金币',
+  '+3 TAX': '+3 税收',
+  'CONTESSA BLOCK!': '女伯爵成功挡杀！',
+  'SWAPPED +1': '大使换牌 +1',
+  'INCOME +1': '基础收入 +1',
+  '+1 COIN': '+1 金币',
+  'DUKE TAX (+3)': '公爵征税 (+3)',
+  'CAPTAIN STEAL (2)': '船长抢劫 (2)',
+  'ASSASSIN STRIKE': '刺客暗杀',
+  'AMBASSADOR SWAP': '大使换牌',
+  'INCOME (+1)': '领取收入 (+1)',
+  'DUKE (+3)': '公爵 (+3)',
+  'CAPTAIN (STEAL)': '船长 (抢劫)',
+  'CALL BLUFF!': '当场拆穿！',
+  'ALLOW CLAIM': '放行相信',
+  'BLUFF ROLES · CATCH LIARS · RULE THE COURT!': '伪装身份 · 抓捕谎言 · 称霸宫廷！',
+  'SUSHI BAR': '回转寿司台',
+  'Dish chosen!': '已选好菜品！',
+  'Picking sushi...': '挑选寿司中...',
+  TEMPURA: '天妇罗',
+  'Pair = 5 pts': '每对 = 5 分',
+  '2x=5': '2份=5',
+  SASHIMI: '刺身拼盘',
+  'Trio = 10 pts': '每3份 = 10 分',
+  '3x=10': '3份=10',
+  DUMPLING: '日式煎饺',
+  COMBO: '连吃加分',
+  WASABI: '山葵酱',
+  '3x Next Nigiri': '下个握寿司×3',
+  '3x!': '3倍!',
+  SALMON: '三文鱼寿司',
+  '+2 (6 w/Wasabi)': '+2分 (蘸山葵6分)',
+  SQUID: '鱿鱼寿司',
+  '+3 (9 w/Wasabi)': '+3分 (蘸山葵9分)',
+  'MAKI x2': '双卷寿司',
+  'Most Maki = +6': '卷王得 +6 分',
+  M2: '2卷',
+  'MAKI x3': '三卷寿司',
+  M3: '3卷',
+  PUDDING: '焦糖布丁',
+  'End Bonus +6': '终局最多 +6',
+  SWEET: '甜品',
+  'PICK LOCKED!': '选牌已锁定！',
+  'MAKI KING +6!': '寿司卷王 +6！',
+  'PICK 1 SUSHI & PASS THE HAND!': '选1份寿司并把牌传给下家！',
+  TRUST: '选择信任',
+
+  // Board games (Pack 1)
+  'LUDO ROYALE': '皇家飞行棋',
+  'ROYAL MATCH COMPLETE!': '皇家对局结束！',
+  'TOKEN DEPLOYED!': '棋子成功起飞！',
+  'SAFE STAR TILE! (+25)': '安全星格！(+25)',
+  'BONUS ROLL (6)!': '掷出6点 · 再掷一次！',
+  'STAR PARTY': '星光派对棋',
+  'STAR PARTY FINALE!': '星光派对大结局！',
+  '2X DOUBLE CANDY!': '2× 双倍骰子糖！',
+  '★ GOLDEN STAR!': '★ 夺得黄金星星！',
+  'LUCKY FOUNTAIN +12!': '幸运喷泉 +12 金币！',
+  'FREE 2X CANDY!': '免费获得 2× 双倍糖！',
+  'REVERSI CLASH': '霓虹黑白棋',
+  'BOARD COMPLETE!': '棋盘对决结束！',
+  'CONNECT 4 DROP': '重力四子棋',
+  'RACK SHIFTED DOWN!': '棋架整体下移！',
+  'RACK COMPLETE — FINAL SCORE!': '棋架填满 — 最终结算！',
+  'ANVIL CRUSH!': '铁砧砸落清列！',
+  'BATTLESHIP SALVO': '海战声呐齐射',
+  'ALL FLEETS SUNK!': '敌方舰队全灭！',
+  'SALVO OPERATION COMPLETE!': '海上齐射行动完成！',
+  'GOLDEN FLAGSHIP SUNK! +90': '击沉黄金旗舰！+90',
+  'DIRECT TORPEDO HIT! +45': '鱼雷直接命中！+45',
+  'SEA MINE DETONATED! -15': '触雷爆炸！-15',
+  'KING JUMP CHECKERS': '王冠跳棋对决',
+  'CROWN KING BOOST!': '加冕成王增益！',
+  'CHECKERS CLASH COMPLETE!': '跳棋对决结束！',
+  'JUMP CAPTURE! +40': '连跳吃子！+40',
+  'CARROM STRIKER': '霓虹卡罗姆弹珠',
+  'POWER SPIN SHOT!': '强力旋球击球！',
+  '👑 RED QUEEN POCKETED! +50': '👑 红皇后入袋！+50',
+  'ALL PUCKS POCKETED!': '全盘母球入袋！',
+  'CARROM MATCH COMPLETE!': '卡罗姆比赛结束！',
+  'DUNGEON QUEST': '地牢勇者探险',
+  'DUNGEON QUEST COMPLETE!': '地牢探险通关！',
+  'HERO POTION (+4 HP / +2 ATK)!': '勇者药水（+4血 / +2攻）！',
+  'GUILD GATE': '公会大门',
+  SLIME: '史莱姆',
+  'IRON CHEST': '铁宝箱',
+  GOBLIN: '哥布林',
+  CAMPFIRE: '营地篝火',
+  'SPIKE PIT': '尖刺陷阱',
+  SKELETON: '骷髅兵',
+  'GOLD CHEST': '黄金宝箱',
+  'ORC BRUTE': '兽人狂战士',
+  SHRINE: '治愈神龛',
+  'DARK MAGE': '暗黑法师',
+  'FIRE RUNE': '烈焰符文',
+  'RELIC VAULT': '圣物宝库',
+  MINOTAUR: '牛头人',
+  SANCTUARY: '圣殿营地',
+  GOLEM: '岩石魔像',
+  'ROYAL HOARD': '皇家宝藏',
+  DRAKE: '飞龙',
+  ALTAR: '祈福祭坛',
+  'DRAGON BOSS': '终极巨龙BOSS',
+
+  // Pack 2: Chinese Viral Arcade & Cards
+  'MELON MERGE': '合成大西瓜',
+  'DROP & MERGE INTO A GIANT MELON!': '精准投放合成大西瓜！',
+  'TILE TRIPLE': '羊了个羊三消',
+  'MATCH 3 IDENTICAL TILES — DON’T FILL YOUR TRAY!': '三消相同方块 — 千万别塞满槽位！',
+  "MATCH 3 IDENTICAL TILES — DON'T FILL YOUR TRAY!": '三消相同方块 — 千万别塞满槽位！',
+  'BLOCK HOP': '跳一跳霓虹',
+  'HOLD A TO CHARGE JUMP — LAND ON CENTER FOR STREAKS!': '长按 A 蓄力跳跃 — 落中靶心连击翻倍！',
+  'PLATFORM LEAP': '疯狂往上跳',
+  'CLIMB HIGHER THAN THE RISING NEON LAVA!': '不断向上跃升，逃离上升岩浆！',
+  'HEAD BOUNCE!': '踩头弹跳！',
+  'EGG RUSH': '蛋仔冲冲冲',
+  'BOUNCE, ROLL & BLAST THROUGH THE FINISH GATE!': '翻滚冲撞冲向终点线！',
+  'GOOSE ALERT': '鹅鸭杀潜行',
+  KITCHEN: '厨房',
+  LIBRARY: '图书馆',
+  BOILER: '锅炉房',
+  GARDEN: '花园',
+  'BELL TOWER': '钟楼',
+  VAULT: '金库',
+  'GEESE: REPAIR ALL 6 STATIONS! DUCKS: STRIKE IN STEALTH!': '大鹅：修好6处设备！坏鸭：暗中偷袭破坏！',
+  'SABOTAGE!': '破坏警报！',
+  'DUCK SPOTTED!': '发现坏鸭！',
+  'QUACKED!': '嘎嘎遭袭击！',
+  'GEESE WIN! MANOR SECURED!': '大鹅阵营胜利！庄园已守住！',
+  'DUCKS WIN! FLOCK ELIMINATED!': '坏鸭阵营胜利！鹅群已全灭！',
+  'HOTPOT RUSH': '火锅捞捞乐',
+  'SNATCH GOLDEN COOKED WAGYU — DODGE FIERY CHILIES!': '抢夹黄金熟和牛 — 躲避暴辣红椒！',
+  'SO SPICY! -60': '太辣了！-60',
+  'CLAW MANIA': '抓娃娃狂潮',
+  'DROP YOUR CLAW ON GOLDEN DRAGONS & PLUSHIES!': '对准金龙和玩偶下爪！',
+  'BOOM! -100': '炸弹！-100',
+  'OTHER PLAYERS: PRESS A TO VOTE DONE!': '其余玩家：按 A 投票确认完成！',
+  'LANDLORD (地主)': '地主',
+  'PEASANT (农民)': '农民',
+  BIDDING: '抢地主中',
+  'BIDDING FOR LANDLORD (1× — 3×)': '叫分抢地主（1× — 3×）',
+  'FREE LEAD — PLAY ANY COMBO': '自由出牌 — 任意牌型领出',
+  'ROCKET! 王炸 ×2': '王炸！！倍数 ×2',
+  PASS: '不出',
+  'BID 1×': '叫1分',
+  'BID 2×': '叫2分',
+  'BID 3×': '叫3分',
+  'PASS BID': '不叫',
+  'SMART PLAY': '智能出牌',
+  DRAGON: '箭牌/中发白',
+  WAN: '万字牌',
+  'HU READY! 可胡': '听牌可胡！',
+  'EXHAUSTIVE DRAW! 流局': '流局平盘！',
+  'HU! 胡牌': '胡牌大胜！',
+  'PURE MODE 齋': '纯斋模式',
+  '1s ARE WILD': '1点当万能',
+  'PURE 齋': '纯斋无万能',
+  '1s WILD': '1点万能',
+  'OPENING BID...': '首家叫骰中...',
+  'CALL LIAR! 开骰': '开骰拆穿！',
+  CLUE: '线索词',
+  VOTE: '投票',
+  'CLUE PHASE': '发言线索阶段',
+  'VOTE OUT THE SPY!': '投票揪出谁是卧底！',
+  'CHECK YOUR SECRET WORD ON YOUR PHONE': '请在手机查看你的秘密词语',
+  'CLUES ARE IN! VOTE OUT THE SPY!': '线索已亮明！请投票投出卧底！',
+  WEREWOLF: '狼人',
+  SEER: '预言家',
+  VILLAGER: '村民',
+  'HUNT TARGET': '袭击目标',
+  'PEEK ROLE': '查验身份',
+  'EXILE VOTE': '放逐投票',
+  'VILLAGE WINS! ALL WEREWOLVES EXILED!': '好人阵营获胜！所有狼人已被放逐！',
+  'WEREWOLVES WIN THE MIDNIGHT HUNT!': '狼人阵营获胜！主宰午夜！',
+  'NIGHT 1 — CHECK YOUR SECRET ROLE & ACT!': '第1夜 — 查看底牌并执行夜晚行动！',
+  'MATCH THE GOLD ENDING LETTER / CHARACTER!': '接上金色尾字或英文首字母！',
+  'WRONG LINK!': '接龙不匹配！',
+  'TIME OUT!': '超时断链！',
+
+  // Pack 3: Global Viral Arcade & Cards
+  'CLIMB TO THE SKY!': '一路攀爬冲向云霄！',
+  'CUT OFF RIVALS TO BURST LOOT!': '绕行拦截对手撞碎得分！',
+  'ABSORB PELLETS & DEVOUR SMALLER RIVALS!': '吞噬光点变大并吃掉小玩家！',
+  'LOOP BACK HOME TO CLAIM TURF!': '画圈闭合领地霸占全图！',
+  'CHOOSE LEFT OR RIGHT GLASS — ONE HOLDS!': '二选一玻璃桥 — 只有一边踩不碎！',
+  'ROUND 1 · PULL ON THE GOLD PULSE!': '第1局 · 趁金光脉冲猛拉绳！',
+  'FLAP THROUGH PIPES & GRAB GOLD RINGS!': '穿梭霓虹水管收集金环！',
+  'LEAP CACTI & DUCK PTERODACTYLS!': '跳仙人掌、低头躲翼龙！',
+  'MERGE!': '合并升级！',
+  'SLIDE & MERGE TO 2048!': '滑动合成冲刺 2048！',
+  'BOARD RESET': '棋盘刷新重开',
+  'DIG SAFE CELLS · FLAG MINES FOR +60!': '排雷挖格 · 插旗标雷 +60！',
+  'DROP YOUR PIN ON THE WORLD MAP!': '在世界地图投下精准图钉！',
+  'DIAL YOUR NEEDLE TO THE SECRET ZONE!': '转动指针命中隐藏共鸣区！',
+  '5-LTR': '5字母词',
+  'TAP A 5-LETTER WORD ON YOUR PHONE!': '在手机点选5字母谜底单词！',
+  'POP CULTURE': '流行文化',
+  'FOOD & ASIA': '亚洲美食',
+  GAMING: '电子游戏',
+  SCIENCE: '科学常识',
+  INTERNET: '互联网',
+  WORLD: '世界地理',
+  ANIMALS: '动物百科',
+  TECH: '前沿科技',
+  MOVIES: '电影娱乐',
+  MUSIC: '音乐艺术',
+  'Tropical Fruit': '热带水果',
+  'Sci-Fi Tech': '科幻科技',
+  'Wild Animal': '野生动物',
+  'Party Food': '派对美食',
+  'Music Gear': '音乐乐器',
+  Weather: '自然天气',
+  Mars: '火星',
+  Saturn: '土星',
+  Venus: '金星',
+  Mercury: '水星',
+  'Nasi Lemak': '椰浆饭',
+  Bibimbap: '韩式拌饭',
+  Paella: '西班牙海鲜饭',
+  Risotto: '意式炖饭',
+  'Bright Red': '亮红色',
+  'Neon Green': '霓虹绿',
+  'Dark Blue': '深蓝色',
+  Gold: '金色',
+  '1 Heart': '1颗心',
+  '2 Hearts': '2颗心',
+  '3 Hearts': '3颗心',
+  '5 Hearts': '5颗心',
+  'South Korea': '韩国',
+  Thailand: '泰国',
+  Japan: '日本',
+  Switzerland: '瑞士',
+  Cheetah: '猎豹',
+  'Grizzly Bear': '灰熊',
+  Kangaroo: '袋鼠',
+  Hippo: '河马',
+  High: '高',
+  HyperText: '超文本',
+  Home: '首页',
+  Host: '主机',
+  Pixar: '皮克斯',
+  DreamWorks: '梦工厂',
+  'Studio Ghibli': '吉卜力工作室',
+  Illumination: '照明娱乐',
+  '64 Keys': '64键',
+  '76 Keys': '76键',
+  '88 Keys': '88键',
+  '100 Keys': '100键',
+  'SLAM THE RIGHT COLOR ON YOUR PHONE!': '在手机极速拍下正确答案颜色！',
+  CODE: '特工代号',
+  SCANNING: '破译扫描中',
+  'ASSASSIN!': '踩到黑衣刺客！',
+  NEUTRAL: '路人卡',
+  DECOY: '假答案',
+  'TRUTH?': '是真相？',
+  'PLOTTING LIE': '编造假答案中',
+  'LIE PLANTED': '已埋下假答案',
+  GUESSING: '辨真伪投票中',
+  VOTED: '已投票',
+  'PLANT A LIE': '编一条假知识',
+  'SPOT THE TRUTH': '揪出唯一真相',
+  REVEAL: '真相揭晓',
+  'PHASE 1: PLANT A BELIEVABLE LIE ON YOUR PHONE!': '第1步：在手机挑选以假乱真的假答案！',
+  'PHASE 2: SPOT THE REAL TRUTH!': '第2步：慧眼识破谎言找出真相！',
+  'CHECK YOUR PHONE · PICK A SNEAKY LIE!': '查看手机 · 选一个坑人的假答案！',
+  '✓ REAL TRUTH': '✓ 真正冷知识',
+
+  // Pack 4: Malaysian Classics
+  'FAR END — TOUCH & RETURN': '底线区 — 摸线即返！',
+  'START & HOME GOAL': '起点与返程终点线',
+  'TAGGED!': '被抓住了！',
+  'OFF DESK!': '掉出课桌！',
+  'OUT OF RPM!': '陀螺停转！',
+  'KNOCK MARBLES OUT OF THE RING!': '将弹珠撞出圆圈之外！',
+  'SEPAK TAKRAW · 3 TOUCHES!': '藤球对决 · 最多3次触球！',
+  'LIPAT SPIKE!': '腾空倒钩扣杀！',
+  'OVER 3 TOUCHES! RIGHT POINT!': '超3次触球犯规！右队得分！',
+  'OVER 3 TOUCHES! LEFT POINT!': '超3次触球犯规！左队得分！',
+  'DODGE!': '极限闪避！',
+  'STOMPED! +240': '精准踩鞋！+240',
+  'ROUND 2 · RUMAH TERBAKAR!': '第2回合 · 烧屋禁坑开启！',
+  'CONGKAK · SOW CLOCKWISE!': '播棋 · 顺时针播种收珠！',
+  'FREE TURN!': '再走一轮！',
+  Spectator: '观战中',
+  'OPEN WITH 3♦!': '必须包含 ♦3 首出！',
+  'TOP-CARD GUARD ACTIVE!': '下家报单 — 顶大警戒中！',
+  'LEAD 3♦': '♦3 首出',
+  'FREE LEAD': '自由领出',
+  'INVALID COMBO!': '无效牌型组合！',
+  'SMART HINT': '智能选牌',
+  'PASS TRICK': '过牌不出',
+  'STRAIGHT FLUSH!': '同花顺！',
+  'STRAIGHT (蛇)': '顺子（蛇）',
+  'BANKER (庄)': '庄家',
+  'HIT!': '要牌！',
+  'RUN (PUSH)': '15点平跑',
+  'RUN (15点跑)': '15点走人',
+  STAND: '停牌不摸',
+  'HIT (+1 CARD)': '加摸1张',
+  '15-PT RUN (跑)': '15点跑路',
+  'OPEN 3+ CARDS': '开3张+闲家',
+  'OPEN ALL': '全开比牌',
+  'PURE NGAU': '纯牛无赖子',
+  '3 ↔ 6 WILD ON': '3/6 互换赖子开',
+  'NO NGAU': '无牛散牌',
+  'FIVE GONG ×5!': '五公 ×5 倍！',
+  'NGAU TUNG ×2!': '牛冬 ×2 倍！',
+  'AUTO BEST NGAU': '一键最优牛',
+  'READY!': '已准备！',
+  'LOCKED!': '已锁定！',
+
+  // Pack 5, 6, 7: Retro, Sports, Chaos, Strategy Classics
+  'GRAB CORNER ORBS TO CHOMP GHOSTS!': '吃角落能量豆反杀霓虹幽灵！',
+  'FRESH PELLET WAVE SPAWNED!': '新一波能量豆已刷新！',
+  'SHATTER BRICKS & UNLEASH LASER PADDLES!': '击碎砖块激活激光挡板！',
+  'NEW NEON BRICK WALL!': '全新霓虹砖墙降临！',
+  'MULTI-BALL UNLEASHED!': '多球分裂爆发！',
+  'WAVE 1 · BLAST THE ALIEN ARMADA!': '第1波 · 轰爆外星舰队！',
+  'MYSTERY GOLDEN UFO SPOTTED (+150)!': '神秘黄金飞碟出没 (+150)！',
+  'CLEAR MULTI-LINES TO SEND GARBAGE!': '一次消多行向对手空投垃圾行！',
+  'DODGE TRAFFIC · RIDE LOGS TO GOLDEN LILY PADS!': '躲避车流 · 踏木头冲向金莲座！',
+  'CLIMB LADDERS & VAULT ROLLING BARRELS!': '爬梯登顶 · 跳越滚落铁桶！',
+  'WHACK MOLES & GOLDEN KINGS · DODGE BOMBS!': '痛打地鼠与金冠王 · 小心炸弹！',
+  'BOOM -45': '炸弹 -45',
+  'AIM THE LANE & SLAM BEAT ON THE GLOW LINE!': '踩准节拍音轨在光线下重击！',
+  'SNIPE FLYING CLAYS & GOLDEN SAUCERS!': '狙击飞盘与黄金飞碟！',
+  'BANK SHOTS & POWER SMASHES!': '墙壁反弹球与强力重击！',
+  'HOLD ROLL TO HIT THE 100-PT CORNER RINGS!': '长按蓄力投进角落 100 分洞！',
+  'DROP BLOCKS FLUSH FOR GOLDEN STREAKS!': '稳稳对齐盖楼赢取黄金连击！',
+  'DRILL FOR DEEP DIAMONDS & CRUSH MONSTERS!': '深钻挖钻石并砸碎地底怪物！',
+  'BOULDER CRUSH (+150)!': '巨石砸怪 (+150)！',
+  'MATCH 3+ BUBBLES FOR CLUSTER POPS!': '三消同色泡泡连锁爆破！',
+  'FRESH CRYSTAL WAVE!': '全新水晶泡泡阵刷新！',
+  'ADD HOOK SPIN & BLAST ALL 10 PINS!': '加弧线旋转全倒 10 个瓶！',
+  'DROP COINS & TRIGGER GEM AVALANCHES!': '投币推落红宝石狂潮！',
+  'HOLD A TO CHARGE — HIT THE SWEET SPOT!': '长按 A 蓄力 — 命中黄金投篮区！',
+  'AIM TOP CORNERS & STRIKE PAST THE KEEPER!': '瞄准死角破门得分！',
+  'HOLE 1 — BANK OFF WALLS TO SINK THE CUP!': '第1洞 — 利用墙面反弹一杆进洞！',
+  'AIM UPWIND & RELEASE (A) FOR 100-PT BULLSEYES!': '留意风向拉弓瞄准靶心 100 分！',
+  'GUARD COUNTER-HOOKS TO SCORE KNOCKOUTS!': '防御反击重拳 KO 对手！',
+  'KO +150!': '击倒 KO +150！',
+  'PRESS A FOR SMASH · B FOR CURVE SPIN!': 'A 猛扣杀 · B 搓旋转球！',
+  'SWING (A) WHEN THE BALL ENTERS THE PLATE RING!': '球进本垒圈时按 A 挥棒！',
+  'GRAB DODGEBALLS — PRESS B TO CATCH HOT THROWS!': '抢球砸人 — 按 B 空手接烈焰球！',
+  'DOSUKOI! BLAST RIVALS OFF THE GOLDEN DOHYO!': '相扑突进！把对手推出黄金土俵！',
+  'TAP PADDLE (A) & STEER THROUGH GREEN GATES!': '划桨加速穿越绿色旗门！',
+  'CATCH THE HYPER DISC & CURVE THROW INTO THE RIVAL GOAL!': '接住飞盘弧线抛进敌方球门！',
+  'LEAP AT THE NET WITH A FOR LIGHTNING SMASHES!': '网前按 A 起跳闪电劈杀！',
+  'POCKET COLORED BALLS & GOLDEN +150 8-BALLS!': '击落彩球与 +150 黄金8号球！',
+  'FRESH RACK SPAWNED!': '新球阵已摆好！',
+  'LUNGE (A) TO IMPALE FLANKS · SHIELD (B) TO PARRY!': 'A 长枪突刺 · B 举盾格挡！',
+  'HOP THE LASER BEAM & SNATCH GEMS!': '跳越旋转激光抢宝石！',
+  'LEAP TO GREEN ISLANDS BEFORE RED ONES SINK!': '红岛下沉前快跳往绿岛！',
+  'PASS THE TICKING BOMB BEFORE 0.0s!': '倒计时归零前把炸弹传给别人！',
+  'ORBIT THE RING — DIVE INTO GREEN PODS WHEN ALARM DROPS!': '绕圈抢位 — 警报响起快钻进绿舱！',
+  'SCRAMBLE! CLAIM A GLOWING THRONE!': '抢椅子！快占领发光王座！',
+  'DANCE AROUND THE ARENA!': '全场霓虹热舞！',
+  'ZERO FRICTION! DRIFT & BUMP RIVALS OFF THE GLACIER!': '零摩擦冰面漂移，把对手撞下冰川！',
+  'DODGE RED RINGS — COLLECT GOLDEN STAR CORES!': '躲避红圈 — 抢占金星核心！',
+  'HOLD THE MOVING GOLDEN CROWN ZONE!': '站稳移动黄金皇冠圈内加分！',
+  'HOLD DUCK (A) UNDER RED LASERS & SNATCH DIAMONDS!': '按住 A 下蹲躲激光抢钻石！',
+  'PATIENT ZERO HUNTING! SURVIVE OR INFECT EVERYONE!': '零号病人来袭！逃生或感染全员！',
+  'SHOVE (B) RIVALS UNDER FALLING ANVIL SHADOWS!': '按 B 把对手推进下坠铁砧阴影下！',
+  'BALANCE THE SKY SEESAW & HOLD GRIP (B) ON STEEP SLOPES!': '空中跷跷板保持平衡，斜坡按 B 抓紧！',
+  'DODGE CANYON BUZZ-SAWS & RIDE THE ELASTIC TETHER!': '借弹力绳甩飞躲避峡谷锯片！',
+  'PAINT FLOOR TILES & DROP CONFETTI BOMBS (A)!': '疯狂涂鸦地板并投放彩带炸弹(A)！',
+  'EVADE SWINGING STEEL WRECKING BALLS!': '躲避摆动的重型钢制破坏球！',
+  'RUN OFF BLINKING RED TRAPDOORS BEFORE THEY DROP!': '离开闪烁红门 — 地板马上塌陷！',
+  'TRAPDOORS OPENED!': '陷阱地板开启！',
+  'FIND A SOLID GREEN SQUARE!': '快找稳固绿格子站稳！',
+  'DROP STONES TO LINK 3, 4 & 5-IN-A-ROW!': '落子连珠冲刺三连、四连、五子连线！',
+  'BOARD FULL — FRESH GOMOKU ROUND!': '棋盘已满 — 开启新一轮五子棋！',
+  'CAPTURE GOLD PAWNS & LEAP OVER RIVALS!': '操控骑士L跳吃金币并跨步抢旗！',
+  'CONNECT MATCHING PIPS TO EXTEND THE DOMINO CHAIN!': '接上对应点数延展多米诺长龙！',
+  'CLAIM HONEYCOMB TILES (A) & CONVERT RIVALS (B)!': '按 A 占领蜂窝格，按 B 转化邻格！',
+  'PICK A RUNNER & ROLL DICE (A) TO RACE PAST POINT 24!': '选棋掷骰全速向24点终点归位！',
+  'SCOOP GLOWING PITS (A) TO SOW & CAPTURE OPPOSITE GEMS!': '按 A 捞穴撒宝并吃光对岸宝石！',
+  'HOLD A TO CHARGE GRANITE STONE — SWEEP (B) INTO THE GOLD BUTTON!': '按 A 蓄力推石壶 — 按 B 猛烈扫冰！',
+  'SELECT 3-OF-A-KIND OR 3-CARD RUNS ON YOUR PHONE & TAP MELD!': '在手机凑齐三条或同花顺点击凑组！',
+  'MELD 3+': '亮牌凑组',
+  'SWAP 1': '换1张',
+  'SWEPT CLEAN TRICK +80!': '清空红心完美拿墩 +80！',
+  'ROYAL FLUSH': '皇家同花顺',
+  'STRAIGHT FLUSH': '同花顺',
+  'FOUR OF A KIND': '四条炸弹',
+  'FULL HOUSE': '葫芦三带二',
+  FLUSH: '同花',
+  STRAIGHT: '顺子',
+  'THREE OF A KIND': '三条',
+  'TWO PAIR': '两对',
+  'ONE PAIR': '一对',
+  'HIGH CARD': '高牌',
+  'FOUR OF A KIND!': '四条炸弹！',
+  'FULL HOUSE!': '葫芦！',
+  'FLUSH!': '同花！',
+  'STRAIGHT!': '顺子！',
+  LOCKED: '已锁牌',
+  'DRAWING...': '选牌换牌中...',
+  READY: '已出牌',
+  'SELECT WEAK CARDS TO SWAP OR LOCK YOUR 5-CARD POKER HAND!': '换掉弱牌或直接锁定5张扑克牌型！',
+  'LOCK HAND': '锁牌摊牌',
+  'SWAP SELECTED': '换掉选中',
+  'FIRE > NATURE > FROST > FIRE · PICK YOUR ELEMENT!': '火 克 自然 · 自然 克 冰 · 冰 克 火 · 选元素！',
+  'ELEMENTS REVEALED!': '元素揭晓对决！',
+  ARCANA: '奥术牌',
+  FIRE: '火',
+  NATURE: '自然',
+  FROST: '冰',
+  SUN: '太阳',
+  'Wild Trump': '万能王牌',
+  'Beats Nature': '克制自然',
+  'Beats Frost': '克制寒冰',
+  'Beats Fire': '克制火焰',
+  'PICK 2 CARDS CLOSEST TO NATURAL 9 (MOD 10)!': '选2张牌个位相加最接近9点！',
+  'BET 2 CARDS': '亮2张牌',
+  'FLIP MATCHING PAIRS ACROSS THE 12-CARD BOARD!': '翻开配对消除12张记忆卡！',
+  'BOARD CLEARED — FRESH 12 CARDS DEALT!': '全部消除 — 新一轮12张牌洗好！',
+  'PLAY CARDS TO CLAIM BOARD NUMBERS — JACKS ARE WILD!': '出牌占领对应大屏数字格 — J 万能！',
+  'FULL SEQUENCE BOARD — FRESH GRID RESET!': '序列盘满 — 全新棋盘重置！',
+  'SWAP HAND': '换一张牌',
+
+  // Misc player names/bot colors fallback
+  Pilot: '飞行员',
+  Racer: '赛车手',
+  Player: '玩家',
+  'Coral Red': '珊瑚红',
+  Tangerine: '活力橙',
+  'Arcade Lime': '电玩绿',
+  Magenta: '霓虹粉',
+  Cyan: '青蓝',
+
+  // Final audit additions (Kitchen, Arena Popups, Malaysian, GeoPin, Fibbage, Chaos Wheel)
+  BANKER: '庄家',
+  NGAU: '牛牛',
+  HINT: '提示',
+  'BLUE TEAM': '蓝队',
+  'RED TEAM': '红队',
+  '+1 ♥ LIFE!': '+1 ♥ 生命！',
+  '+20 BLOCK': '+20 冰块！',
+  '+35 GEM!': '+35 宝石！',
+  'LAVA KO!': '掉入岩浆出局！',
+  'FROZEN +65!': '成功冰冻 +65！',
+  'FULL ♥ +40': '满血复活 +40！',
+  'HOLO RETURN!': '全息回球！',
+  'TURBO SPIKE!': '极速重扣！',
+  'HOLO-KEEPER ZONE (SPIKE TO SCORE!)': '全息守门区（扣杀破门！）',
+  'RUNNERS: THAW FROZEN FRIENDS!': '逃跑者：快解救被冰冻的队友！',
+  'SWEEP FLASHLIGHTS TO EXPOSE THE PHANTOM!': '扫射强光手电找出隐身幽灵！',
+  'PASS THE BOMB BEFORE IT BLOWS!': '倒计时爆炸前把炸弹传出去！',
+  'PLAY FLIP TO UNLEASH THE DARK SIDE!': '打出翻转牌切换暗黑面！',
+  'CHOPPED! → GRILL': '切好了！→ 快下锅煎烤',
+  'COOKED! GRAB IT!': '煎好了！快拿去上菜！',
+  'PREP READY!': '备菜完成！',
+  TRASHED: '已丢弃',
+  '🔥 STOVE FIRE! TAP A/B!': '🔥 灶台起火！快按 A/B 灭火！',
+  '🧯 FIRE OUT +30!': '🧯 成功灭火 +30！',
+  '🫧 CLEAN DISHES +45!': '🫧 洗净餐盘 +45！',
+  'FAR ZONE! +120': '远端突围！+120',
+  'FULL CROSSING! +280': '全线冲关！+280',
+  'TINDIH PIN! +240': '成功压制！+240',
+  'Petronas Twin Towers': '吉隆坡双子塔',
+  'Shibuya Crossing & Mt. Fuji': '涩谷十字路口与富士山',
+  'Eiffel Tower & Seine': '埃菲尔铁塔与塞纳河',
+  'Statue of Liberty': '自由女神像',
+  'Great Pyramids of Giza': '吉萨大金字塔',
+  'Sydney Opera House': '悉尼歌剧院',
+  'Christ the Redeemer': '里约救世基督像',
+  'Great Wall & Forbidden City': '万里长城与故宫',
+  'Big Ben & Tower Bridge': '大本钟与伦敦塔桥',
+  'Marina Bay Sands': '新加坡滨海湾金沙',
+  'Guinea Pig': '豚鼠 (天竺鼠)',
+  Radioactive: '放射性',
+  Unicorn: '独角兽',
+  Taller: '更高',
+  Edible: '可以食用',
+  'HYPER TURBO 1.35×': '极速狂飙 1.35×',
+  '2× SCORE MADNESS': '双倍积分狂潮',
+  'EARLY INFERNO': '半程烈焰',
+  'MIRROR CURSE': '镜像反转',
+  'GOLDEN OVERDRIVE': '黄金超载',
 };
 
 function translateOrdinalZh(ord: string): string {
@@ -2349,6 +3015,678 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^NEW BID \$(\d+)!$/i))) {
     return `最新出价 $${m[1]}！`;
   }
+
+  // --- Card Deck & Card Private States (Packs 1–7) ---
+  if ((m = trimmed.match(/^BOOM RISK (\d+)% · DECK (\d+)$/i))) {
+    return `爆炸风险 ${m[1]}% · 牌库 ${m[2]} 张`;
+  }
+  if ((m = trimmed.match(/^BOOM DECK:\s*(\d+)$/i))) {
+    return `炸弹牌库：${m[1]} 张`;
+  }
+  if ((m = trimmed.match(/^BOMBS HIDDEN:\s*(\d+)\s+·\s+RISK\s+(\d+)%$/i))) {
+    return `暗藏炸弹：${m[1]} · 爆率 ${m[2]}%`;
+  }
+  if ((m = trimmed.match(/^DRAWS OWED:\s*x(\d+)$/i))) {
+    return `待摸次数：×${m[1]}`;
+  }
+  if ((m = trimmed.match(/^DRAW \((\d+) LEFT\)$/i))) {
+    return `摸牌 (还需 ${m[1]} 张)`;
+  }
+  if ((m = trimmed.match(/^DRAW x(\d+)$/i))) {
+    return `连摸 ×${m[1]}`;
+  }
+  if ((m = trimmed.match(/^DREW \+(\d+)$/i))) {
+    return `摸了 +${m[1]} 张`;
+  }
+  if ((m = trimmed.match(/^DEFUSE x(\d+)$/i))) {
+    return `拆弹卡 ×${m[1]}`;
+  }
+  if ((m = trimmed.match(/^DECK:\s*(\d+)$/i))) {
+    return `牌库：${m[1]} 张`;
+  }
+  if ((m = trimmed.match(/^SETS (\d+)\/(\d+) · BANK \$(\d+)M · PLAYS (\d+)$/i))) {
+    return `套组 ${m[1]}/${m[2]} · 资金 $${m[3]}M · 可出 ${m[4]} 张`;
+  }
+  if ((m = trimmed.match(/^GOAL:\s*(\d+)\s+FULL SETS\s+·\s+PLAYS LEFT:\s*(\d+)$/i))) {
+    return `目标：${m[1]} 套全产 · 剩余可出 ${m[2]} 张`;
+  }
+  if ((m = trimmed.match(/^FIRST TO (\d+) PROPERTY SETS WINS!$/i))) {
+    return `率先凑齐 ${m[1]} 套地产获胜！`;
+  }
+  if ((m = trimmed.match(/^(\d+) Sets · \$(\d+)M Bank$/i))) {
+    return `${m[1]} 套地产 · $${m[2]}M 银行`;
+  }
+  if ((m = trimmed.match(/^(\d+)\/(\d+) sets · \$(\d+)M$/i))) {
+    return `${m[1]}/${m[2]} 套 · $${m[3]}M`;
+  }
+  if ((m = trimmed.match(/^\$(\d+)M · (\d+)\/(\d+) SETS$/i))) {
+    return `$${m[1]}M · ${m[2]}/${m[3]} 套`;
+  }
+  if ((m = trimmed.match(/^WILD ([A-Z]+)$/i))) {
+    return `万能${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^BANKED \$(\d+)M$/i))) {
+    return `存入 $${m[1]}M`;
+  }
+  if ((m = trimmed.match(/^\+\$(\d+)M$/i))) {
+    return `+$${m[1]}M`;
+  }
+  if ((m = trimmed.match(/^RENT \+\$(\d+)M$/i))) {
+    return `收租 +$${m[1]}M`;
+  }
+  if ((m = trimmed.match(/^STOLE ([A-Z]+)!$/i))) {
+    return `偷走${translateGameText(m[1], lang)}地契！`;
+  }
+  if ((m = trimmed.match(/^DEBT \+\$(\d+)M$/i))) {
+    return `讨债 +$${m[1]}M`;
+  }
+  if ((m = trimmed.match(/^(\d+)\/7 CARDS · \+(\d+) PTS$/i))) {
+    return `${m[1]}/7 张不重 · +${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+)\/7 unique$/i))) {
+    return `${m[1]}/7 张不同`;
+  }
+  if ((m = trimmed.match(/^FLIP 7 UNIQUE = \+(\d+) JACKPOT · GOAL (\d+) PTS$/i))) {
+    return `7张不重 = +${m[1]} 大奖 · 目标 ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts total$/i))) {
+    return `累计 ${m[1]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts · \+(\d+)$/i))) {
+    return `${m[1]} 分 · +${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(\d+) PTS \(\+(\d+)\)$/i))) {
+    return `${m[1]} 分 (+${m[2]})`;
+  }
+  if ((m = trimmed.match(/^FLIPPED (\d+)$/i))) {
+    return `翻出 ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^BUST \((\d+)\)!$/i))) {
+    return `撞牌爆了 (${m[1]})！`;
+  }
+  if ((m = trimmed.match(/^\+(\d+) BONUS$/i))) {
+    return `+${m[1]} 加分`;
+  }
+  if ((m = trimmed.match(/^BANKED \+(\d+)$/i))) {
+    return `安全入账 +${m[1]}`;
+  }
+  if ((m = trimmed.match(/^STAY \+(\d+)$/i))) {
+    return `见好就收 +${m[1]}`;
+  }
+  if ((m = trimmed.match(/^HIT \(FLIP CARD\)$/i))) {
+    return '继续翻牌 (+1张)';
+  }
+  if ((m = trimmed.match(/^STAY \(\+(\d+) PTS\)$/i))) {
+    return `收手 (+${m[1]} 分)`;
+  }
+  if ((m = trimmed.match(/^COINS: (\d+) · INFLUENCE: (\d+)\/2$/i))) {
+    return `金币：${m[1]} · 势力：${m[2]}/2`;
+  }
+  if ((m = trimmed.match(/^COURT ROUND (\d+)$/i))) {
+    return `宫廷第 ${m[1]} 轮`;
+  }
+  if ((m = trimmed.match(/^ALIVE:\s*(\d+)$/i))) {
+    return `存活：${m[1]} 人`;
+  }
+  if ((m = trimmed.match(/^(.+) CLAIMS$/i))) {
+    return `${m[1]} 宣称`;
+  }
+  if ((m = trimmed.match(/^Roles · (\d+) Coins$/i))) {
+    return `亮牌 · ${m[1]} 金币`;
+  }
+  if ((m = trimmed.match(/^Exiled · (\d+) pts$/i))) {
+    return `已放逐 · ${m[1]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) coins · (\d+) roles$/i))) {
+    return `${m[1]} 金币 · ${m[2]} 张身份`;
+  }
+  if ((m = trimmed.match(/^(\d+) COINS$/i))) {
+    return `${m[1]} 金币`;
+  }
+  if ((m = trimmed.match(/^COUP -> (.+)!$/i))) {
+    return `政变消灭 -> ${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^STOLE (\d+)$/i))) {
+    return `抢劫 +${m[1]} 金币`;
+  }
+  if ((m = trimmed.match(/^LOST (\d+)!$/i))) {
+    return `失去 ${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) · PLATE \+(\d+) · TOTAL (\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 轮 · 本盘 +${m[3]} · 总分 ${m[4]}`;
+  }
+  if ((m = trimmed.match(/^PICK (\d+)\/(\d+) · (\d+)s TO DRAFT$/i))) {
+    return `第 ${m[1]}/${m[2]} 选 · 还剩 ${m[3]} 秒选牌`;
+  }
+  if ((m = trimmed.match(/^PICK (\d+)\/(\d+) · REVEALING PLATES!$/i))) {
+    return `第 ${m[1]}/${m[2]} 选 · 正在结算餐盘！`;
+  }
+  if ((m = trimmed.match(/^STEP (\d+)\/(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 步`;
+  }
+  if ((m = trimmed.match(/^(\d+) pts · (\d+) Puddings$/i))) {
+    return `${m[1]} 分 · ${m[2]} 份布丁`;
+  }
+  if ((m = trimmed.match(/^(\d+) CARDS$/i))) {
+    return `${m[1]} 张牌`;
+  }
+  if ((m = trimmed.match(/^(\d+) cards · ([A-Z]+)$/i))) {
+    return `${m[1]} 张牌 · ${translateGameText(m[2], lang)}`;
+  }
+  if ((m = trimmed.match(/^PENALTY STACK:\s*\+(\d+)$/i))) {
+    return `加牌罚抽堆：+${m[1]}`;
+  }
+  if ((m = trimmed.match(/^ACTIVE COLOR:\s*(.+)$/i))) {
+    return `当前颜色：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^DIR:\s*(CW|CCW)$/i))) {
+    return `方向：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^([↻↺])\s*(\d+)s TURN\s+·\s+#(\d+)$/i))) {
+    return `${m[1]} ${m[2]}秒回合 · 第${m[3]}轮`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) · BLUFF CHECK (\d+)s$/i))) {
+    return `第 ${m[1]} 轮 · 抓谎时刻 ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) · (\d+)s TURN$/i))) {
+    return `第 ${m[1]} 轮 · ${m[2]}秒出牌`;
+  }
+  if ((m = trimmed.match(/^Select 1[–-]3 cards & claim ([A-Z0-9]+)! \((\d+)s\)$/i))) {
+    return `选 1–3 张牌并宣称「${m[1]}」！(${m[2]}秒)`;
+  }
+  if ((m = trimmed.match(/^(\d+)× ([A-Z0-9]+)\?$/i))) {
+    return `${m[1]} 张 ${m[2]}?`;
+  }
+  if ((m = trimmed.match(/^Stack \+2\/\+4 or Draw \+(\d+)!$/i))) {
+    return `接力 +2/+4 或罚摸 +${m[1]} 张！`;
+  }
+  if ((m = trimmed.match(/^Your turn! Tap a glowing card \((\d+)s\)$/i))) {
+    return `轮到你了！点击高亮卡牌 (${m[1]}秒)`;
+  }
+
+  // --- Pack 1 New 8 Board Games ---
+  if ((m = trimmed.match(/^TURN:\s*(.+)\s+\((\d+)s\)$/i))) {
+    return `当前回合：${m[1]} (${m[2]}秒)`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) · STAR (\d+) AWAY$/i))) {
+    return `第 ${m[1]}/${m[2]} 轮 · 距星星 ${m[3]} 格`;
+  }
+  if ((m = trimmed.match(/^GOAL:\s*(\d+) CONNECTS$/i))) {
+    return `目标：${m[1]} 次四连`;
+  }
+  if ((m = trimmed.match(/^FLEET HULLS LEFT:\s*(\d+)$/i))) {
+    return `剩余舰体格：${m[1]}`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) · BOSS ♥(\d+)\/(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 轮 · 巨龙 ♥${m[3]}/${m[4]}`;
+  }
+  if ((m = trimmed.match(/^TURN (\d+)\/(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 步`;
+  }
+  if ((m = trimmed.match(/^(.+):\s*(\d+) Discs$/i))) {
+    return `${m[1]}：${m[2]} 棋`;
+  }
+  if ((m = trimmed.match(/^YOUR TURN · (\d+) Discs$/i))) {
+    return `你的回合 · ${m[1]} 棋`;
+  }
+  if ((m = trimmed.match(/^(\d+) Discs(?: Owned)? · (\d+) Flips$/i))) {
+    return `${m[1]} 枚棋子 · 翻转 ${m[2]} 次`;
+  }
+  if ((m = trimmed.match(/^NOVA FLIP \((\d+)\)!$/i))) {
+    return `超新星大反转 (${m[1]})！`;
+  }
+  if ((m = trimmed.match(/^💥 (.+) detonated a 3x3 Nova Flip Bomb!$/i))) {
+    return `💥 ${m[1]} 引爆了 3×3 超新星反转炸弹！`;
+  }
+  if ((m = trimmed.match(/^CONNECTED 4! \((\d+)\/(\d+)\)$/i))) {
+    return `四子连线！(${m[1]}/${m[2]})`;
+  }
+  if ((m = trimmed.match(/^(.+) CONNECTED 4! \((\d+)\/(\d+)\)$/i))) {
+    return `${m[1]} 完成四子连线！(${m[2]}/${m[3]})`;
+  }
+  if ((m = trimmed.match(/^(\d+) Connects · (\d+) Tokens$/i))) {
+    return `${m[1]} 次连线 · 落子 ${m[2]} 枚`;
+  }
+  if ((m = trimmed.match(/^(\d+)\/3 Home · (\d+) Captures$/i))) {
+    return `${m[1]}/3 归位 · 踩吃 ${m[2]} 次`;
+  }
+  if ((m = trimmed.match(/^TOKEN #(\d+) HOME! \(\+120\)$/i))) {
+    return `#${m[1]}号棋子入库！(+120)`;
+  }
+  if ((m = trimmed.match(/^(.+) WINS LUDO ROYALE!$/i))) {
+    return `${m[1]} 赢得皇家飞行棋冠军！`;
+  }
+  if ((m = trimmed.match(/^CAPTURED (.+)! \(\+75\)$/i))) {
+    return `踩吃 ${m[1]}！(+75)`;
+  }
+  if ((m = trimmed.match(/^(\d+) Direct Hits · (\d+) pts$/i))) {
+    return `${m[1]} 次命中 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^SONAR PING:\s*(\d+) TARGETS?$/i))) {
+    return `声呐扫描：发现 ${m[1]} 个目标`;
+  }
+  if ((m = trimmed.match(/^(\d+) Captures · (\d+) Kings$/i))) {
+    return `吃子 ${m[1]} · 升王 ${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(.+) CROWNED A KING!$/i))) {
+    return `${m[1]} 棋子加冕为王！`;
+  }
+  if ((m = trimmed.match(/^(\d+) Pucks Pocketed · (\d+) Queens$/i))) {
+    return `入袋 ${m[1]} 球 · 红后 ${m[2]} 次`;
+  }
+  if ((m = trimmed.match(/^POCKETED \+(\d+)!$/i))) {
+    return `进袋 +${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^(\d+) Golden Stars · (\d+) Coins$/i))) {
+    return `${m[1]} 颗金星 · ${m[2]} 金币`;
+  }
+  if ((m = trimmed.match(/^(.+) GOT A GOLDEN STAR!$/i))) {
+    return `${m[1]} 获得了黄金星星！`;
+  }
+  if ((m = trimmed.match(/^ZAP TRAP -(\d+)!$/i))) {
+    return `踩到电击陷阱 -${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^STOLE (\d+) COINS!$/i))) {
+    return `偷走 ${m[1]} 金币！`;
+  }
+  if ((m = trimmed.match(/^(\d+) Gold · (\d+) Monsters Slain$/i))) {
+    return `${m[1]} 金币 · 斩怪 ${m[2]} 只`;
+  }
+  if ((m = trimmed.match(/^⚔️ ENCOUNTER:\s*(.+?)\s+\(PWR (\d+)\)!$/i))) {
+    return `⚔️ 遭遇战：${translateGameText(m[1], lang)}（战力 ${m[2]}）！`;
+  }
+  if ((m = trimmed.match(/^⚔ (.+) \(1-6 \+(\d+)\) VS (.+?) \(PWR (\d+)\) — PRESS A TO STRIKE!$/i))) {
+    return `⚔ ${m[1]} (1-6 +${m[2]}) 对战 ${translateGameText(m[3], lang)} (战力 ${m[4]}) — 按 A 出击！`;
+  }
+  if ((m = trimmed.match(/^SLAIN (.+?)! \+(\d+)G$/i))) {
+    return `斩杀 ${translateGameText(m[1], lang)}！+${m[2]}金`;
+  }
+  if ((m = trimmed.match(/^GRAZED (.+?) \(\+15G, -2 HP\)$/i))) {
+    return `激战 ${translateGameText(m[1], lang)} (+15金, -2血)`;
+  }
+  if ((m = trimmed.match(/^TREASURE \+(\d+)G & \+1 ATK!$/i))) {
+    return `宝箱 +${m[1]}金 且 +1 攻击！`;
+  }
+  if ((m = trimmed.match(/^HEALED \+(\d+)G!$/i))) {
+    return `营地回满血 +${m[1]}金！`;
+  }
+  if ((m = trimmed.match(/^(.+?) \(-(\d+) HP\)!$/i))) {
+    return `${translateGameText(m[1], lang)} (-${m[2]} 生命)！`;
+  }
+  if ((m = trimmed.match(/^DRAGON HIT FOR (\d+) DMG!$/i))) {
+    return `重创巨龙 ${m[1]} 点伤害！`;
+  }
+  if ((m = trimmed.match(/^(.+) SLEW THE DRAGON BOSS!$/i))) {
+    return `${m[1]} 屠龙成功！`;
+  }
+  if ((m = trimmed.match(/^([A-Za-z0-9_ ()]+)\s*\((\d+) LEFT\)$/i))) {
+    return `${translateGameText(m[1], lang)} (${m[2]} 剩)`;
+  }
+
+  // --- Packs 2–7 Dynamic Canvas Chips, Banners & Results ---
+  if ((m = trimmed.match(/^RD (\d+)\/(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 轮`;
+  }
+  if ((m = trimmed.match(/^RD (\d+)\/(\d+) · ×(\d+)$/i))) {
+    return `第 ${m[1]}/${m[2]} 轮 · ×${m[3]}`;
+  }
+  if ((m = trimmed.match(/^RD (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]} 轮 · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^R(\d+)\/(\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]}/${m[2]} 轮 · ${m[3]}秒`;
+  }
+  if ((m = trimmed.match(/^Q(\d+)\/(\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]}/${m[2]} 题 · ${m[3]}秒`;
+  }
+  if ((m = trimmed.match(/^QUESTION (\d+) \/ (\d+)$/i))) {
+    return `第 ${m[1]} / ${m[2]} 题`;
+  }
+  if ((m = trimmed.match(/^WAVE (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]} 波 · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^FRAME (\d+)\/(\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]}/${m[2]} 格 · ${m[3]}秒`;
+  }
+  if ((m = trimmed.match(/^HOLE (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]} 洞 · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^TRICK (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]} 墩 · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^HAND (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]} 局 · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^CLASH (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]} 阵 · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^ENDS (\d+) · (\d+) · (\d+)s$/i))) {
+    return `第 ${m[1]}·${m[2]} 局 · ${m[3]}秒`;
+  }
+  if ((m = trimmed.match(/^LEFT (\d+) — (\d+) RIGHT$/i))) {
+    return `左队 ${m[1]} — ${m[2]} 右队`;
+  }
+  if ((m = trimmed.match(/^LEFT (\d+) — (\d+) RIGHT \(TO (\d+)\)$/i))) {
+    return `左队 ${m[1]} — ${m[2]} 右队 (先到 ${m[3]} 分)`;
+  }
+  if ((m = trimmed.match(/^SKY CLIMB · (\d+)s$/i))) {
+    return `冲向云霄 · ${m[1]}秒`;
+  }
+  if ((m = trimmed.match(/^GLASS BRIDGE · (\d+)s$/i))) {
+    return `玻璃桥求生 · ${m[1]}秒`;
+  }
+  if ((m = trimmed.match(/^(\d+)m · (\d+) SPD$/i))) {
+    return `${m[1]}米 · 速度 ${m[2]}`;
+  }
+  if ((m = trimmed.match(/^MINES LEFT:\s*(\d+)$/i))) {
+    return `剩余地雷：${m[1]}`;
+  }
+  if ((m = trimmed.match(/^TASKS (\d+)\/(\d+)$/i))) {
+    return `任务 ${m[1]}/${m[2]}`;
+  }
+  if ((m = trimmed.match(/^ARTIST:\s*(.+?)\s+·\s+RD (\d+)\/(\d+)$/i))) {
+    return `灵魂画手：${m[1]} · 第 ${m[2]}/${m[3]} 轮`;
+  }
+  if ((m = trimmed.match(/^WORD CHAIN · (\d+) LINKS$/i))) {
+    return `词语接龙 · ${m[1]} 连击`;
+  }
+  if ((m = trimmed.match(/^MIDNIGHT WEREWOLF · DAY (\d+)$/i))) {
+    return `午夜狼人杀 · 第 ${m[1]} 天`;
+  }
+  if ((m = trimmed.match(/^NIGHT (\d+)$/i))) {
+    return `第 ${m[1]} 夜`;
+  }
+  if ((m = trimmed.match(/^DAY (\d+) VOTE$/i))) {
+    return `第 ${m[1]} 天投票`;
+  }
+  if ((m = trimmed.match(/^SPY WORD RD (\d+)\/(\d+)$/i))) {
+    return `谁是卧底 · 第 ${m[1]}/${m[2]} 轮`;
+  }
+  if ((m = trimmed.match(/^CIVILIAN:\s*(.+)$/i))) {
+    return `平民词：${m[1]}`;
+  }
+  if ((m = trimmed.match(/^SPY:\s*(.+)$/i))) {
+    return `卧底词：${m[1]}`;
+  }
+  if ((m = trimmed.match(/^TAVERN DICE RD (\d+)$/i))) {
+    return `大话骰 · 第 ${m[1]} 轮`;
+  }
+  if ((m = trimmed.match(/^ACTUAL MATCHING:\s*(\d+) DICE$/i))) {
+    return `开骰结果：共 ${m[1]} 颗匹配`;
+  }
+  if ((m = trimmed.match(/^(.+) · (PURE 齋|1s WILD)$/i))) {
+    return `${m[1]} · ${translateGameText(m[2], lang)}`;
+  }
+  if ((m = trimmed.match(/^MAHJONG RD (\d+)\/(\d+) · WALL (\d+)$/i))) {
+    return `麻将第 ${m[1]}/${m[2]} 局 · 余牌 ${m[3]}`;
+  }
+  if ((m = trimmed.match(/^WALL:\s*(\d+) TILES$/i))) {
+    return `牌墙余 ${m[1]} 张`;
+  }
+  if ((m = trimmed.match(/^LAST DISCARD · (.+)$/i))) {
+    return `刚打出 · ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^CONGKAK RD (\d+)\/(\d+)$/i))) {
+    return `马来播棋 · 第 ${m[1]}/${m[2]} 轮`;
+  }
+  if ((m = trimmed.match(/^GULI LEFT:\s*(\d+)$/i))) {
+    return `余弹珠：${m[1]} 颗`;
+  }
+  if ((m = trimmed.match(/^WASH \((\d+)\) \+45$/i))) {
+    return `洗盘 (${m[1]}) +45`;
+  }
+  if ((m = trimmed.match(/^PLATES:\s*(\d+)$/i))) {
+    return `净盘：${m[1]}`;
+  }
+  if ((m = trimmed.match(/^SECRET:\s*(.+)$/i))) {
+    return `底牌：${m[1]}`;
+  }
+  if ((m = trimmed.match(/^LINK:\s*(.+?)\s*\/\s*(.+)$/i))) {
+    return `接龙字：${m[1]} / ${m[2]}`;
+  }
+  if ((m = trimmed.match(/^🔥 STREAK ×(\d+)$/i))) {
+    return `🔥 连胜 ×${m[1]}`;
+  }
+  if ((m = trimmed.match(/^BEAT:\s*(.+)$/i))) {
+    return `需压过：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^LOCK:\s*(.+)$/i))) {
+    return `锁定：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^锁定:\s*(.+)$/))) {
+    return `锁定：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^已锁定：(.+)$/))) {
+    return `已锁定：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^LOCK 3 BASE \((\d+)\/3\)$/i))) {
+    return `锁定3张底牌 (${m[1]}/3)`;
+  }
+  if ((m = trimmed.match(/^BET (\d+)$/i))) {
+    return `下注 ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^(\d+) MELDS$/i))) {
+    return `${m[1]} 组`;
+  }
+  if ((m = trimmed.match(/^(\d+) SEQ$/i))) {
+    return `${m[1]} 连线`;
+  }
+  if ((m = trimmed.match(/^(\d+) Chips$/i))) {
+    return `${m[1]} 筹码`;
+  }
+  if ((m = trimmed.match(/^(\d+) CNY Chips$/i))) {
+    return `${m[1]} 新年筹码`;
+  }
+  if ((m = trimmed.match(/^(\d+) Cards(?: Left)?$/i))) {
+    return `余 ${m[1]} 张牌`;
+  }
+  if ((m = trimmed.match(/^(\d+) DICE · (\d+)$/i))) {
+    return `${m[1]} 颗骰 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) VOTES · (\d+)$/i))) {
+    return `${m[1]} 票 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) VOTES$/i))) {
+    return `${m[1]} 票`;
+  }
+  if ((m = trimmed.match(/^(\d+) CHIPS(?: · BET (\d+))?(?: \(([+-]?\d+)\))?$/i))) {
+    const betPart = m[2] ? ` · 注${m[2]}` : '';
+    const diffPart = m[3] ? ` (${m[3]})` : '';
+    return `${m[1]} 筹码${betPart}${diffPart}`;
+  }
+  if ((m = trimmed.match(/^PAIR ([A-Z0-9]+)s ×3!$/i))) {
+    return `对 ${m[1]} ×3！`;
+  }
+  if ((m = trimmed.match(/^PAIR ([A-Z0-9]+)s$/i))) {
+    return `对 ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^TRIPLE ([A-Z0-9]+)s$/i))) {
+    return `三张 ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^FOUR ([A-Z0-9]+)s$/i))) {
+    return `四条 ${m[1]} 炸弹`;
+  }
+  if ((m = trimmed.match(/^FULL HOUSE ([A-Z0-9]+)s$/i))) {
+    return `葫芦 (${m[1]}带2)`;
+  }
+  if ((m = trimmed.match(/^FLUSH (.+)$/i))) {
+    return `同花 ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^NGAU (\d+)$/i))) {
+    return `牛 ${m[1]}`;
+  }
+  if ((m = trimmed.match(/^STAND \((\d+)\)$/i))) {
+    return `停牌 (${m[1]}点)`;
+  }
+  if ((m = trimmed.match(/^BANKER (.+)$/i))) {
+    return `庄家：${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^庄 (.+)$/))) {
+    return `庄 ${translateGameText(m[1], lang)}`;
+  }
+  if ((m = trimmed.match(/^(\d+)-CARD STRAIGHT$/i))) {
+    return `${m[1]} 张顺子`;
+  }
+  if ((m = trimmed.match(/^BOMB ([A-Z0-9]+)×4!$/i))) {
+    return `四条炸弹 ${m[1]}×4！`;
+  }
+  if ((m = trimmed.match(/^LIE BY (.+)$/i))) {
+    return `${m[1]} 的假答案`;
+  }
+  if ((m = trimmed.match(/^(.+) WINS THE POT WITH (.+)!$/i))) {
+    return `${m[1]} 凭「${translateGameText(m[2], lang)}」赢下奖池！`;
+  }
+  if ((m = trimmed.match(/^FOOLED (\d+)!$/i))) {
+    return `骗到 ${m[1]} 人！`;
+  }
+  if ((m = trimmed.match(/^TRUTH \+(\d+)$/i))) {
+    return `找对真相 +${m[1]}`;
+  }
+  if ((m = trimmed.match(/^AGENT \+(\d+)$/i))) {
+    return `特工命中 +${m[1]}`;
+  }
+  if ((m = trimmed.match(/^(.+) DECODED AGENT (.+)!$/i))) {
+    return `${m[1]} 破译特工词「${m[2]}」！`;
+  }
+  if ((m = trimmed.match(/^💀 (.+) TRIGGERED THE ASSASSIN \((.+)\)!$/i))) {
+    return `💀 ${m[1]} 踩中刺客暗雷（${m[2]}）！`;
+  }
+  if ((m = trimmed.match(/^ANSWER:\s*(.+?)!$/i))) {
+    return `答案揭晓：${translateGameText(m[1], lang)}！`;
+  }
+  if ((m = trimmed.match(/^THE TRUTH WAS:\s*(.+?)!$/i))) {
+    return `真实冷知识：${translateGameText(m[1], lang)}！`;
+  }
+  if ((m = trimmed.match(/^TIME UP · WORD WAS (.+)!$/i))) {
+    return `时间到 · 谜底单词是 ${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) · CRACK THE 5-LETTER WORD!$/i))) {
+    return `第 ${m[1]} 轮 · 破译 5 字母单词！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) · PLANT YOUR LIE!$/i))) {
+    return `第 ${m[1]} 轮 · 埋下假答案陷阱！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) · PIN THE LANDMARK!$/i))) {
+    return `第 ${m[1]} 轮 · 地图标出地标！`;
+  }
+  if ((m = trimmed.match(/^ROUND (\d+) · SYNC MINDS!$/i))) {
+    return `第 ${m[1]} 轮 · 心灵共鸣同频！`;
+  }
+  if ((m = trimmed.match(/^TARGET REVEALED · (\d+)%!$/i))) {
+    return `目标揭晓 · ${m[1]}%！`;
+  }
+  if ((m = trimmed.match(/^([A-D]) · (.+)$/))) {
+    return `${m[1]} · ${translateGameText(m[2], lang)}`;
+  }
+
+  // --- Shared Rank/Stat Highlights Across Packs 2–7 ---
+  if ((m = trimmed.match(/^(\d+)m Peak$/i))) return `最高 ${m[1]}米`;
+  if ((m = trimmed.match(/^(\d+) Cuts · (\d+) Len$/i))) return `拦截 ${m[1]} · 长度 ${m[2]}`;
+  if ((m = trimmed.match(/^(\d+) Eats · (\d+) Mass$/i))) return `吞噬 ${m[1]} · 体积 ${m[2]}`;
+  if ((m = trimmed.match(/^(\d+) Slices · (\d+) pts$/i))) return `切分 ${m[1]} · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(LEFT|RIGHT) · (\d+) Pulls$/i))) {
+    return `${m[1].toUpperCase() === 'LEFT' ? '左队' : '右队'} · 拉力 ${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(\d+) Pipes Cleared$/i))) return `穿过 ${m[1]} 根管`;
+  if ((m = trimmed.match(/^(\d+) Dash Pts$/i))) return `冲刺 ${m[1]} 分`;
+  if ((m = trimmed.match(/^Max Tile (\d+)$/i))) return `最大方块 ${m[1]}`;
+  if ((m = trimmed.match(/^(\d+) Mines Flagged$/i))) return `标雷 ${m[1]} 颗`;
+  if ((m = trimmed.match(/^(\d+) Geo Pts$/i))) return `地理 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) Mind Pts$/i))) return `默契 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) Word Pts$/i))) return `猜词 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) Quiz Pts$/i))) return `问答 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) Agents Decoded$/i))) return `破译 ${m[1]} 名特工`;
+  if ((m = trimmed.match(/^Fooled (\d+) · (\d+) pts$/i))) return `坑到 ${m[1]} 人 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) Ghosts Eaten$/i))) return `吃掉 ${m[1]} 只幽灵`;
+  if ((m = trimmed.match(/^(\d+) Bricks Smashed$/i))) return `击碎 ${m[1]} 块砖`;
+  if ((m = trimmed.match(/^(\d+) Aliens Blasted$/i))) return `击落 ${m[1]} 艘外星机`;
+  if ((m = trimmed.match(/^(\d+) Lines Cleared$/i))) return `消除 ${m[1]} 行`;
+  if ((m = trimmed.match(/^(\d+) Crossings$/i))) return `成功过河 ${m[1]} 次`;
+  if ((m = trimmed.match(/^(\d+) Summits$/i))) return `登顶 ${m[1]} 次`;
+  if ((m = trimmed.match(/^(\d+) Whack Pts$/i))) return `打地鼠 ${m[1]} 分`;
+  if ((m = trimmed.match(/^Max Combo ×(\d+)$/i))) return `最高连击 ×${m[1]}`;
+  if ((m = trimmed.match(/^(\d+) Skeet Pts$/i))) return `飞碟 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(LEFT|RIGHT) · (\d+) Goals$/i))) {
+    return `${m[1].toUpperCase() === 'LEFT' ? '左队' : '右队'} · ${m[2]} 球`;
+  }
+  if ((m = trimmed.match(/^(\d+) Tickets$/i))) return `${m[1]} 张奖券`;
+  if ((m = trimmed.match(/^(\d+) Floors Stacked$/i))) return `叠高 ${m[1]} 层`;
+  if ((m = trimmed.match(/^(\d+) Gem Pts$/i))) return `宝石 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) Bubbles Popped$/i))) return `消泡 ${m[1]} 颗`;
+  if ((m = trimmed.match(/^(\d+) Strikes$/i))) return `${m[1]} 次全倒`;
+  if ((m = trimmed.match(/^(\d+) Gems · (\d+) pts$/i))) return `${m[1]} 宝石 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) buckets · (\d+) pts$/i))) return `投进 ${m[1]} 球 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) pts · Hole (\d+)$/i))) return `${m[1]} 分 · 第 ${m[2]} 洞`;
+  if ((m = trimmed.match(/^Best Ring ([^·]+) · (\d+) pts$/i))) return `最佳 ${m[1]} 环 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) HRs · (\d+)ft best$/i))) return `${m[1]} 本垒打 · 最远 ${m[2]}尺`;
+  if ((m = trimmed.match(/^(\d+) hits · (\d+) pts$/i))) return `击中 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) ring-outs · (\d+) pts$/i))) return `推落 ${m[1]} 人 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+)m · (\d+) gates$/i))) return `${m[1]}米 · 过 ${m[2]} 门`;
+  if ((m = trimmed.match(/^(\d+) potted · (\d+) pts$/i))) return `进袋 ${m[1]} 球 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) unhorses · (\d+) pts$/i))) return `刺落 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) jumps · (\d+) pts$/i))) return `跳越 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) crown pts$/i))) return `皇冠 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) tags · (\d+) pts$/i))) return `感染 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) tiles · (\d+) pts$/i))) return `出牌 ${m[1]} 格 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) chains · (\d+) pts$/i))) return `连珠 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) captures · (\d+) pts$/i))) return `吃子 ${m[1]} 枚 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) played · (\d+) pts$/i))) return `接龙 ${m[1]} 张 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) hexes · (\d+) pts$/i))) return `占格 ${m[1]} 块 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) borne off · (\d+) pts$/i))) return `归位 ${m[1]} 枚 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) curl pts$/i))) return `冰壶 ${m[1]} 分`;
+  if ((m = trimmed.match(/^(\d+) melds · (\d+) pts$/i))) return `凑组 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) tricks · (\d+) pts$/i))) return `赢墩 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) clashes · (\d+) pts$/i))) return `胜阵 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) wins · (\d+) chips$/i))) return `${m[1]} 胜 · ${m[2]} 筹码`;
+  if ((m = trimmed.match(/^(\d+) pairs · (\d+) pts$/i))) return `配对 ${m[1]} 对 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) sequences · (\d+) pts$/i))) return `四连 ${m[1]} 次 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^Guard · (\d+) Tags$/i))) return `守卫 · 抓捕 ${m[1]} 人`;
+  if ((m = trimmed.match(/^Runner · (\d+) Runs$/i))) return `跑者 · 冲线 ${m[1]} 次`;
+  if ((m = trimmed.match(/^(\d+) Runs · (\d+) Tags$/i))) return `冲线 ${m[1]} · 抓捕 ${m[2]}`;
+  if ((m = trimmed.match(/^(\d+) Tindih Pins$/i))) return `压制 ${m[1]} 次`;
+  if ((m = trimmed.match(/^RPM (\d+)%$/i))) return `转速 ${m[1]}%`;
+  if ((m = trimmed.match(/^(\d+) Ring-Outs$/i))) return `撞飞 ${m[1]} 次`;
+  if ((m = trimmed.match(/^(\d+) Marbles$/i))) return `${m[1]} 颗弹珠`;
+  if ((m = trimmed.match(/^(\d+) Guli Claimed$/i))) return `赢得 ${m[1]} 颗弹珠`;
+  if ((m = trimmed.match(/^(LEFT|RIGHT) · (\d+-\d+)$/i))) {
+    return `${m[1].toUpperCase() === 'LEFT' ? '左队' : '右队'} · ${m[2]}`;
+  }
+  if ((m = trimmed.match(/^Left (\d+)$/i))) return `左队 ${m[1]}`;
+  if ((m = trimmed.match(/^Right (\d+)$/i))) return `右队 ${m[1]}`;
+  if ((m = trimmed.match(/^(\d+) Steps Left$/i))) return `还剩 ${m[1]} 步`;
+  if ((m = trimmed.match(/^(\d+) Stomps$/i))) return `踩鞋 ${m[1]} 次`;
+  if ((m = trimmed.match(/^(\d+) Shoe Stomps$/i))) return `踩鞋 ${m[1]} 次`;
+  if ((m = trimmed.match(/^Rumah:\s*(\d+) · (\d+) Tembak$/i))) return `大仓：${m[1]} · 吃子 ${m[2]}`;
+  if ((m = trimmed.match(/^(\d+) in Rumah · (\d+) Tembak$/i))) return `大仓 ${m[1]} 颗 · 吃子 ${m[2]}`;
+  if ((m = trimmed.match(/^(.+) READY$/i))) return `${m[1]} 已准备`;
+  if ((m = trimmed.match(/^READY (\d+)\.\.\.$/i))) return `倒计时 ${m[1]}...`;
+  if ((m = trimmed.match(/^CHAOS:\s*(.+)$/i))) return `混沌事件：${translateGameText(m[1], lang)}`;
+  if ((m = trimmed.match(/^HIGH BID:\s*\$(\d+)$/i))) return `最高出价：$${m[1]}`;
+  if ((m = trimmed.match(/^RIGHT SCORES! (\d+) - (\d+)$/i))) return `右队得分！${m[1]} - ${m[2]}`;
+  if ((m = trimmed.match(/^LEFT SCORES! (\d+) - (\d+)$/i))) return `左队得分！${m[1]} - ${m[2]}`;
+  if ((m = trimmed.match(/^RIGHT SQUAD GOAL! \((\d+) - (\d+)\)$/i))) return `右队进球！(${m[1]} - ${m[2]})`;
+  if ((m = trimmed.match(/^LEFT SQUAD GOAL! \((\d+) - (\d+)\)$/i))) return `左队进球！(${m[1]} - ${m[2]})`;
+  if ((m = trimmed.match(/^ROUND (\d+) · TINDIH TO WIN!$/i))) return `第 ${m[1]} 轮 · 压制对手橡胶擦！`;
+  if ((m = trimmed.match(/^ROUND (\d+) · GASING PANGKAH!$/i))) return `第 ${m[1]} 轮 · 传统陀螺对撞！`;
+  if ((m = trimmed.match(/^TEMBAK \+(\d+)!$/i))) return `吃光对岸 +${m[1]}！`;
+  if ((m = trimmed.match(/^TEMBAK CAPTURE! \+(\d+) MARBLES!$/i))) return `对岸包抄吃子！+${m[1]} 颗弹珠！`;
+  if ((m = trimmed.match(/^GOLD GULI! \+(\d+)$/i))) return `黄金弹珠！+${m[1]}`;
+  if ((m = trimmed.match(/^(.+) · JALAN TERUS \(FREE TURN!\)$/i))) return `${m[1]} · 连走一轮！`;
+  if ((m = trimmed.match(/^ROUND (\d+) · HEAVE!$/i))) return `第 ${m[1]} 局 · 拔河拉绳！`;
+  if ((m = trimmed.match(/^WINS ROUND (\d+)!$/i))) return `赢得第 ${m[1]} 局！`;
+  if ((m = trimmed.match(/^(.+) DEVOURED (.+)!$/i))) return `${m[1]} 吞掉了 ${m[2]}！`;
+  if ((m = trimmed.match(/^DEVOURED (.+)!$/i))) return `吞噬了 ${m[1]}！`;
+  if ((m = trimmed.match(/^(.+) CUT OFF (.+)!$/i))) return `${m[1]} 拦截撞爆了 ${m[2]}！`;
+  if ((m = trimmed.match(/^CUT OFF (.+)!$/i))) return `拦截撞爆了 ${m[1]}！`;
+  if ((m = trimmed.match(/^(.+) SHATTERED STEP (\d+)!$/i))) return `${m[1]} 踩碎了第 ${m[2]} 块玻璃！`;
+  if ((m = trimmed.match(/^SHATTERED STEP (\d+)!$/i))) return `踩碎第 ${m[1]} 块玻璃！`;
+  if ((m = trimmed.match(/^(.+) REACHED 2048!$/i))) return `${m[1]} 成功合成 2048！`;
+  if ((m = trimmed.match(/^(.+) FROZE (.+)!$/i))) return `${m[1]} 冰冻了 ${m[2]}！`;
+  if ((m = trimmed.match(/^FROZE (.+)!$/i))) return `冰冻了 ${m[1]}！`;
+  if ((m = trimmed.match(/^(.+) FLAGGED A MINE \(\+(\d+)\)!$/i))) return `${m[1]} 精准标雷 (+${m[2]})！`;
+  if ((m = trimmed.match(/^FLAGGED A MINE \(\+(\d+)\)!$/i))) return `精准标雷 (+${m[1]})！`;
+  if ((m = trimmed.match(/^BOOM! (.+) HIT A MINE!$/i))) return `轰！${m[1]} 踩中地雷！`;
+
   if (trimmed === 'Your Turn!' || trimmed === 'Card Turn!') {
     return '⚡ 轮到你了！';
   }
