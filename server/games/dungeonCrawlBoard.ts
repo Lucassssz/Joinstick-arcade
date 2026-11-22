@@ -288,11 +288,21 @@ export const dungeonCrawlBoardModule: ServerGameModule<DungeonCrawlState> = {
               state.finished = true;
               state.banner = `${active.name} SLEW THE DRAGON BOSS!`;
               sounds.push({ type: 'win', playerId: active.id });
+              const winHudUpdates: Record<string, PlayerHudUpdate> = {};
+              for (const pl of state.players) {
+                winHudUpdates[pl.id] = {
+                  score: pl.score,
+                  alive: true,
+                  statText: `♥${pl.hp} · ⚔+${pl.attackBonus} · ${pl.gold}G`,
+                  cooldownA: 1,
+                  cooldownB: 1,
+                };
+              }
               return {
                 snapshot: this.getSnapshot(state),
                 sounds,
                 haptics,
-                hudUpdates: {},
+                hudUpdates: winHudUpdates,
                 finished: true,
                 rankings: this.getRankings(state, players),
               };

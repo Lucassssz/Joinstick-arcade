@@ -1,5 +1,30 @@
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { BotDifficulty, GameId, GameMetadata, PlayerFilterMode } from '../shared/types';
+import { PACK_MALAYSIAN_GAME_CATALOG, PACK_MALAYSIAN_ZH } from '../shared/packMalaysianCatalog';
+import {
+  PACK_CHINESE_VIRAL_GAME_CATALOG,
+  PACK_CHINESE_VIRAL_ZH,
+} from '../shared/packChineseViralCatalog';
+import {
+  PACK_GLOBAL_VIRAL_GAME_CATALOG,
+  PACK_GLOBAL_VIRAL_ZH,
+} from '../shared/packGlobalViralCatalog';
+import {
+  PACK_RETRO_ARCADE_GAME_CATALOG,
+  PACK_RETRO_ARCADE_ZH,
+} from '../shared/packRetroArcadeCatalog';
+import {
+  PACK_SPORTS_PHYSICS_GAME_CATALOG,
+  PACK_SPORTS_PHYSICS_ZH,
+} from '../shared/packSportsPhysicsCatalog';
+import {
+  PACK_CHAOS_SURVIVAL_GAME_CATALOG,
+  PACK_CHAOS_SURVIVAL_ZH,
+} from '../shared/packChaosSurvivalCatalog';
+import {
+  PACK_STRATEGY_CLASSICS_CATALOG,
+  PACK_STRATEGY_CLASSICS_ZH,
+} from '../shared/packStrategyClassicsCatalog';
 
 export type Language = 'en' | 'zh';
 
@@ -119,6 +144,8 @@ export function getLocalizedFilterLabel(
     switch (id) {
       case 'all':
         return short ? 'All' : 'All Games';
+      case 'heritage':
+        return short ? 'MY Classics' : 'Malaysian Classics';
       case 'arcade':
         return short ? 'Arcade' : 'Arcade Games';
       case 'board':
@@ -136,6 +163,8 @@ export function getLocalizedFilterLabel(
   switch (id) {
     case 'all':
       return short ? '全部' : '全部游戏';
+    case 'heritage':
+      return short ? '大马经典' : '马来西亚经典';
     case 'arcade':
       return short ? '街机' : '街机竞技';
     case 'board':
@@ -1192,6 +1221,259 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     settingLabel: '盛宴轮数',
     settingOptions: { 2: '2 轮（快局）', 3: '3 轮（经典）' },
   },
+  ...(Object.fromEntries(
+    PACK_MALAYSIAN_GAME_CATALOG.map((meta) => {
+      const zh = PACK_MALAYSIAN_ZH[meta.id as keyof typeof PACK_MALAYSIAN_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt, idx) => {
+        optMap[opt.value] = zh.settingOptions[idx] ?? opt.label;
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: zh.playerModeLabel,
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionA.label,
+          actionASublabel: zh.actionA.sublabel,
+          actionBLabel: zh.actionB.label,
+          actionBSublabel: zh.actionB.sublabel,
+          controlTip: zh.controlTip,
+          settingLabel: zh.settingLabel,
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_MALAYSIAN_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    PACK_CHINESE_VIRAL_GAME_CATALOG.map((meta) => {
+      const zh = PACK_CHINESE_VIRAL_ZH[meta.id as keyof typeof PACK_CHINESE_VIRAL_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt) => {
+        optMap[opt.value] = opt.label
+          .replace(/Rounds/g, '局')
+          .replace(/Dice/g, '颗骰子')
+          .replace('Sprint', '极速冲刺')
+          .replace('Standard', '标准赛道')
+          .replace('Marathon', '超长狂飙')
+          .replace('Fast', '极速')
+          .replace('Normal', '标准')
+          .replace('Relaxed', '休闲')
+          .replace('Chill', '轻松')
+          .replace('Blitz', '闪电');
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: meta.playerModeLabel
+            .replace(/1P/g, '单人')
+            .replace(/2P/g, '双人')
+            .replace(/3–8P/g, '3–8人')
+            .replace(/3–4P/g, '3–4人')
+            .replace(/4–8P/g, '4–8人'),
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionA[0],
+          actionASublabel: zh.actionA[1],
+          actionBLabel: zh.actionB[0],
+          actionBSublabel: zh.actionB[1],
+          controlTip: zh.controlTip,
+          settingLabel: zh.settingLabel,
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_CHINESE_VIRAL_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    PACK_GLOBAL_VIRAL_GAME_CATALOG.map((meta) => {
+      const zh = PACK_GLOBAL_VIRAL_ZH[meta.id as keyof typeof PACK_GLOBAL_VIRAL_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt) => {
+        optMap[opt.value] = opt.label
+          .replace(/Rounds/g, '回合')
+          .replace(/Steps/g, '级玻璃')
+          .replace(/Qs/g, '题');
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: meta.playerModeLabel
+            .replace(/1P/g, '单人')
+            .replace(/2P/g, '双人')
+            .replace(/3–8P/g, '3–8人'),
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionALabel,
+          actionASublabel: zh.actionASub,
+          actionBLabel: zh.actionBLabel,
+          actionBSublabel: zh.actionBSub,
+          controlTip: zh.controlTip,
+          settingLabel: meta.settingLabel
+            .replace('Climb Time', '攀登时长')
+            .replace('Match Time', '对战时长')
+            .replace('Bridge Length', '玻璃桥长度')
+            .replace('Rounds', '回合数')
+            .replace('Flight Time', '飞行时长')
+            .replace('Run Time', '奔跑时长')
+            .replace('Blitz Time', '限时赛程')
+            .replace('Questions', '题目数量'),
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_GLOBAL_VIRAL_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    PACK_RETRO_ARCADE_GAME_CATALOG.map((meta) => {
+      const zh = PACK_RETRO_ARCADE_ZH[meta.id as keyof typeof PACK_RETRO_ARCADE_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt) => {
+        optMap[opt.value] = opt.label.replace(/Frames/g, '局');
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: meta.playerModeLabel
+            .replace(/1P/g, '单人')
+            .replace(/2P/g, '双人')
+            .replace(/3–8P/g, '3–8人'),
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionALabel,
+          actionASublabel: zh.actionASub,
+          actionBLabel: zh.actionBLabel,
+          actionBSublabel: zh.actionBSub,
+          controlTip: zh.controlTip,
+          settingLabel: meta.settingLabel
+            .replace('Match Time', '对战时长')
+            .replace('Song Length', '曲目时长')
+            .replace('Build Time', '叠楼时长')
+            .replace('Frames', '保龄球局数'),
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_RETRO_ARCADE_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    PACK_SPORTS_PHYSICS_GAME_CATALOG.map((meta) => {
+      const zh = PACK_SPORTS_PHYSICS_ZH[meta.id as keyof typeof PACK_SPORTS_PHYSICS_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt) => {
+        optMap[opt.value] = opt.label.replace(/s$/i, ' 秒');
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: meta.playerModeLabel
+            .replace(/1P/g, '单人')
+            .replace(/2P/g, '双人')
+            .replace(/3–8P/g, '3–8人')
+            .replace(/3–4P/g, '3–4人'),
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionALabel,
+          actionASublabel: zh.actionASub,
+          actionBLabel: zh.actionBLabel,
+          actionBSublabel: zh.actionBSub,
+          controlTip: zh.controlTip,
+          settingLabel: meta.settingLabel
+            .replace('Course Time', '球场限时')
+            .replace('Match Time', '对战时长'),
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_SPORTS_PHYSICS_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    PACK_CHAOS_SURVIVAL_GAME_CATALOG.map((meta) => {
+      const zh = PACK_CHAOS_SURVIVAL_ZH[meta.id as keyof typeof PACK_CHAOS_SURVIVAL_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt) => {
+        optMap[opt.value] = opt.label.replace(/s$/i, ' 秒');
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: meta.playerModeLabel
+            .replace(/1P/g, '单人')
+            .replace(/2P/g, '双人')
+            .replace(/3–8P/g, '3–8人'),
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionALabel,
+          actionASublabel: zh.actionASub,
+          actionBLabel: zh.actionBLabel,
+          actionBSublabel: zh.actionBSub,
+          controlTip: zh.controlTip,
+          settingLabel: meta.settingLabel.replace('Match Time', '对战时长'),
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_CHAOS_SURVIVAL_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    PACK_STRATEGY_CLASSICS_CATALOG.map((meta) => {
+      const zh = PACK_STRATEGY_CLASSICS_ZH[meta.id as keyof typeof PACK_STRATEGY_CLASSICS_ZH];
+      const optMap: Record<number, string> = {};
+      meta.settingOptions.forEach((opt) => {
+        optMap[opt.value] = opt.label
+          .replace(/s$/i, ' 秒')
+          .replace(/Rounds/g, '回合')
+          .replace(/Hands/g, '手')
+          .replace(/Clashes/g, '轮对决');
+      });
+      return [
+        meta.id,
+        {
+          name: zh.name,
+          category: zh.category,
+          tagline: zh.tagline,
+          description: zh.description,
+          playerModeLabel: meta.playerModeLabel
+            .replace(/1P/g, '单人')
+            .replace(/2–8P/g, '2–8人')
+            .replace(/2P/g, '双人')
+            .replace(/3–8P/g, '3–8人'),
+          rules: zh.rules,
+          joystickLabel: zh.joystickLabel,
+          actionALabel: zh.actionA[0],
+          actionASublabel: zh.actionA[1],
+          actionBLabel: zh.actionB[0],
+          actionBSublabel: zh.actionB[1],
+          controlTip: zh.controlTip,
+          settingLabel: meta.settingLabel
+            .replace('Match Time', '对战时长')
+            .replace('Rounds', '回合数')
+            .replace('Hands', '发牌局数')
+            .replace('Clashes', '对决轮数'),
+          settingOptions: optMap,
+        } satisfies GameTranslationZh,
+      ];
+    })
+  ) as Record<keyof typeof PACK_STRATEGY_CLASSICS_ZH, GameTranslationZh>),
 };
 
 export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMetadata {

@@ -26,18 +26,19 @@ export interface ManagedSocketCallbacks {
   onMessage: (msg: ServerMessage) => void;
 }
 
-const PING_INTERVAL_MS = 3_500;
-const PONG_TIMEOUT_MS = 9_500;
-const SILENCE_TIMEOUT_MS = 14_000;
-const CONNECT_TIMEOUT_MS = 3_000;
-const INITIAL_RECONNECT_MS = 120;
-const MAX_RECONNECT_MS = 1_800;
+const PING_INTERVAL_MS = 5_000;
+const PONG_TIMEOUT_MS = 18_000;
+const SILENCE_TIMEOUT_MS = 28_000;
+const CONNECT_TIMEOUT_MS = 8_000;
+const INITIAL_RECONNECT_MS = 200;
+const MAX_RECONNECT_MS = 3_000;
 
 export class ManagedWebSocket {
   private ws: WebSocket | null = null;
   private status: SocketStatus = 'connecting';
   private closedManually = false;
   private reconnectDelay = INITIAL_RECONNECT_MS;
+  private consecutiveFailures = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectStartedAt = 0;
@@ -73,15 +74,18 @@ export class ManagedWebSocket {
     if (this.closedManually) return;
     this.reconnectDelay = INITIAL_RECONNECT_MS;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      this.reconnectNow(true);
+      this.reconnectNow(false);
     } else {
-      this.sendHeartbeatProbe(2_200);
+      this.sendHeartbeatProbe(7_000);
     }
   };
 
   private handleOffline = (): void => {
     if (this.closedManually) return;
-    this.forceDropAndReconnect(false);
+    // Some browsers/OSes emit transient 'offline' events during Wi-Fi roaming; probe before dropping
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.sendHeartbeatProbe(5_000);
+    }
   };
 
   private handleVisibilityOrShow = (): void => {
@@ -91,9 +95,12 @@ export class ManagedWebSocket {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.reconnectNow(false);
     } else {
-      // Probe immediately when a phone wakes up or returns to tab; timeout within 2.2s if dead
-      this.lastMessageAt = Date.now();
-      this.sendHeartbeatProbe(2_200);
+      // Only probe if we haven't heard from the server in >2.5s; give generous 7s window so focus changes never cause false drops
+      const now = Date.now();
+      if (now - this.lastMessageAt > 2_500) {
+        this.lastMessageAt = now;
+        this.sendHeartbeatProbe(7_000);
+      }
     }
   };
 
@@ -154,7 +161,18 @@ export class ManagedWebSocket {
       this.setStatus('connecting');
     }
 
-    const ws = new WebSocket(getWebSocketUrl());
+    // After repeated failures, gently nudge /api/health to warm up any idle proxy/container
+    if (this.consecutiveFailures >= 2 && typeof fetch === 'function') {
+      fetch('/api/health', { cache: 'no-store' }).catch(() => {});
+    }
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(getWebSocketUrl());
+    } catch {
+      this.handleSocketDropped(false);
+      return;
+    }
     this.ws = ws;
     this.connectStartedAt = Date.now();
 
@@ -172,17 +190,30 @@ export class ManagedWebSocket {
       }
       this.clearConnectTimer();
       this.reconnectDelay = INITIAL_RECONNECT_MS;
-      this.lastMessageAt = Date.now();
-      this.lastWatchdogTickAt = Date.now();
+      this.consecutiveFailures = 0;
+      const now = Date.now();
+      this.lastMessageAt = now;
+      this.lastWatchdogTickAt = now;
       this.awaitingPongSince = null;
       this.setStatus('connected');
 
-      while (this.queue.length > 0 && ws.readyState === WebSocket.OPEN) {
-        const msg = this.queue.shift()!;
-        ws.send(JSON.stringify(msg));
-      }
       this.startHeartbeat();
+
+      // Run onOpen FIRST so room:host-reattach / room:join always binds the socket before queued actions fire
+      const pending = this.queue.splice(0, this.queue.length);
       this.callbacks.onOpen?.();
+
+      for (const msg of pending) {
+        if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) break;
+        if (msg.type === 'room:host-reattach' || msg.type === 'room:join' || msg.type === 'room:create') {
+          continue; // Handled authoritatively by onOpen
+        }
+        try {
+          ws.send(JSON.stringify(msg));
+        } catch {
+          break;
+        }
+      }
     };
 
     ws.onmessage = (event) => {
@@ -221,10 +252,12 @@ export class ManagedWebSocket {
       this.setStatus('closed');
       return;
     }
+    this.consecutiveFailures += 1;
     this.setStatus('reconnecting');
     this.callbacks.onClose?.();
 
-    const delay = immediate ? 100 : this.reconnectDelay;
+    const jitter = Math.floor(Math.random() * 220);
+    const delay = immediate ? 150 : this.reconnectDelay + jitter;
     if (!this.reconnectTimer) {
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
@@ -251,12 +284,12 @@ export class ManagedWebSocket {
     }
     this.reconnectDelay = INITIAL_RECONNECT_MS;
 
-    // Avoid aborting a fresh in-flight handshake started <650ms ago unless forced after stall
+    // Avoid aborting a fresh in-flight handshake started <1200ms ago unless forced after stall
     if (
       !force &&
       this.ws &&
       this.ws.readyState === WebSocket.CONNECTING &&
-      Date.now() - this.connectStartedAt < 650
+      Date.now() - this.connectStartedAt < 1_200
     ) {
       return;
     }
@@ -276,7 +309,10 @@ export class ManagedWebSocket {
       this.ws.send(JSON.stringify({ type: 'ping' }));
       const now = Date.now();
       if (maxWaitMs !== undefined) {
-        this.awaitingPongSince = now - Math.max(0, PONG_TIMEOUT_MS - maxWaitMs);
+        const candidateStart = now - Math.max(0, PONG_TIMEOUT_MS - maxWaitMs);
+        // Never make an existing waiting deadline shorter than maxWaitMs from now
+        this.awaitingPongSince =
+          this.awaitingPongSince === null ? candidateStart : Math.max(this.awaitingPongSince, candidateStart);
       } else if (this.awaitingPongSince === null) {
         this.awaitingPongSince = now;
       }
@@ -293,19 +329,35 @@ export class ManagedWebSocket {
     this.awaitingPongSince = null;
 
     this.pingTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        if (!this.closedManually && !this.reconnectTimer) {
+          this.forceDropAndReconnect(true);
+        }
+        return;
+      }
       this.sendHeartbeatProbe();
     }, PING_INTERVAL_MS);
 
     this.watchdogTimer = setInterval(() => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (this.closedManually) return;
+      if (!this.ws) {
+        if (!this.reconnectTimer) this.forceDropAndReconnect(true);
+        return;
+      }
+      if (this.ws.readyState === WebSocket.CLOSED || this.ws.readyState === WebSocket.CLOSING) {
+        this.forceDropAndReconnect(true);
+        return;
+      }
+      if (this.ws.readyState !== WebSocket.OPEN) return;
+
       const now = Date.now();
       const tickDelta = now - this.lastWatchdogTickAt;
       this.lastWatchdogTickAt = now;
 
-      // If browser throttled/paused JS timers (e.g. mobile screen dim/sleep), probe first instead of false-dropping
-      if (tickDelta > 3_500) {
+      // If browser throttled/paused JS timers (e.g. screen dim/background tab), probe generously before dropping
+      if (tickDelta > 4_000) {
         this.lastMessageAt = now;
-        this.sendHeartbeatProbe(2_500);
+        this.sendHeartbeatProbe(7_000);
         return;
       }
 
@@ -315,7 +367,7 @@ export class ManagedWebSocket {
       if (pongTimedOut || silenceTimedOut) {
         this.forceDropAndReconnect(true);
       }
-    }, 1_000);
+    }, 1_500);
   }
 
   private stopHeartbeat(): void {

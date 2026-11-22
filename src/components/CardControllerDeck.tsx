@@ -1,6 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Flame, ShieldAlert, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowDownUp,
+  ArrowLeftRight,
+  Check,
+  Eye,
+  EyeOff,
+  Flame,
+  LayoutGrid,
+  ShieldAlert,
+  Sparkles,
+} from 'lucide-react';
 import { CardClientAction, CardColor, CardPrivateHandItem, CardPrivateState } from '../shared/types';
+import type { CardSortMode, CardViewMode } from '../shared/padProfiles';
 import { useLanguage } from '../lib/i18n';
 
 interface CardControllerDeckProps {
@@ -9,6 +21,15 @@ interface CardControllerDeckProps {
   embedded?: boolean;
   isCountdown?: boolean;
   countdownValue?: number;
+  viewMode?: CardViewMode;
+  recommendedView?: 'fan' | 'grid';
+  sortMode?: CardSortMode;
+  privacyShield?: boolean;
+  actionsSide?: 'right' | 'left';
+  onChangeViewMode?: (next: 'fan' | 'grid') => void;
+  onCycleSortMode?: () => void;
+  onTogglePrivacy?: () => void;
+  onFlipActionsSide?: () => void;
   onAction: (action: CardClientAction) => void;
 }
 
@@ -22,6 +43,35 @@ const CLASH_STYLE: Record<
   green: { bg: '#10D98B', dark: '#0A915D', text: '#0A1913', nameEn: 'GREEN', nameZh: '绿' },
   wild: { bg: '#7C3AED', dark: '#4C1D95', text: '#FFFFFF', nameEn: 'WILD', nameZh: '万能' },
 };
+
+const RANK_SORT_ORDER: Record<string, number> = {
+  '3': 3,
+  '4': 4,
+  '5': 5,
+  '6': 6,
+  '7': 7,
+  '8': 8,
+  '9': 9,
+  '10': 10,
+  J: 11,
+  Q: 12,
+  K: 13,
+  A: 14,
+  '2': 15,
+  JOKER: 16,
+};
+
+function cardSortWeight(card: CardPrivateHandItem): number {
+  if (card.rank && RANK_SORT_ORDER[card.rank] !== undefined) {
+    return RANK_SORT_ORDER[card.rank] * 10 + (card.suit ? card.suit.charCodeAt(0) % 7 : 0);
+  }
+  if (card.value) {
+    const n = Number(card.value);
+    if (!Number.isNaN(n)) return n * 10;
+    return card.value.charCodeAt(0) * 10;
+  }
+  return (card.title ?? card.badge ?? card.id).charCodeAt(0) * 10;
+}
 
 function suitSymbol(suit?: CardPrivateHandItem['suit']): string {
   switch (suit) {
@@ -46,12 +96,22 @@ export function CardControllerDeck({
   embedded = false,
   isCountdown = false,
   countdownValue = 0,
+  viewMode = 'auto',
+  recommendedView = 'fan',
+  sortMode = 'server',
+  privacyShield = false,
+  actionsSide = 'right',
+  onChangeViewMode,
+  onCycleSortMode,
+  onTogglePrivacy,
+  onFlipActionsSide,
   onAction,
 }: CardControllerDeckProps) {
   const { lang, t } = useLanguage();
   const seenCardIdsRef = useRef<Set<string>>(new Set());
   const [freshCardOrder, setFreshCardOrder] = useState<Record<string, number>>({});
   const [throwingCardId, setThrowingCardId] = useState<string | null>(null);
+  const [peeking, setPeeking] = useState(false);
   const throwTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -103,6 +163,23 @@ export function CardControllerDeck({
     onAction({ type: 'play-card', cardId });
   };
 
+  useEffect(() => {
+    if (!privacyShield) setPeeking(false);
+  }, [privacyShield]);
+
+  const handList = cardState?.hand ?? [];
+  const sortedEntries = useMemo(() => {
+    const base = handList.map((card, originalIndex) => ({ card, originalIndex }));
+    if (sortMode === 'server') return base;
+    if (sortMode === 'playable') {
+      return [...base].sort((a, b) => {
+        if (a.card.playable !== b.card.playable) return a.card.playable ? -1 : 1;
+        return cardSortWeight(a.card) - cardSortWeight(b.card);
+      });
+    }
+    return [...base].sort((a, b) => cardSortWeight(a.card) - cardSortWeight(b.card));
+  }, [handList, sortMode]);
+
   if (!cardState) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center rounded-2xl bg-[#161922] border border-[#2A303D] p-4 text-center">
@@ -128,7 +205,10 @@ export function CardControllerDeck({
   const activeColorSpec = cardState.activeColor ? CLASH_STYLE[cardState.activeColor] : null;
   const highlightedCard = cardState.hand[cardState.cursorIndex];
   const selectedLiarCount = cardState.hand.filter((c) => c.selected).length;
-  const handMid = (cardState.hand.length - 1) / 2;
+  const effectiveView: 'fan' | 'grid' =
+    viewMode === 'auto' ? recommendedView : viewMode;
+  const isMaskActive = privacyShield && !peeking;
+  const handMid = (sortedEntries.length - 1) / 2;
 
   return (
     <div className="flex-1 flex flex-col justify-between gap-2 min-h-0">
@@ -215,26 +295,141 @@ export function CardControllerDeck({
           })}
         </div>
       ) : (
-        /* Fanned Card Hand + Right Action Column */
-        <div className="flex-1 flex items-stretch gap-2.5 min-h-0">
-          {/* Private Card Hand */}
-          <div className="flex-1 flex items-center gap-1.5 sm:gap-2 overflow-x-auto px-2.5 py-2.5 rounded-2xl bg-[#0F131A]/85 border border-[#242B38] min-w-0">
-            {cardState.hand.length === 0 ? (
-              <div className="w-full text-center text-xs font-bold text-[#10D98B]">
-                {t('Empty hand — waiting on final check!', '手牌已空 — 等待最终判定！')}
+        /* Pad 4 Tabletop Hand + Action Column */
+        <div
+          className={`flex-1 flex items-stretch gap-2.5 min-h-0 ${
+            actionsSide === 'left' ? 'flex-row-reverse' : 'flex-row'
+          }`}
+        >
+          {/* Private Card Hand Container + Utility Bar */}
+          <div className="relative flex-1 flex flex-col rounded-2xl bg-[#0F131A]/85 border border-[#242B38] min-w-0 overflow-hidden">
+            {/* Compact Pad 4 Card Toolbar */}
+            <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 border-b border-[#1E2430] bg-[#131722] shrink-0">
+              <div className="flex items-center gap-1">
+                {onChangeViewMode && (
+                  <div className="inline-flex items-center p-0.5 rounded-md bg-[#0B0E14] border border-[#242934]">
+                    <button
+                      type="button"
+                      onClick={() => onChangeViewMode('fan')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap cursor-pointer ${
+                        effectiveView === 'fan'
+                          ? 'bg-[#FFB800] text-[#14120B]'
+                          : 'text-[#9CA3AF] hover:text-white'
+                      }`}
+                    >
+                      {t('Fan', '扇形')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeViewMode('grid')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                        effectiveView === 'grid'
+                          ? 'bg-[#FFB800] text-[#14120B]'
+                          : 'text-[#9CA3AF] hover:text-white'
+                      }`}
+                    >
+                      <LayoutGrid className="w-2.5 h-2.5" />
+                      <span>{t('Grid', '网格')}</span>
+                    </button>
+                  </div>
+                )}
+
+                {onCycleSortMode && (
+                  <button
+                    type="button"
+                    onClick={onCycleSortMode}
+                    className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                      sortMode !== 'server'
+                        ? 'bg-[#00C2FF]/20 border-[#00C2FF]/60 text-[#00C2FF]'
+                        : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
+                    }`}
+                  >
+                    <ArrowDownUp className="w-2.5 h-2.5" />
+                    <span>
+                      {sortMode === 'playable'
+                        ? t('Sort: Playable', '排序: 可出')
+                        : sortMode === 'rank'
+                        ? t('Sort: Rank', '排序: 点数')
+                        : t('Sort', '理牌')}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1">
+                {onTogglePrivacy && (
+                  <button
+                    type="button"
+                    onClick={onTogglePrivacy}
+                    className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                      privacyShield
+                        ? 'bg-[#FFB800]/20 border-[#FFB800] text-[#FFB800]'
+                        : 'bg-[#181C26] border-[#2A303D] text-[#9CA3AF] hover:text-white'
+                    }`}
+                  >
+                    {privacyShield ? <EyeOff className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                    <span>{privacyShield ? t('Peek Shield', '盖牌保护') : t('Show', '明牌')}</span>
+                  </button>
+                )}
+
+                {onFlipActionsSide && (
+                  <button
+                    type="button"
+                    onClick={onFlipActionsSide}
+                    title={t('Swap Action Buttons Left/Right', '左右切换出牌按钮位置')}
+                    className="px-1.5 py-0.5 rounded-md bg-[#181C26] border border-[#2A303D] text-[10px] font-bold text-[#9CA3AF] hover:text-white inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
+                  >
+                    <ArrowLeftRight className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Hold-to-Peek Couch Privacy Curtain */}
+            {isMaskActive ? (
+              <div
+                onPointerDown={() => setPeeking(true)}
+                onPointerUp={() => setPeeking(false)}
+                onPointerCancel={() => setPeeking(false)}
+                onPointerLeave={() => setPeeking(false)}
+                onContextMenu={(e) => e.preventDefault()}
+                className="flex-1 flex flex-col items-center justify-center p-4 text-center touch-none select-none cursor-pointer bg-[#121620] hover:bg-[#161B28]"
+              >
+                <EyeOff className="w-8 h-8 text-[#FFB800] mb-1.5" />
+                <div className="font-display font-extrabold text-sm text-white">
+                  {t('Cards Hidden · Hold Here to Peek', '手牌已遮盖防偷窥 · 按住此处查看')}
+                </div>
+                <div className="mt-0.5 text-[11px] text-[#9CA3AF]">
+                  {t(
+                    `${cardState.hand.length} cards in hand — lifts while your finger holds`,
+                    `共 ${cardState.hand.length} 张牌 — 松手即刻自动隐藏`
+                  )}
+                </div>
               </div>
             ) : (
-              cardState.hand.map((card, idx) => {
-                const fanOffset = idx - handMid;
-                const fanRot = fanOffset * 1.65;
-                const fanDrop = Math.min(8, Math.abs(fanOffset) * 1.4);
-                const freshOrder = freshCardOrder[card.id];
-                const isThrowing = throwingCardId === card.id;
+              <div
+                className={`flex-1 min-h-0 px-2.5 py-2.5 ${
+                  effectiveView === 'grid'
+                    ? 'overflow-y-auto arcade-scrollbar grid grid-cols-4 sm:grid-cols-6 gap-2 content-start justify-items-center'
+                    : 'flex items-center gap-1.5 sm:gap-2 overflow-x-auto'
+                }`}
+              >
+                {sortedEntries.length === 0 ? (
+                  <div className="col-span-full w-full text-center text-xs font-bold text-[#10D98B] self-center">
+                    {t('Empty hand — waiting on final check!', '手牌已空 — 等待最终判定！')}
+                  </div>
+                ) : (
+                  sortedEntries.map(({ card, originalIndex }, idx) => {
+                    const fanOffset = idx - handMid;
+                    const fanRot = effectiveView === 'grid' ? 0 : fanOffset * 1.65;
+                    const fanDrop = effectiveView === 'grid' ? 0 : Math.min(8, Math.abs(fanOffset) * 1.4);
+                    const freshOrder = freshCardOrder[card.id];
+                    const isThrowing = throwingCardId === card.id;
 
                 if (card.kind === 'clash') {
                   const colKey: CardColor = card.color ?? 'red';
                   const spec = CLASH_STYLE[colKey];
-                  const isHighlighted = idx === cardState.cursorIndex;
+                  const isHighlighted = originalIndex === cardState.cursorIndex;
                   const canTapPlay = cardState.isMyTurn && card.playable;
                   const val = card.value ?? '?';
 
@@ -262,7 +457,7 @@ export function CardControllerDeck({
                           if (canTapPlay) {
                             triggerPlayWithThrowAnim(card.id);
                           } else {
-                            onAction({ type: 'select-index', index: idx });
+                            onAction({ type: 'select-index', index: originalIndex });
                           }
                         }}
                         className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer ${
@@ -315,7 +510,7 @@ export function CardControllerDeck({
                 if (card.kind === 'party') {
                   const accent = card.accentHex ?? '#FFB800';
                   const dark = card.secondaryHex ?? '#0F172A';
-                  const isHighlighted = idx === cardState.cursorIndex;
+                  const isHighlighted = originalIndex === cardState.cursorIndex;
                   const canTapPlay = cardState.isMyTurn && card.playable;
                   const partyTransform = isThrowing
                     ? 'translate3d(0, -34px, 0) scale(0.86) rotate(4deg)'
@@ -341,7 +536,7 @@ export function CardControllerDeck({
                           if (canTapPlay) {
                             triggerPlayWithThrowAnim(card.id);
                           } else {
-                            onAction({ type: 'select-index', index: idx });
+                            onAction({ type: 'select-index', index: originalIndex });
                           }
                         }}
                         className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 text-center select-none cursor-pointer ${
@@ -380,7 +575,7 @@ export function CardControllerDeck({
                 const isRed = card.suit === 'hearts' || card.suit === 'diamonds';
                 const isJoker = card.rank === 'JOKER';
                 const isSelected = card.selected;
-                const isCursor = idx === cardState.cursorIndex;
+                const isCursor = originalIndex === cardState.cursorIndex;
 
                 const liarTransform = isSelected
                   ? 'translate3d(0, -11px, 0) scale(1.06) rotate(0deg)'
@@ -404,7 +599,7 @@ export function CardControllerDeck({
                         if (cardState.isMyTurn) {
                           onAction({ type: 'toggle-card', cardId: card.id });
                         } else {
-                          onAction({ type: 'select-index', index: idx });
+                          onAction({ type: 'select-index', index: originalIndex });
                         }
                       }}
                       className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer bg-[#F8FAFC] border-2 active:scale-95 ${
@@ -443,6 +638,28 @@ export function CardControllerDeck({
                   </div>
                 );
               })
+            )}
+              </div>
+            )}
+
+            {/* Quick Hold-to-Peek Trigger Strip at Bottom when Privacy Shield is On */}
+            {privacyShield && (
+              <button
+                type="button"
+                onPointerDown={() => setPeeking(true)}
+                onPointerUp={() => setPeeking(false)}
+                onPointerCancel={() => setPeeking(false)}
+                onPointerLeave={() => setPeeking(false)}
+                onContextMenu={(e) => e.preventDefault()}
+                className="shrink-0 h-8 bg-[#181D29] border-t border-[#2A303D] text-[11px] font-bold text-[#FFB800] flex items-center justify-center gap-1.5 touch-none select-none cursor-pointer"
+              >
+                {peeking ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span>
+                  {peeking
+                    ? t('Peeking — release to hide', '正在查看 — 松开手指立即隐藏')
+                    : t('Hold to Peek at Secret Cards', '按住此处查看秘密手牌')}
+                </span>
+              </button>
             )}
           </div>
 

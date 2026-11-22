@@ -1,4 +1,11 @@
 import type { GameId, GameMetadata } from './types.ts';
+import { PACK_MALAYSIAN_FRENZY_PERKS } from './packMalaysianCatalog.ts';
+import { PACK_CHINESE_VIRAL_FRENZY_PERKS } from './packChineseViralCatalog.ts';
+import { PACK_GLOBAL_VIRAL_FRENZY_PERKS } from './packGlobalViralCatalog.ts';
+import { PACK_RETRO_ARCADE_FRENZY_PERKS } from './packRetroArcadeCatalog.ts';
+import { PACK_SPORTS_PHYSICS_FRENZY_PERKS } from './packSportsPhysicsCatalog.ts';
+import { PACK_CHAOS_SURVIVAL_FRENZY_PERKS } from './packChaosSurvivalCatalog.ts';
+import { PACK_STRATEGY_CLASSICS_FRENZY_PERKS } from './packStrategyClassicsCatalog.ts';
 
 export type MutatorId =
   | 'normal'
@@ -420,6 +427,13 @@ export const GAME_FRENZY_PERKS: Record<GameId, FrenzyGamePerk> = {
     perk2En: 'FINAL CONVEYOR RUSH',
     perk2Zh: '终轮回转盛宴',
   },
+  ...PACK_MALAYSIAN_FRENZY_PERKS,
+  ...PACK_CHINESE_VIRAL_FRENZY_PERKS,
+  ...PACK_GLOBAL_VIRAL_FRENZY_PERKS,
+  ...PACK_RETRO_ARCADE_FRENZY_PERKS,
+  ...PACK_SPORTS_PHYSICS_FRENZY_PERKS,
+  ...PACK_CHAOS_SURVIVAL_FRENZY_PERKS,
+  ...PACK_STRATEGY_CLASSICS_FRENZY_PERKS,
 };
 
 export const TOURNAMENT_TOTAL_GAMES = 5;

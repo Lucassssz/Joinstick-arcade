@@ -12,38 +12,51 @@ interface DemoClipPayload {
   frames: GameSnapshot[];
 }
 
+// Strict browser LRU clip cache so browsing 150 games never leaks RAM
+const MAX_CLIENT_CLIP_CACHE = 14;
 const clipCache = new Map<GameId, DemoClipPayload>();
-const inflightClips = new Map<GameId, Promise<DemoClipPayload | null>>();
 
-function fetchDemoClip(gameId: GameId): Promise<DemoClipPayload | null> {
-  const cached = clipCache.get(gameId);
-  if (cached) return Promise.resolve(cached);
+function getCachedClip(gameId: GameId): DemoClipPayload | null {
+  const hit = clipCache.get(gameId);
+  if (!hit) return null;
+  // Refresh recency
+  clipCache.delete(gameId);
+  clipCache.set(gameId, hit);
+  return hit;
+}
 
-  const existing = inflightClips.get(gameId);
-  if (existing) return existing;
+function putCachedClip(gameId: GameId, data: DemoClipPayload): void {
+  if (clipCache.has(gameId)) {
+    clipCache.delete(gameId);
+  } else if (clipCache.size >= MAX_CLIENT_CLIP_CACHE) {
+    const oldest = clipCache.keys().next().value;
+    if (oldest) clipCache.delete(oldest);
+  }
+  clipCache.set(gameId, data);
+}
 
-  const promise = (async () => {
-    try {
-      const [resp] = await Promise.all([
-        fetch(`/api/demo-clip/${encodeURIComponent(gameId)}`),
-        ensureGameRendererLoaded(gameId),
-      ]);
-      if (!resp.ok) return null;
-      const data = (await resp.json()) as DemoClipPayload;
-      if (!data || !Array.isArray(data.frames) || data.frames.length === 0) {
-        return null;
-      }
-      clipCache.set(gameId, data);
-      return data;
-    } catch {
+async function fetchDemoClip(
+  gameId: GameId,
+  signal?: AbortSignal
+): Promise<DemoClipPayload | null> {
+  const cached = getCachedClip(gameId);
+  if (cached) return cached;
+
+  try {
+    const [resp] = await Promise.all([
+      fetch(`/api/demo-clip/${encodeURIComponent(gameId)}`, { signal }),
+      ensureGameRendererLoaded(gameId),
+    ]);
+    if (!resp.ok || signal?.aborted) return null;
+    const data = (await resp.json()) as DemoClipPayload;
+    if (!data || !Array.isArray(data.frames) || data.frames.length === 0) {
       return null;
-    } finally {
-      inflightClips.delete(gameId);
     }
-  })();
-
-  inflightClips.set(gameId, promise);
-  return promise;
+    putCachedClip(gameId, data);
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 interface GameHoverPreviewProps {
@@ -54,13 +67,15 @@ interface GameHoverPreviewProps {
   alt?: string;
   active: boolean;
   eager?: boolean;
+  immediate?: boolean;
   timecodePosition?: 'top-right' | 'bottom-right';
   className?: string;
 }
 
 /**
- * Displays the stylized GameThumbnail at rest, and when hovered plays a real
+ * Displays the stylized GameThumbnail at rest, and when active/hovered plays a real
  * 5-second live gameplay clip directly from the game's engine and canvas renderer.
+ * Uses bounded LRU memory, AbortController cancellation, and visibility pausing.
  */
 export function GameHoverPreview({
   gameId,
@@ -70,6 +85,7 @@ export function GameHoverPreview({
   alt,
   active,
   eager = false,
+  immediate = false,
   timecodePosition = 'top-right',
   className = 'w-full h-full object-cover',
 }: GameHoverPreviewProps) {
@@ -79,18 +95,18 @@ export function GameHoverPreview({
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
-  const [clip, setClip] = useState<DemoClipPayload | null>(() => clipCache.get(gameId) ?? null);
+  const [clip, setClip] = useState<DemoClipPayload | null>(() => getCachedClip(gameId));
   const [playing, setPlaying] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
 
   // Sync cached clip if gameId changes
   useEffect(() => {
-    setClip(clipCache.get(gameId) ?? null);
+    setClip(getCachedClip(gameId));
     setPlaying(false);
     setElapsedSec(0);
   }, [gameId]);
 
-  // Load 5-second gameplay clip on hover (instant if cached, 120ms hover-intent delay otherwise)
+  // Load 5-second gameplay clip with AbortController so fast card flips cancel stale requests
   useEffect(() => {
     if (!active) {
       setPlaying(false);
@@ -99,7 +115,9 @@ export function GameHoverPreview({
     }
 
     let cancelled = false;
-    const cached = clipCache.get(gameId);
+    const controller = new AbortController();
+
+    const cached = getCachedClip(gameId);
     if (cached) {
       ensureGameRendererLoaded(gameId).then(() => {
         if (!cancelled) {
@@ -109,25 +127,38 @@ export function GameHoverPreview({
       });
       return () => {
         cancelled = true;
+        controller.abort();
       };
     }
 
-    const timer = window.setTimeout(() => {
-      fetchDemoClip(gameId).then((loaded) => {
+    const startFetch = () => {
+      fetchDemoClip(gameId, controller.signal).then((loaded) => {
         if (!cancelled && loaded) {
           setClip(loaded);
           setPlaying(true);
         }
       });
-    }, 120);
+    };
+
+    if (immediate) {
+      startFetch();
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }
+
+    const timer = window.setTimeout(startFetch, 120);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      controller.abort();
     };
-  }, [active, gameId]);
+  }, [active, gameId, immediate]);
 
-  // Real-time 5-second looping playback loop over the authoritative gameplay frames
+  // Real-time 5-second looping playback loop over authoritative gameplay frames
+  // Automatically pauses when the browser tab is hidden to save CPU/GPU.
   useEffect(() => {
     if (!active || !playing || !clip || clip.frames.length === 0) return;
 
@@ -145,6 +176,11 @@ export function GameHoverPreview({
     let rafId = 0;
 
     const tick = (now: number) => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
       const elapsed = (now - startTime) % durationMs;
       const progress = elapsed / durationMs;
       const frameIdx = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
@@ -167,7 +203,6 @@ export function GameHoverPreview({
       rafId = requestAnimationFrame(tick);
     };
 
-    // Immediately paint frame 0 so crossfade never reveals a blank canvas
     renderGameSnapshot(ctx, clip.frames[0], fx, langRef.current);
     rafId = requestAnimationFrame(tick);
 

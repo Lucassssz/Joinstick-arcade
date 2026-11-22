@@ -1,6 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Gamepad2, Info, Monitor, Play, QrCode, Smartphone, Users, ArrowRight, X } from 'lucide-react';
+import {
+  ArrowRight,
+  ChevronDown,
+  Dices,
+  Gamepad2,
+  Info,
+  Monitor,
+  Play,
+  QrCode,
+  Search,
+  Smartphone,
+  Users,
+  X,
+} from 'lucide-react';
 import {
   filterGamesByPlayerMode,
   GAME_CATALOG,
@@ -8,6 +21,7 @@ import {
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
+import { getPadTutorialGuide } from '../shared/padProfiles';
 import { GameId, PlayerFilterMode } from '../shared/types';
 import {
   getLocalizedFilterLabel,
@@ -24,19 +38,65 @@ interface LandingViewProps {
   onJoinController: (initialCode?: string) => void;
 }
 
+const GAMES_PAGE_SIZE = 18;
+
 export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) {
   const { lang, t } = useLanguage();
   const [quickCode, setQuickCode] = useState('');
-  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(GAMES_PAGE_SIZE);
   const [previewGameId, setPreviewGameId] = useState<GameId | null>(null);
   const [hoveredGameId, setHoveredGameId] = useState<GameId | null>(null);
-  const filteredGames = filterGamesByPlayerMode(playerFilter).map((g) =>
-    getLocalizedGameMeta(g, lang)
+
+  const filteredGames = useMemo(() => {
+    const base = filterGamesByPlayerMode(playerFilter);
+    const q = searchQuery.trim().toLowerCase();
+    const localized = base.map((raw) => ({
+      raw,
+      loc: getLocalizedGameMeta(raw, lang),
+    }));
+    if (!q) return localized.map((item) => item.loc);
+    return localized
+      .filter(({ raw, loc }) => {
+        const haystack = [
+          raw.name,
+          raw.category,
+          raw.tagline,
+          raw.description,
+          loc.name,
+          loc.category,
+          loc.tagline,
+          loc.description,
+        ]
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+      .map((item) => item.loc);
+  }, [playerFilter, searchQuery, lang]);
+
+  useEffect(() => {
+    setVisibleCount(GAMES_PAGE_SIZE);
+  }, [playerFilter, searchQuery]);
+
+  const visibleGames = useMemo(
+    () => filteredGames.slice(0, visibleCount),
+    [filteredGames, visibleCount]
   );
+
+  const handleSurpriseMe = () => {
+    const pool = filteredGames.length > 0 ? filteredGames : GAME_CATALOG;
+    if (pool.length === 0) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    preloadGameRenderer(pick.id);
+    setPreviewGameId(pick.id);
+  };
+
   const previewGame = previewGameId
     ? getLocalizedGameMeta(getGameMeta(previewGameId), lang)
     : null;
+  const previewPadGuide = previewGame ? getPadTutorialGuide(previewGame.id, lang) : null;
 
   useEffect(() => {
     if (!previewGameId) return;
@@ -65,7 +125,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             href="#top"
             className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0"
           >
-            {t('Cloocade Party', 'Cloocade Party')}
+            {t('JoinStick Arcade', 'JoinStick 街机派对')}
           </a>
 
           <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-[#9CA3AF]">
@@ -224,39 +284,104 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                 </p>
               </div>
 
-              {/* Player-Count Suitability Filter */}
-              <div
-                role="tablist"
-                aria-label={t('Filter games by player count', '按人数筛选游戏')}
-                className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-[#101218] border border-[#262C39] self-start lg:self-auto"
-              >
-                {PLAYER_FILTER_OPTIONS.map((opt) => {
-                  const active = playerFilter === opt.id;
-                  const count = filterGamesByPlayerMode(opt.id).length;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setPlayerFilter(opt.id)}
-                      className={`px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                        active
-                          ? 'bg-[#FF4D2E] text-white'
-                          : 'text-[#9CA3AF] hover:text-white'
-                      }`}
-                    >
-                      {getLocalizedFilterLabel(opt.id, lang, false)}{' '}
-                      <span className="font-mono opacity-80 tabular-nums">({count})</span>
-                    </button>
-                  );
-                })}
+              {/* Filter Tabs + Quick Search + Surprise Me */}
+              <div className="flex flex-col gap-3 lg:items-end">
+                <div
+                  role="tablist"
+                  aria-label={t('Filter games by player count', '按人数筛选游戏')}
+                  className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-[#101218] border border-[#262C39] self-start lg:self-auto"
+                >
+                  {PLAYER_FILTER_OPTIONS.map((opt) => {
+                    const active = playerFilter === opt.id;
+                    const count = filterGamesByPlayerMode(opt.id).length;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setPlayerFilter(opt.id)}
+                        className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                          active
+                            ? opt.id === 'heritage'
+                              ? 'bg-[#F59E0B] text-[#141008]'
+                              : 'bg-[#FF4D2E] text-white'
+                            : 'text-[#9CA3AF] hover:text-white'
+                        }`}
+                      >
+                        {getLocalizedFilterLabel(opt.id, lang, false)}{' '}
+                        <span className="font-mono opacity-80 tabular-nums">({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full lg:w-auto">
+                  <div className="relative flex-1 sm:w-72">
+                    <Search className="w-4 h-4 text-[#6B7280] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder={t(
+                        'Search games (e.g. Congkak, 21, Guli)...',
+                        '搜索游戏（如 锄大弟、21点、冲格）...'
+                      )}
+                      aria-label={t('Search games', '搜索游戏')}
+                      className="w-full h-10 pl-9 pr-8 rounded-xl bg-[#101218] border border-[#262C39] focus:border-[#00C2FF] focus:outline-none text-xs sm:text-sm text-white placeholder:text-[#6B7280]"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        aria-label={t('Clear search', '清除搜索')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-white cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSurpriseMe}
+                    className="tactile-btn h-10 px-3.5 rounded-xl bg-[#1E232D] hover:bg-[#272E3C] border border-[#323B4D] text-xs font-bold text-[#FDE047] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Dices className="w-4 h-4" />
+                    <span>{t('Surprise Me', '随机挑一款')}</span>
+                  </button>
+                </div>
               </div>
             </div>
 
+            {filteredGames.length === 0 ? (
+              <div className="rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-10 text-center">
+                <p className="text-base font-bold text-white">
+                  {t('No games match your search.', '没有找到匹配的游戏。')}
+                </p>
+                <p className="mt-1 text-sm text-[#9CA3AF]">
+                  {t(
+                    'Try another title, traditional name, or clear your search filter.',
+                    '试试其他名称、传统游戏名，或清空搜索条件。'
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setPlayerFilter('all');
+                  }}
+                  className="mt-4 px-4 py-2 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs font-bold cursor-pointer"
+                >
+                  {t('Reset Filters', '重置筛选')}
+                </button>
+              </div>
+            ) : (
+            <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {filteredGames.map((game) => {
+              {visibleGames.map((game) => {
                 const isCardHovered = hoveredGameId === game.id;
+                const padGuide = getPadTutorialGuide(game.id, lang);
                 return (
                   <article
                     key={game.id}
@@ -324,6 +449,24 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                         {game.description}
                       </p>
 
+                      <div className="mt-3 rounded-xl bg-[#101217] border border-[#262C38] px-3 py-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <span
+                            className="inline-flex items-center gap-1.5 text-[11px] font-extrabold"
+                            style={{ color: padGuide.accentHex }}
+                          >
+                            <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>{padGuide.padTitle}</span>
+                          </span>
+                          <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">
+                            {padGuide.presetTag}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-[#C7D0DE] leading-snug">
+                          {padGuide.shortTutorial}
+                        </p>
+                      </div>
+
                       <div className="mt-4 pt-4 border-t border-[#262C38] flex items-center justify-between gap-2 text-xs text-[#9CA3AF]">
                         <span className="truncate">
                           {t('Buttons:', '按键：')}{' '}
@@ -360,6 +503,32 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                 );
               })}
             </div>
+
+            {visibleCount < filteredGames.length && (
+              <div className="mt-8 flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((prev) => prev + GAMES_PAGE_SIZE)}
+                  className="tactile-btn h-11 px-6 rounded-xl bg-[#1E232D] hover:bg-[#272F3D] border border-[#323B4D] text-sm font-bold text-white inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <ChevronDown className="w-4 h-4 text-[#00C2FF]" />
+                  <span>
+                    {t(
+                      `Show More Games (${filteredGames.length - visibleCount} remaining)`,
+                      `展开更多游戏（还有 ${filteredGames.length - visibleCount} 款）`
+                    )}
+                  </span>
+                </button>
+                <span className="text-xs font-mono text-[#6B7280] tabular-nums">
+                  {t(
+                    `Showing ${visibleGames.length} of ${filteredGames.length} games`,
+                    `当前显示 ${visibleGames.length} / ${filteredGames.length} 款游戏`
+                  )}
+                </span>
+              </div>
+            )}
+            </>
+            )}
           </div>
         </section>
 
@@ -419,8 +588,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#6B7280]">
           <span>
             {t(
-              'Cloocade Party · Multi-Device Browser Party Console',
-              'Cloocade Party · 多设备浏览器聚会游戏主机'
+              'JoinStick Arcade · Multi-Device Browser Party Console',
+              'JoinStick 街机派对 · 多设备浏览器聚会游戏主机'
             )}
           </span>
           <div className="flex items-center gap-5">
@@ -499,14 +668,48 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
 
               {/* Modal Body */}
               <div className="p-5 sm:p-6 space-y-5 max-h-[68vh] overflow-y-auto arcade-scrollbar">
-                {/* Game Description */}
-                <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4">
-                  <div className="text-xs font-bold uppercase tracking-wider text-[#FFB800] mb-1.5">
-                    {t('Game Introduction', '游戏简介')}
+                {/* Game Description + Auto-Matched Pad Type & Usage Tutorial */}
+                <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4 space-y-3">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-[#FFB800] mb-1.5">
+                      {t('Game Introduction', '游戏简介')}
+                    </div>
+                    <p className="text-sm sm:text-[15px] text-[#E5E7EB] leading-relaxed">
+                      {previewGame.description}
+                    </p>
                   </div>
-                  <p className="text-sm sm:text-[15px] text-[#E5E7EB] leading-relaxed">
-                    {previewGame.description}
-                  </p>
+
+                  {previewPadGuide && (
+                    <div className="pt-3 border-t border-[#242934] space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md font-display text-xs font-extrabold border"
+                            style={{
+                              color: previewPadGuide.accentHex,
+                              borderColor: `${previewPadGuide.accentHex}55`,
+                              backgroundColor: `${previewPadGuide.accentHex}18`,
+                            }}
+                          >
+                            <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>{previewPadGuide.padTitle}</span>
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-[#1A1E26] border border-[#2A303D] font-mono text-[11px] font-bold text-[#D1D5DB]">
+                            {previewPadGuide.presetTag}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[#9CA3AF]">
+                          {previewPadGuide.whyText}
+                        </span>
+                      </div>
+                      <p className="text-xs sm:text-[13px] text-[#D1D5DB] leading-relaxed">
+                        <strong className="text-white">
+                          {t('Pad Usage Tutorial:', '手柄使用教程：')}
+                        </strong>{' '}
+                        {previewPadGuide.tutorialText}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -536,9 +739,19 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   {/* Phone Controls Preview */}
                   <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4 flex flex-col justify-between">
                     <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF] mb-3">
-                        {t('Phone Controls', '手机手柄按键')}
-                      </h3>
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
+                          {t('Phone Controls', '手机手柄按键')}
+                        </h3>
+                        {previewPadGuide && (
+                          <span
+                            className="font-mono text-[10px] font-extrabold uppercase"
+                            style={{ color: previewPadGuide.accentHex }}
+                          >
+                            {previewPadGuide.padShortLabel}
+                          </span>
+                        )}
+                      </div>
                       <div className="space-y-3">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-full bg-[#1E232D] border-2 border-[#2F3747] flex items-center justify-center shrink-0">

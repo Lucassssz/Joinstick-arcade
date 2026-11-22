@@ -1493,18 +1493,57 @@ export function computeBotInput(
     case 'four-in-a-row': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || snapshot.activePlayerId !== botId) break;
-      if (snapshot.turnTimeLeft < 11.4 && mem.actionCooldown <= 0) {
-        const targetCol = Math.max(0, Math.min(snapshot.cols - 1, Math.round(3 + Math.sin(mem.wanderAngle) * 2)));
+      if (snapshot.turnTimeLeft < 12.2 && mem.actionCooldown <= 0) {
+        const cols = snapshot.cols;
+        const rows = snapshot.rows;
+        const dropRowOf = (col: number) => {
+          for (let r = rows - 1; r >= 0; r--) {
+            if (snapshot.grid[r * cols + col] === null) return r;
+          }
+          return -1;
+        };
+        const wouldConnect4 = (col: number, row: number, pid: string) => {
+          const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
+          for (const [dc, dr] of dirs) {
+            let cnt = 1;
+            for (const dir of [-1, 1]) {
+              for (let s = 1; s < 4; s++) {
+                const nc = col + dc * s * dir;
+                const nr = row + dr * s * dir;
+                if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) break;
+                if (snapshot.grid[nr * cols + nc] === pid) cnt++;
+                else break;
+              }
+            }
+            if (cnt >= 4) return true;
+          }
+          return false;
+        };
+        let targetCol = 3;
+        let bestScore = -999;
+        for (let c = 0; c < cols; c++) {
+          const r = dropRowOf(c);
+          if (r < 0) continue;
+          let sc = 4 - Math.abs(3 - c);
+          if (wouldConnect4(c, r, botId)) sc += 1000;
+          for (const opp of snapshot.players) {
+            if (opp.id !== botId && wouldConnect4(c, r, opp.id)) sc += 400;
+          }
+          if (sc > bestScore) {
+            bestScore = sc;
+            targetCol = c;
+          }
+        }
         if (me.hoverCol !== targetCol && snapshot.turnTimeLeft > 8.5) {
           dx = Math.sign(targetCol - me.hoverCol);
-          mem.actionCooldown = 0.28;
+          mem.actionCooldown = 0.16;
         } else {
-          if (me.anvilCharges > 0 && Math.random() < 0.2) {
+          if (me.anvilCharges > 0 && bestScore < 400 && Math.random() < 0.15) {
             b = true;
           } else {
             a = true;
           }
-          mem.actionCooldown = 1.0;
+          mem.actionCooldown = 0.65;
         }
       }
       break;
@@ -1601,8 +1640,1699 @@ export function computeBotInput(
     case 'royal-bluff':
     case 'dark-flip-clash':
     case 'sushi-draft':
-      // Card games run native card-aware AI inside each engine's step()
+    case 'pit-harvest':
+    case 'big-two-royale':
+    case 'lucky-21':
+    case 'ten-pair-showdown':
+    case 'landlord-clash':
+    case 'speed-mahjong':
+    case 'liars-dice-tavern':
+    case 'undercover-word':
+    case 'midnight-werewolf':
+    case 'idiom-chain':
+    case 'word-pulse':
+    case 'trivia-blitz':
+    case 'codenames-grid':
+    case 'fib-party':
+      // Card, Mahjong, Quiz & Social Deduction games run native AI inside each engine's step()
       break;
+
+    case 'line-breakers': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      if (me.role === 'guard') {
+        const runners = snapshot.players.filter((p) => p.role === 'runner' && p.alive);
+        const { item: nearRunner, dist } = nearestOf(me.x, me.y, runners);
+        if (nearRunner) {
+          dx = clampUnit((nearRunner.x - me.x) / 90);
+          dy = clampUnit((nearRunner.y - me.y) / 90);
+          if (dist < 110 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          }
+        }
+      } else {
+        const goalY = me.reachedFarEnd ? snapshot.courtY + snapshot.courtH - 25 : snapshot.courtY + 25;
+        const targetX = snapshot.courtX + snapshot.courtW * (0.5 + Math.sin(mem.driftPhase) * 0.35);
+        const s = steerToward(me.x, me.y, targetX, goalY, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.28) {
+          a = true;
+          markActed();
+        } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.16) {
+          b = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'desk-flippers': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: target, dist } = nearestOf(me.x, me.y, rivals);
+      if (target) {
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (dist < 175 && me.cooldownB <= 0 && canAct() && Math.random() < 0.4) {
+          b = true;
+          markActed();
+        } else if (me.cooldownA <= 0 && canAct() && Math.random() < 0.45) {
+          a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'spin-clash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const distCenter = Math.hypot(me.x - snapshot.ringCenterX, me.y - snapshot.ringCenterY);
+      if (distCenter > snapshot.ringRadius * 0.72) {
+        const s = steerToward(me.x, me.y, snapshot.ringCenterX, snapshot.ringCenterY, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else {
+        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+        const { item: target, dist } = nearestOf(me.x, me.y, rivals);
+        if (target) {
+          const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase);
+          dx = s.dx;
+          dy = s.dy;
+          if (dist < 165 && me.cooldownA <= 0 && canAct() && Math.random() < 0.35) {
+            a = true;
+            markActed();
+          } else if (dist < 85 && me.cooldownB <= 0 && canAct() && Math.random() < 0.22) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'marble-ring': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const { item: target, dist } = nearestOf(me.x, me.y, snapshot.marbles);
+      if (target) {
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (dist < 380 && me.cooldownA <= 0 && canAct() && Math.random() < 0.4) {
+          a = true;
+          markActed();
+        } else if (dist < 280 && me.cooldownB <= 0 && canAct() && Math.random() < 0.22) {
+          b = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'rattan-volley': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const ballOnMySide = me.team === 'left' ? snapshot.ball.x <= snapshot.netX + 60 : snapshot.ball.x >= snapshot.netX - 60;
+      const targetX = ballOnMySide ? snapshot.ball.x : me.team === 'left' ? 300 : ARENA_WIDTH - 300;
+      dx = clampUnit((targetX - me.x) / 65);
+      const distBall = Math.hypot(snapshot.ball.x - me.x, snapshot.ball.y - me.y);
+      if (ballOnMySide && distBall < 115 && canAct()) {
+        if (snapshot.ball.y < snapshot.floorY - 120 && Math.random() < 0.6) a = true;
+        else b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'step-stomp': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: target, dist } = nearestOf(me.x, me.y, rivals);
+      if (snapshot.activeAttackerId === botId && target) {
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.45) {
+          a = true;
+          markActed();
+        }
+      } else if (snapshot.activeAttackerId && snapshot.activeAttackerId !== botId) {
+        const attacker = snapshot.players.find((p) => p.id === snapshot.activeAttackerId);
+        if (attacker && Math.hypot(attacker.x - me.x, attacker.y - me.y) < 170 && me.cooldownB <= 0 && canAct()) {
+          dx = clampUnit((me.x - attacker.x) / 80);
+          dy = clampUnit((me.y - attacker.y) / 80);
+          b = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'melon-merge': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.overflowed) break;
+      const sameTier = me.fruits.find((f) => f.tier === me.nextTier);
+      const targetX = sameTier ? sameTier.x : 0.25 + ((Math.sin(mem.driftPhase) + 1) * 0.25);
+      dx = clampUnit((targetX - me.aimX) * 5);
+      if (Math.abs(targetX - me.aimX) < 0.08 && me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      } else if (me.cooldownB <= 0 && me.fruits.length > 9 && canAct() && Math.random() < 0.15) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'tile-triple': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.failed) break;
+      const open = me.tiles.filter((t) => !t.removed && !t.blocked);
+      if (open.length === 0) break;
+      // Prefer symbol already in tray!
+      const traySet = new Set(me.tray);
+      const target = open.find((t) => traySet.has(t.symbol)) ?? open[0];
+      if (target.col !== me.cursorCol) dx = target.col > me.cursorCol ? 1 : -1;
+      else if (target.row !== me.cursorRow) dy = target.row > me.cursorRow ? 1 : -1;
+      else if (me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'block-hop': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive || me.inAir) break;
+      const cur = snapshot.platforms.find((p) => p.index === me.platformIndex);
+      const nxt = snapshot.platforms.find((p) => p.index === me.platformIndex + 1);
+      if (cur && nxt) {
+        const d = Math.hypot(nxt.x - cur.x, nxt.y - cur.y);
+        const idealCharge = clampUnit((d - 60) / 255);
+        if (me.charging < idealCharge - 0.02) {
+          a = true;
+        }
+      }
+      break;
+    }
+
+    case 'platform-leap': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const above = snapshot.platforms
+        .filter((p) => !p.cracked && p.y <= me.y + 45 && p.y >= me.y - 190)
+        .sort((p1, p2) => Math.abs(p1.x + p1.w / 2 - me.x) - Math.abs(p2.x + p2.w / 2 - me.x))[0];
+      if (above) {
+        dx = clampUnit((above.x + above.w / 2 - me.x) / 70);
+      }
+      if (me.vy > 80 && me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'egg-rush': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.finished) break;
+      dx = 1;
+      dy = Math.sin(mem.driftPhase * 1.4) * 0.45;
+      const nearObs = snapshot.obstacles.find((o) => o.x > me.x - 10 && o.x - me.x < 110 && Math.abs(o.y - me.y) < 75);
+      if (nearObs && nearObs.kind === 'sweeper' && me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'goose-alert': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      if (me.role === 'goose') {
+        const openSt = snapshot.stations.filter((s) => !s.completed);
+        const { item: st, dist } = nearestOf(me.x, me.y, openSt);
+        if (st) {
+          const s = steerToward(me.x, me.y, st.x, st.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (dist < 62) a = true;
+        }
+        if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+          b = true;
+          markActed();
+        }
+      } else {
+        const geese = snapshot.players.filter((p) => p.alive && p.role === 'goose');
+        const { item: prey, dist } = nearestOf(me.x, me.y, geese);
+        if (prey) {
+          const s = steerToward(me.x, me.y, prey.x, prey.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (dist < 64 && me.cooldownB <= 0 && canAct()) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'hotpot-rush': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const yummy = snapshot.ingredients.filter((i) => i.kind !== 'chili');
+      const best = yummy
+        .sort((i1, i2) => (i2.cookPct >= 55 ? i2.value * 2 : i2.value) - (i1.cookPct >= 55 ? i1.value * 2 : i1.value))[0];
+      if (best) {
+        const s = steerToward(me.tipX, me.tipY, best.x, best.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (Math.hypot(best.x - me.tipX, best.y - me.tipY) < best.r + 18 && me.cooldownA <= 0 && canAct()) {
+          a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'claw-mania': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.clawState !== 'aim') break;
+      const good = snapshot.prizes.filter((p) => !p.grabbedBy && p.kind !== 'bomb');
+      const { item: prize, dist } = nearestOf(me.x, me.y, good);
+      if (prize) {
+        const s = steerToward(me.x, me.y, prize.x, prize.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (dist < 26 && me.cooldownA <= 0 && canAct()) {
+          a = true;
+          markActed();
+        } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+          b = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'truth-bomb': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      if (snapshot.phase === 'pass' && snapshot.holderId === botId && canAct()) {
+        if (Math.random() < 0.25) b = true;
+        else a = true;
+        markActed();
+      } else if (snapshot.phase === 'challenge' && snapshot.holderId !== botId && snapshot.phaseTimer < 8 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'draw-guess-relay': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.phase !== 'drawing') break;
+      if (me.isArtist) {
+        dx = Math.cos(mem.driftPhase * 2.1);
+        dy = Math.sin(mem.driftPhase * 1.7);
+        a = true;
+      } else if (!me.lockedGuess && snapshot.timeLeft < 17 && canAct()) {
+        if (Math.random() < 0.35) dy = 1;
+        else a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'sky-climb': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const above = snapshot.platforms
+        .filter((pl) => !pl.broken && pl.y < me.y - 10)
+        .sort((x, y) => Math.hypot(x.x - me.x, x.y - me.y) - Math.hypot(y.x - me.x, y.y - me.y))[0];
+      if (above) dx = clampUnit((above.x - me.x) / 90);
+      if ((me.grounded || me.vy > 180) && canAct()) {
+        a = true;
+        markActed();
+      } else if (me.vy > 340 && me.cooldownB <= 0 && canAct()) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'flappy-flock': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const nextPipe = snapshot.pipes
+        .filter((pp) => pp.x > me.x - 25)
+        .sort((x, y) => x.x - y.x)[0];
+      const targetY = nextPipe ? nextPipe.gapY + 12 : ARENA_HEIGHT / 2;
+      if (me.y > targetY && me.vy > -40 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'dino-dash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const near = snapshot.obstacles.find((o) => o.x > me.x - 10 && o.x - me.x < 145);
+      if (near && near.kind !== 'star') {
+        if (near.kind.startsWith('ptero')) b = true;
+        else if (me.grounded) a = true;
+      }
+      break;
+    }
+
+    case 'tug-titan': {
+      if (snapshot.pulseZone > 0.72 || Math.random() < 0.35) a = true;
+      break;
+    }
+
+    case 'glass-bridge': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.falling || me.finished) break;
+      const nextStep = me.step + 1;
+      const knownSafe = snapshot.panels.find((pn) => pn.step === nextStep && pn.state === 'safe-revealed');
+      const knownBad = snapshot.panels.find((pn) => pn.step === nextStep && pn.state === 'shattered');
+      const desiredLane = knownSafe ? knownSafe.lane : knownBad ? (knownBad.lane === 0 ? 1 : 0) : (Math.sin(mem.driftPhase) > 0 ? 0 : 1);
+      dy = desiredLane === 0 ? -0.8 : 0.8;
+      if (me.lane === desiredLane && canAct() && Math.random() < 0.45) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'tile-2048-blitz': {
+      if (canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'geo-pin-rush': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.locked || snapshot.phase !== 'guessing') break;
+      const tx = clampUnit(snapshot.targetX + Math.sin(mem.driftPhase) * 0.14);
+      const ty = clampUnit(snapshot.targetY + Math.cos(mem.driftPhase) * 0.14);
+      dx = clampUnit((tx - me.x) * 6);
+      dy = clampUnit((ty - me.y) * 6);
+      if (Math.hypot(tx - me.x, ty - me.y) < 0.06 && snapshot.timeLeft < 9) a = true;
+      break;
+    }
+
+    case 'wavelength-sync': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.locked || snapshot.phase !== 'dialing') break;
+      const tgt = Math.max(0.05, Math.min(0.95, snapshot.targetAngle + Math.sin(mem.driftPhase) * 0.12));
+      dx = clampUnit((tgt - me.dial) * 6);
+      if (Math.abs(tgt - me.dial) < 0.04 && snapshot.timeLeft < 7.5) a = true;
+      break;
+    }
+
+    case 'brick-clash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const lowestBall = [...snapshot.balls].sort((x, y) => y.y - x.y)[0];
+      if (lowestBall) dx = clampUnit((lowestBall.x - me.x) / 60);
+      if (me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'alien-wave': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const target = snapshot.aliens[0];
+      if (target) dx = clampUnit((target.x - me.x) / 50);
+      a = true;
+      if (me.cooldownB <= 0 && Math.random() < 0.08) b = true;
+      break;
+    }
+
+    case 'rhythm-pulse': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const nextNote = [...snapshot.notes].sort((x, y) => y.y - x.y)[0];
+      if (nextNote) {
+        dx = nextNote.lane === 0 ? -0.9 : nextNote.lane === 3 ? 0.9 : 0;
+        dy = nextNote.lane === 1 ? -0.9 : nextNote.lane === 2 ? 0.9 : 0;
+        if (Math.abs(nextNote.y - 585) < 38 && canAct()) {
+          a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'whack-blitz': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const good = snapshot.holes.filter((h) => h.mole === 'golden' || h.mole === 'normal');
+      const { item: tgt, dist } = nearestOf(me.x, me.y, good);
+      if (tgt) {
+        const s = steerToward(me.x, me.y, tgt.x, tgt.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (dist < 62 && canAct()) {
+          a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'air-hockey-neo': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      const pk = snapshot.pucks[0];
+      if (!me || !pk) break;
+      const s = steerToward(me.x, me.y, pk.x, pk.y, tuning);
+      dx = s.dx;
+      dy = s.dy;
+      if (Math.hypot(pk.x - me.x, pk.y - me.y) < 85 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'stack-tower': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const top = me.blocks[me.blocks.length - 1];
+      if (top && Math.abs(me.moverX - top.x) < 0.045 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    // ------------------------------------------------------------------
+    // Pack 5 — Sports & Physics Showdowns
+    // ------------------------------------------------------------------
+    case 'hoop-blitz': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const targetX = clampUnit((snapshot.hoopX - me.x) / 140);
+      dx = targetX;
+      if (me.cooldownA <= 0) {
+        if (!me.charging) {
+          a = true;
+        } else if (me.power < 0.7 + Math.sin(mem.driftPhase) * 0.06) {
+          a = true;
+        }
+      }
+      if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'penalty-duel': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const targetCorner =
+        snapshot.keeperX > snapshot.goalX
+          ? snapshot.goalX - snapshot.goalW * 0.36
+          : snapshot.goalX + snapshot.goalW * 0.36;
+      dx = clampUnit((targetCorner - me.aimX) / 90);
+      if (Math.abs(targetCorner - me.aimX) < 55 && canAct()) {
+        if (me.cooldownB <= 0 && Math.random() < 0.35) b = true;
+        else if (me.cooldownA <= 0) a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'mini-golf-pro': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.sunk) break;
+      const vx = snapshot.cupX - me.x;
+      const vy = snapshot.cupY - me.y;
+      const len = Math.hypot(vx, vy) || 1;
+      dx = clampUnit((vx / len) * 0.9);
+      dy = clampUnit((vy / len) * 0.9);
+      const moving = Math.hypot(me.vx, me.vy) > 28;
+      if (!moving && me.cooldownA <= 0) {
+        const wantPower = Math.min(0.9, Math.max(0.32, len / 780));
+        if (!me.charging) a = true;
+        else if (me.power < wantPower) a = true;
+      }
+      break;
+    }
+
+    case 'archery-wind': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const aimTargetX = snapshot.targetX - snapshot.windX * 0.65;
+      const aimTargetY = snapshot.targetY - snapshot.windY * 0.65;
+      const steer = steerToward(me.aimX, me.aimY, aimTargetX, aimTargetY, tuning);
+      dx = steer.dx;
+      dy = steer.dy;
+      if (me.cooldownA <= 0) {
+        if (!me.drawing && Math.hypot(aimTargetX - me.aimX, aimTargetY - me.aimY) < 90) {
+          a = true;
+        } else if (me.drawing && me.drawPct < 0.78) {
+          a = true;
+        }
+      }
+      if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'boxing-ko': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: rival, dist: rDist } = nearestOf(me.x, me.y, rivals);
+      if (rival) {
+        const s = steerToward(me.x, me.y, rival.x, rival.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (rival.punchTimer > 0.05 && rDist < 85 && me.stamina > 20) {
+          b = true;
+        } else if (rDist < 76 && me.cooldownA <= 0 && canAct()) {
+          a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'ping-pong-pro': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      const ball = snapshot.balls[0];
+      if (!me || !ball) break;
+      if (me.side === 'left' || me.side === 'right') {
+        dy = clampUnit((ball.y - me.y) / 65);
+      } else {
+        dx = clampUnit((ball.x - me.x) / 65);
+      }
+      if (Math.hypot(ball.x - me.x, ball.y - me.y) < 92 && canAct()) {
+        if (me.cooldownB <= 0 && Math.random() < 0.25) b = true;
+        else if (me.cooldownA <= 0) a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'home-run-derby': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const incoming = snapshot.pitches.find((pt) => pt.active && pt.y > 475 && pt.y < 605);
+      if (incoming && me.cooldownA <= 0 && Math.abs(incoming.y - 560) < 42) {
+        a = true;
+      }
+      if (me.cooldownB <= 0 && canAct() && Math.random() < 0.07) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'dodgeball-riot': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      if (me.hasBall) {
+        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+        const { item: tgt, dist: tDist } = nearestOf(me.x, me.y, rivals);
+        if (tgt) {
+          const s = steerToward(me.x, me.y, tgt.x, tgt.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (tDist < 380 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          }
+        }
+      } else {
+        const hotBall = snapshot.balls.find((bl) => bl.hot && bl.ownerId !== botId && Math.hypot(bl.x - me.x, bl.y - me.y) < 120);
+        if (hotBall && me.cooldownB <= 0) {
+          b = true;
+        }
+        const loose = snapshot.balls.filter((bl) => !bl.hot);
+        const { item: pick } = nearestOf(me.x, me.y, loose);
+        if (pick) {
+          const s = steerToward(me.x, me.y, pick.x, pick.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        }
+      }
+      break;
+    }
+
+    case 'sumo-clash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const dCenter = Math.hypot(me.x - ARENA_WIDTH / 2, me.y - 375);
+      if (dCenter > snapshot.ringRadius * 0.72) {
+        const s = steerToward(me.x, me.y, ARENA_WIDTH / 2, 375, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else {
+        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+        const { item: tgt, dist: rDist } = nearestOf(me.x, me.y, rivals);
+        if (tgt) {
+          const s = steerToward(me.x, me.y, tgt.x, tgt.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (rDist < 155 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          } else if (rDist < 130 && me.cooldownB <= 0 && canAct()) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'canoe-sprint': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const nextGate = snapshot.gates.find((g) => g.dist > me.dist - 15 && g.dist < me.dist + 360);
+      if (nextGate) {
+        dx = clampUnit((nextGate.x - me.laneX) / 85);
+      }
+      if (me.cooldownA <= 0) a = true;
+      if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'disc-arena': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      if (snapshot.disc.holderId === botId) {
+        dy = Math.sin(mem.driftPhase * 2) * 0.8;
+        a = true;
+      } else {
+        const s = steerToward(me.x, me.y, snapshot.disc.x, snapshot.disc.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (Math.hypot(snapshot.disc.x - me.x, snapshot.disc.y - me.y) > 130 && me.cooldownB <= 0 && canAct()) {
+          b = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'badminton-smash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const targetX = snapshot.shuttle.x;
+      dx = clampUnit((targetX - me.x) / 60);
+      if (Math.hypot(snapshot.shuttle.x - me.x, snapshot.shuttle.y - (me.y - 30)) < 110 && canAct()) {
+        if (me.cooldownA <= 0) a = true;
+        else if (me.cooldownB <= 0) b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'billiards-snooker': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const { item: ball } = nearestOf(me.x, me.y, snapshot.balls);
+      if (ball) {
+        const vx = ball.x - me.x;
+        const vy = ball.y - me.y;
+        const len = Math.hypot(vx, vy) || 1;
+        dx = clampUnit(vx / len);
+        dy = clampUnit(vy / len);
+      }
+      if (me.cooldownA <= 0) {
+        if (!me.charging) a = true;
+        else if (me.power < 0.72) a = true;
+      }
+      break;
+    }
+
+    case 'tether-joust': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: tgt, dist: tDist } = nearestOf(me.x, me.y, rivals);
+      if (tgt) {
+        const s = steerToward(me.x, me.y, tgt.x, tgt.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (tDist < 220 && me.cooldownA <= 0 && canAct()) {
+          a = true;
+          markActed();
+        } else if (tgt.lungeTimer > 0 && tDist < 120 && me.cooldownB <= 0) {
+          b = true;
+        }
+      }
+      break;
+    }
+
+    // ------------------------------------------------------------------
+    // Pack 6 — Chaos Party & Survival Games
+    // ------------------------------------------------------------------
+    case 'laser-jump-rope': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const { item: gem } = nearestOf(me.x, me.y, snapshot.gems);
+      if (gem) {
+        const s = steerToward(me.x, me.y, gem.x, gem.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      }
+      const rx = me.x - ARENA_WIDTH / 2;
+      const ry = me.y - 375;
+      const angles = snapshot.doubleBeam ? [snapshot.beamAngle, snapshot.beamAngle + Math.PI] : [snapshot.beamAngle];
+      for (const ang of angles) {
+        const bx = Math.cos(ang);
+        const by = Math.sin(ang);
+        const proj = rx * bx + ry * by;
+        const perp = Math.abs(rx * -by + ry * bx);
+        if (proj > 20 && perp < 58 && me.z <= 2 && me.cooldownA <= 0) {
+          a = true;
+          break;
+        }
+      }
+      break;
+    }
+
+    case 'hot-lava-floor': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const bestPlatforms = snapshot.platforms.filter((pl) => pl.safe && !pl.sinking);
+      const safePool = bestPlatforms.length > 0 ? bestPlatforms : snapshot.platforms.filter((pl) => pl.safe);
+      const { item: safePlat, dist: pDist } = nearestOf(me.x, me.y, safePool);
+      if (safePlat) {
+        const s = steerToward(me.x, me.y, safePlat.x, safePlat.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+        if (pDist > 75 && me.z <= 1 && me.cooldownA <= 0) a = true;
+      }
+      if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'bomb-tag-arena': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      if (snapshot.bombHolderId === botId) {
+        const { item: tgt, dist: tDist } = nearestOf(me.x, me.y, rivals);
+        if (tgt) {
+          const s = steerToward(me.x, me.y, tgt.x, tgt.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (tDist < 190 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          }
+        }
+      } else {
+        const holder = snapshot.players.find((p) => p.id === snapshot.bombHolderId);
+        if (holder) {
+          const awayX = clampUnit((me.x - holder.x) / 100);
+          const awayY = clampUnit((me.y - holder.y) / 100);
+          const centerX = clampUnit((ARENA_WIDTH / 2 - me.x) / 260);
+          const centerY = clampUnit((375 - me.y) / 180);
+          dx = clampUnit(awayX * 0.75 + centerX * 0.35);
+          dy = clampUnit(awayY * 0.75 + centerY * 0.35);
+          if (Math.hypot(me.x - holder.x, me.y - holder.y) < 120) {
+            if (me.cooldownB <= 0) b = true;
+            else if (me.cooldownA <= 0) a = true;
+          }
+        }
+      }
+      break;
+    }
+
+    case 'musical-thrones': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      if (snapshot.phase === 'scramble') {
+        const openPods = snapshot.pods.filter((pd) => !pd.occupantId || pd.occupantId === botId);
+        const { item: pod, dist: pdDist } = nearestOf(me.x, me.y, openPods);
+        if (pod) {
+          const s = steerToward(me.x, me.y, pod.x, pod.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (pdDist > 80 && me.cooldownA <= 0) a = true;
+        }
+      } else {
+        const ang = mem.driftPhase + me.slotIndex;
+        const tx = ARENA_WIDTH / 2 + Math.cos(ang) * 210;
+        const ty = 375 + Math.sin(ang) * 145;
+        const s = steerToward(me.x, me.y, tx, ty, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      }
+      break;
+    }
+
+    case 'sumo-ice-drift': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const dCenter = Math.hypot(me.x - ARENA_WIDTH / 2, me.y - 375);
+      if (dCenter > snapshot.iceRadius * 0.62) {
+        const s = steerToward(me.x, me.y, ARENA_WIDTH / 2, 375, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      } else {
+        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+        const { item: tgt, dist: tDist } = nearestOf(me.x, me.y, rivals);
+        if (tgt) {
+          const s = steerToward(me.x, me.y, tgt.x, tgt.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (tDist < 135 && me.cooldownB <= 0 && canAct()) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'meteor-dodge-x':
+    case 'falling-anvils': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const hazards = snapshot.gameId === 'meteor-dodge-x' ? snapshot.meteors : snapshot.anvils;
+      const { item: nearHazard, dist: hDist } = nearestOf(me.x, me.y, hazards);
+      if (nearHazard && hDist < nearHazard.r + 45) {
+        dx = clampUnit((me.x - nearHazard.x) / 50);
+        dy = clampUnit((me.y - nearHazard.y) / 50);
+        if (me.cooldownA <= 0) a = true;
+      } else if (snapshot.gameId === 'meteor-dodge-x' && snapshot.craters.length > 0) {
+        const { item: crater } = nearestOf(me.x, me.y, snapshot.craters);
+        if (crater) {
+          const s = steerToward(me.x, me.y, crater.x, crater.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        }
+      } else {
+        dx = Math.cos(mem.wanderAngle) * 0.65;
+        dy = Math.sin(mem.wanderAngle) * 0.65;
+      }
+      break;
+    }
+
+    case 'king-of-hill-neo': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const s = steerToward(me.x, me.y, snapshot.zoneX, snapshot.zoneY, tuning);
+      dx = s.dx;
+      dy = s.dy;
+      if (s.dist > snapshot.zoneR && me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      }
+      if (me.inZone && me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'laser-maze-heist': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const { item: gem } = nearestOf(me.x, me.y, snapshot.diamonds);
+      if (gem) {
+        const s = steerToward(me.x, me.y, gem.x, gem.y, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      }
+      for (const sw of snapshot.sweepers) {
+        const bx = Math.cos(sw.angle);
+        const by = Math.sin(sw.angle);
+        const rx = me.x - sw.x;
+        const ry = me.y - sw.y;
+        const proj = Math.max(0, Math.min(sw.length, rx * bx + ry * by));
+        const d = Math.hypot(me.x - (sw.x + bx * proj), me.y - (sw.y + by * proj));
+        if (d < 52) {
+          a = true;
+          break;
+        }
+      }
+      break;
+    }
+
+    case 'zombie-outbreak': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      if (me.infected) {
+        const humans = snapshot.players.filter((p) => !p.infected);
+        const { item: prey, dist: pDist } = nearestOf(me.x, me.y, humans);
+        if (prey) {
+          const s = steerToward(me.x, me.y, prey.x, prey.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (pDist < 170 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          }
+        }
+      } else {
+        const zombies = snapshot.players.filter((p) => p.infected);
+        const { item: zmb, dist: zDist } = nearestOf(me.x, me.y, zombies);
+        if (zmb && zDist < 170) {
+          dx = clampUnit((me.x - zmb.x) / 60);
+          dy = clampUnit((me.y - zmb.y) / 60);
+          if (zDist < 95 && me.cooldownB <= 0) b = true;
+          else if (me.cooldownA <= 0) a = true;
+        } else {
+          const { item: orb } = nearestOf(me.x, me.y, snapshot.cureOrbs);
+          if (orb) {
+            const s = steerToward(me.x, me.y, orb.x, orb.y, tuning);
+            dx = s.dx;
+            dy = s.dy;
+          }
+        }
+      }
+      break;
+    }
+
+    case 'seesaw-balance': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      let targetOff = -snapshot.beamTilt * 240;
+      if (snapshot.coins.length > 0 && Math.abs(snapshot.beamTilt) < 0.34) {
+        let bestCoin = snapshot.coins[0];
+        let bestDist = Infinity;
+        for (const c of snapshot.coins) {
+          const d = Math.abs(c.offset - me.offset);
+          if (d < bestDist) {
+            bestDist = d;
+            bestCoin = c;
+          }
+        }
+        targetOff = bestCoin.offset;
+      }
+      dx = clampUnit((targetOff - me.offset) / 95);
+      if (Math.abs(me.offset) > 300 && Math.abs(snapshot.beamTilt) > 0.25) b = true;
+      break;
+    }
+
+    case 'chain-gang-climb': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const { item: nearSaw, dist: sDist } = nearestOf(me.x, me.y, snapshot.hazards);
+      if (nearSaw && sDist < 110) {
+        dx = clampUnit((me.x - nearSaw.x) / 45);
+        dy = clampUnit((me.y - nearSaw.y) / 45);
+        if (me.cooldownA <= 0) a = true;
+      } else if (snapshot.stars.length > 0) {
+        const { item: st } = nearestOf(me.x, me.y, snapshot.stars);
+        if (st) {
+          const s = steerToward(me.x, me.y, st.x, st.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        }
+      }
+      break;
+    }
+
+    case 'confetti-capture': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const tx = ARENA_WIDTH / 2 + Math.cos(mem.driftPhase + me.slotIndex * 1.4) * 320;
+      const ty = 375 + Math.sin(mem.driftPhase * 1.3 + me.slotIndex) * 190;
+      const s = steerToward(me.x, me.y, tx, ty, tuning);
+      dx = s.dx;
+      dy = s.dy;
+      if (me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      } else if (me.cooldownB <= 0 && canAct()) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'crane-drop-chaos': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const { item: nearBall, dist: bDist } = nearestOf(me.x, me.y, snapshot.balls);
+      if (nearBall && bDist < 110) {
+        dx = clampUnit((me.x - nearBall.x) / 45);
+        dy = clampUnit((me.y - nearBall.y) / 45);
+        if (bDist < 75 && me.cooldownB <= 0) b = true;
+        else if (me.cooldownA <= 0) a = true;
+      } else {
+        const s = steerToward(me.x, me.y, ARENA_WIDTH / 2 + Math.cos(mem.driftPhase) * 90, 375 + Math.sin(mem.driftPhase) * 90, tuning);
+        dx = s.dx;
+        dy = s.dy;
+      }
+      break;
+    }
+
+    case 'roulette-arena': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const ax = 180;
+      const ay = 135;
+      const aw = ARENA_WIDTH - 360;
+      const ah = ARENA_HEIGHT - 230;
+      const cw = aw / snapshot.cols;
+      const ch = ah / snapshot.rows;
+      let bestX = ARENA_WIDTH / 2;
+      let bestY = 375;
+      let bestD = Infinity;
+      for (let r = 0; r < snapshot.rows; r++) {
+        for (let c = 0; c < snapshot.cols; c++) {
+          if (snapshot.tileStates[r * snapshot.cols + c] === 0) {
+            const cx = ax + (c + 0.5) * cw;
+            const cy = ay + (r + 0.5) * ch;
+            const d = Math.hypot(cx - me.x, cy - me.y);
+            if (d < bestD) {
+              bestD = d;
+              bestX = cx;
+              bestY = cy;
+            }
+          }
+        }
+      }
+      const s = steerToward(me.x, me.y, bestX, bestY, tuning);
+      dx = s.dx;
+      dy = s.dy;
+      if (bestD > 120 && me.cooldownA <= 0) a = true;
+      break;
+    }
+
+    case 'gomoku-blitz': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const sz = snapshot.size;
+      const curIdx = me.cursorR * sz + me.cursorC;
+      if (snapshot.cells[curIdx] === -1 && Math.random() < 0.55) {
+        a = true;
+      } else {
+        // Seek nearest empty cell to own stones or center
+        let targetR = Math.floor(sz / 2);
+        let targetC = Math.floor(sz / 2);
+        let bestScore = Infinity;
+        for (let r = 0; r < sz; r++) {
+          for (let c = 0; c < sz; c++) {
+            if (snapshot.cells[r * sz + c] !== -1) continue;
+            const d = Math.abs(r - me.cursorR) + Math.abs(c - me.cursorC) + Math.abs(r - 5) * 0.25 + Math.abs(c - 5) * 0.25;
+            if (d < bestScore) {
+              bestScore = d;
+              targetR = r;
+              targetC = c;
+            }
+          }
+        }
+        if (Math.abs(targetC - me.cursorC) >= Math.abs(targetR - me.cursorR) && targetC !== me.cursorC) {
+          dx = Math.sign(targetC - me.cursorC);
+        } else if (targetR !== me.cursorR) {
+          dy = Math.sign(targetR - me.cursorR);
+        }
+        if (snapshot.cells[curIdx] === -1 && me.cooldownB <= 0 && Math.random() < 0.08) b = true;
+      }
+      break;
+    }
+
+    case 'chess-blitz': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      let targetR = me.r;
+      let targetC = me.c;
+      let bestDist = Infinity;
+      for (const pw of snapshot.pawns) {
+        const d = Math.abs(pw.r - me.r) + Math.abs(pw.c - me.c) - (pw.gold ? 1.5 : 0);
+        if (d < bestDist) {
+          bestDist = d;
+          targetR = pw.r;
+          targetC = pw.c;
+        }
+      }
+      if (Math.abs(targetC - me.c) >= Math.abs(targetR - me.r) && targetC !== me.c) {
+        dx = Math.sign(targetC - me.c);
+      } else if (targetR !== me.r) {
+        dy = Math.sign(targetR - me.r);
+      } else {
+        dx = Math.cos(mem.wanderAngle);
+        dy = Math.sin(mem.wanderAngle);
+      }
+      if (me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.35) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'domino-chain': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const matchIdx = me.tiles.findIndex(
+        ([tA, tB]) => tA === snapshot.leftEnd || tB === snapshot.leftEnd || tA === snapshot.rightEnd || tB === snapshot.rightEnd
+      );
+      if (matchIdx >= 0) {
+        if (matchIdx > me.cursorIdx) dx = 1;
+        else if (matchIdx < me.cursorIdx) dx = -1;
+        else if (me.cooldownA <= 0) a = true;
+      } else if (me.cooldownB <= 0) {
+        b = true;
+      }
+      break;
+    }
+
+    case 'hexagon-conquest': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const curIdx = me.r * snapshot.cols + me.c;
+      if (snapshot.owners[curIdx] !== me.slotIndex && me.cooldownA <= 0) {
+        a = true;
+      } else {
+        let bestR = Math.floor(snapshot.rows / 2);
+        let bestC = Math.floor(snapshot.cols / 2);
+        let bestD = Infinity;
+        for (let r = 0; r < snapshot.rows; r++) {
+          for (let c = 0; c < snapshot.cols; c++) {
+            const owner = snapshot.owners[r * snapshot.cols + c];
+            if (owner === me.slotIndex) continue;
+            const d = Math.abs(r - me.r) + Math.abs(c - me.c) - (owner >= 0 ? 0.8 : 0);
+            if (d < bestD) {
+              bestD = d;
+              bestR = r;
+              bestC = c;
+            }
+          }
+        }
+        if (Math.abs(bestC - me.c) >= Math.abs(bestR - me.r) && bestC !== me.c) dx = Math.sign(bestC - me.c);
+        else if (bestR !== me.r) dy = Math.sign(bestR - me.r);
+        if (me.cooldownB <= 0 && canAct() && Math.random() < 0.3) {
+          b = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'backgammon-sprint': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const chosen = me.pips[me.cursorPip] ?? snapshot.trackLen;
+      if (chosen >= snapshot.trackLen) {
+        dx = 1;
+      } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+        b = true;
+        markActed();
+      } else if (me.cooldownA <= 0) {
+        a = true;
+      }
+      break;
+    }
+
+    case 'mancala-jewels': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      let bestPit = me.cursorPit;
+      let bestGems = -1;
+      snapshot.pits.forEach((g, idx) => {
+        if (g > bestGems) {
+          bestGems = g;
+          bestPit = idx;
+        }
+      });
+      if (bestGems <= 0) {
+        if (me.cooldownB <= 0) b = true;
+      } else if (bestPit !== me.cursorPit) {
+        const diff = (bestPit - me.cursorPit + snapshot.pits.length) % snapshot.pits.length;
+        dx = diff <= snapshot.pits.length / 2 ? 1 : -1;
+      } else if (me.cooldownA <= 0) {
+        a = true;
+      }
+      break;
+    }
+
+    case 'curling-masters': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const targetX = snapshot.houseX + Math.sin(mem.driftPhase + me.slotIndex) * 34;
+      dx = clampUnit((targetX - me.aimX) / 45);
+      if (me.charging) {
+        if (me.power < 0.72) a = true;
+        else a = false; // release to throw stone!
+      } else if (me.cooldownA <= 0 && Math.abs(targetX - me.aimX) < 35) {
+        a = true;
+      } else if (snapshot.stones.some((st) => st.ownerId === botId && Math.hypot(st.vx, st.vy) > 15)) {
+        if (Math.random() < 0.45) b = true; // sweep moving stone
+      }
+      break;
+    }
+
+    case 'slither-feast': {
+      const me = snapshot.snakes.find((s) => s.id === botId);
+      if (!me || !me.alive || me.segments.length === 0) break;
+      const head = me.segments[0];
+      // Check wall / rival body danger ahead
+      let danger = false;
+      for (const other of snapshot.snakes) {
+        if (!other.alive || other.id === botId) continue;
+        for (let k = 0; k < other.segments.length; k += 2) {
+          const seg = other.segments[k];
+          if (Math.hypot(seg.x - head.x, seg.y - head.y) < 95) {
+            const away = steerToward(seg.x, seg.y, head.x, head.y, tuning);
+            dx = away.dx;
+            dy = away.dy;
+            danger = true;
+            if (me.cooldownB <= 0 && canAct() && Math.random() < 0.35) {
+              b = true;
+              markActed();
+            }
+            break;
+          }
+        }
+        if (danger) break;
+      }
+      if (!danger) {
+        if (head.x < 95 || head.x > ARENA_WIDTH - 95 || head.y < 95 || head.y > ARENA_HEIGHT - 95) {
+          const toCenter = steerToward(head.x, head.y, ARENA_WIDTH / 2, ARENA_HEIGHT / 2, tuning);
+          dx = toCenter.dx;
+          dy = toCenter.dy;
+        } else {
+          const bigPellets = snapshot.pellets.filter((p) => p.value >= 20);
+          const pool = bigPellets.length > 0 ? bigPellets : snapshot.pellets;
+          const { item: pel, dist } = nearestOf(head.x, head.y, pool);
+          if (pel) {
+            const aim = steerToward(head.x, head.y, pel.x, pel.y, tuning, mem.wanderAngle);
+            dx = aim.dx;
+            dy = aim.dy;
+            if (me.length > 14 && dist < 170 && pel.value >= 20) a = true;
+          } else {
+            dx = Math.cos(mem.wanderAngle) * tuning.moveScale;
+            dy = Math.sin(mem.wanderAngle) * tuning.moveScale;
+          }
+        }
+      }
+      break;
+    }
+
+    case 'blob-devour': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const threats = snapshot.players.filter((p) => p.id !== botId && p.alive && p.mass > me.mass * 1.16);
+      const { item: threat, dist: tDist } = nearestOf(me.x, me.y, threats);
+      if (threat && tDist < me.r + threat.r + 125) {
+        const away = steerToward(threat.x, threat.y, me.x, me.y, tuning);
+        dx = away.dx;
+        dy = away.dy;
+        if (me.cooldownB <= 0 && canAct()) {
+          b = true;
+          markActed();
+        }
+      } else {
+        const prey = snapshot.players.filter((p) => p.id !== botId && p.alive && me.mass > p.mass * 1.2);
+        const { item: target, dist: pDist } = nearestOf(me.x, me.y, prey);
+        if (target && pDist < 360) {
+          const aim = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
+          dx = aim.dx;
+          dy = aim.dy;
+          if (pDist < 140 && me.cooldownA <= 0 && canAct()) {
+            a = true;
+            markActed();
+          }
+        } else {
+          const { item: pel } = nearestOf(me.x, me.y, snapshot.pellets);
+          if (pel) {
+            const aim = steerToward(me.x, me.y, pel.x, pel.y, tuning, mem.wanderAngle);
+            dx = aim.dx;
+            dy = aim.dy;
+          }
+        }
+      }
+      break;
+    }
+
+    case 'turf-ribbon': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const gx = Math.floor(me.x);
+      const gy = Math.floor(me.y);
+      const onHome = gx >= 0 && gx < snapshot.cols && gy >= 0 && gy < snapshot.rows && snapshot.cells[gy * snapshot.cols + gx] === me.slotIndex;
+      if (me.x < 3 || me.x > snapshot.cols - 3 || me.y < 3 || me.y > snapshot.rows - 3) {
+        const home = steerToward(me.x, me.y, snapshot.cols / 2, snapshot.rows / 2, tuning);
+        dx = home.dx;
+        dy = home.dy;
+      } else if (!onHome && (Math.sin(mem.driftPhase * 1.7) > 0.35 || snapshot.trails.filter((t) => t === me.slotIndex).length > 16)) {
+        // Loop back toward closest owned cell to lock turf safely!
+        let bestDist = Infinity;
+        let homeX = snapshot.cols / 2;
+        let homeY = snapshot.rows / 2;
+        for (let r = 0; r < snapshot.rows; r += 2) {
+          for (let c = 0; c < snapshot.cols; c += 2) {
+            if (snapshot.cells[r * snapshot.cols + c] === me.slotIndex) {
+              const d = Math.hypot(c + 0.5 - me.x, r + 0.5 - me.y);
+              if (d < bestDist) {
+                bestDist = d;
+                homeX = c + 0.5;
+                homeY = r + 0.5;
+              }
+            }
+          }
+        }
+        const back = steerToward(me.x, me.y, homeX, homeY, tuning);
+        dx = back.dx;
+        dy = back.dy;
+      } else {
+        dx = Math.cos(mem.wanderAngle);
+        dy = Math.sin(mem.wanderAngle);
+      }
+      if (me.cooldownA <= 0 && canAct() && Math.random() < 0.28) {
+        a = true;
+        markActed();
+      } else if (!onHome && me.cooldownB <= 0 && canAct() && Math.random() < 0.2) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'mine-sweep-duel': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      const idx = me.row * snapshot.cols + me.col;
+      const cur = snapshot.cells[idx];
+      if (cur && cur.state === 'hidden') {
+        if (canAct()) {
+          // Check neighboring revealed clue counts
+          let adjHint = 0;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = me.row + dr;
+              const nc = me.col + dc;
+              if (nr >= 0 && nr < snapshot.rows && nc >= 0 && nc < snapshot.cols) {
+                const nb = snapshot.cells[nr * snapshot.cols + nc];
+                if (nb?.state === 'revealed') adjHint = Math.max(adjHint, nb.adj);
+              }
+            }
+          }
+          if (adjHint >= 2 && Math.random() < 0.35) b = true;
+          else a = true;
+          markActed();
+        }
+      } else {
+        let bestC = me.col;
+        let bestR = me.row;
+        let bestD = Infinity;
+        for (let r = 0; r < snapshot.rows; r++) {
+          for (let c = 0; c < snapshot.cols; c++) {
+            if (snapshot.cells[r * snapshot.cols + c]?.state === 'hidden') {
+              const d = Math.abs(r - me.row) + Math.abs(c - me.col);
+              if (d < bestD) {
+                bestD = d;
+                bestR = r;
+                bestC = c;
+              }
+            }
+          }
+        }
+        if (Math.abs(bestC - me.col) >= Math.abs(bestR - me.row) && bestC !== me.col) {
+          dx = Math.sign(bestC - me.col);
+        } else if (bestR !== me.row) {
+          dy = Math.sign(bestR - me.row);
+        }
+      }
+      break;
+    }
+
+    case 'maze-chomper': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      const activeGhost = snapshot.ghosts.filter((g) => g.scaredTimer <= 0);
+      const scaredGhost = snapshot.ghosts.filter((g) => g.scaredTimer > 0.6);
+      const { item: danger, dist: dGhost } = nearestOf(me.x, me.y, activeGhost);
+      const { item: prey, dist: pDist } = nearestOf(me.x, me.y, scaredGhost);
+      if (me.powerTimer > 0 && prey && pDist < 6) {
+        const aim = steerToward(me.x, me.y, prey.x, prey.y, tuning);
+        dx = aim.dx;
+        dy = aim.dy;
+      } else if (danger && dGhost < 2.6) {
+        const away = steerToward(danger.x, danger.y, me.x, me.y, tuning);
+        dx = away.dx;
+        dy = away.dy;
+        if (me.cooldownB <= 0 && canAct()) {
+          b = true;
+          markActed();
+        }
+      } else {
+        const powerOrbs = snapshot.pellets.filter((p) => p.power);
+        const targetList = powerOrbs.length > 0 && me.powerTimer <= 0 ? powerOrbs : snapshot.pellets;
+        const { item: pel } = nearestOf(me.x, me.y, targetList);
+        if (pel) {
+          const aim = steerToward(me.x, me.y, pel.x, pel.y, tuning, mem.wanderAngle);
+          dx = aim.dx;
+          dy = aim.dy;
+        }
+      }
+      if (me.cooldownA <= 0 && canAct() && Math.random() < 0.25) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'block-stack': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive || me.curShape.length === 0) break;
+      const cols = 10;
+      const rows = 16;
+      const board = Array.isArray(me.board) ? me.board : [];
+      let bestCol = 4;
+      let lowestTopRow = -1;
+      for (let c = 0; c < cols; c++) {
+        let topR = rows;
+        for (let r = 0; r < rows; r++) {
+          if ((board[r * cols + c] ?? 0) !== 0) {
+            topR = r;
+            break;
+          }
+        }
+        if (topR > lowestTopRow) {
+          lowestTopRow = topR;
+          bestCol = c;
+        }
+      }
+      const curCenter = me.curShape.reduce((acc, pt) => acc + pt.cx, 0) / me.curShape.length;
+      if (Math.abs(bestCol - curCenter) > 0.8) {
+        dx = Math.sign(bestCol - curCenter);
+      } else if (canAct()) {
+        if (Math.random() < 0.25) a = true;
+        else b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'frog-crossing': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      const nextRow = Math.max(0, me.row - 1);
+      const nextLane = snapshot.lanes[nextRow];
+      let safeToHop = true;
+      if (nextLane?.kind === 'road') {
+        const hitCar = nextLane.items.some((car) => me.x > car.x - 42 && me.x < car.x + car.w + 42);
+        if (hitCar) {
+          safeToHop = false;
+          dx = me.x > ARENA_WIDTH / 2 ? -0.8 : 0.8;
+        }
+      } else if (nextLane?.kind === 'river') {
+        const onLog = nextLane.items.find((l) => me.x > l.x + 8 && me.x < l.x + l.w - 8);
+        if (!onLog && nextLane.items.length > 0) {
+          safeToHop = false;
+          const nearestLog = [...nextLane.items].sort((l1, l2) => Math.abs((l1.x + l1.w / 2) - me.x) - Math.abs((l2.x + l2.w / 2) - me.x))[0];
+          dx = Math.sign((nearestLog.x + nearestLog.w / 2) - me.x);
+        }
+      } else if (nextLane?.kind === 'goal') {
+        const nearestPad = [...snapshot.pads].sort((p1, p2) => Math.abs(p1.x - me.x) - Math.abs(p2.x - me.x))[0];
+        if (nearestPad && Math.abs(nearestPad.x - me.x) > 40) {
+          dx = Math.sign(nearestPad.x - me.x);
+        }
+      }
+      if (safeToHop && me.hopTimer <= 0 && canAct()) {
+        a = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'barrel-tower': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      const fl = snapshot.floors[me.floorIdx];
+      const approaching = snapshot.barrels.some(
+        (br) => Math.abs(br.y - me.y) < 38 && Math.abs(br.x - me.x) < 92 && Math.sign(br.vx) === Math.sign(me.x - br.x)
+      );
+      if (approaching && canAct()) {
+        a = true;
+        markActed();
+      }
+      if (fl && fl.ladderX.length > 0) {
+        const targetLadder = [...fl.ladderX].sort((lx1, lx2) => Math.abs(lx1 - me.x) - Math.abs(lx2 - me.x))[0];
+        if (Math.abs(targetLadder - me.x) > 18) {
+          dx = Math.sign(targetLadder - me.x);
+        } else {
+          dy = -1;
+        }
+      }
+      break;
+    }
+
+    case 'clay-skeet': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const validTargets = snapshot.targets.filter((t) => t.kind !== 'decoy');
+      const golds = validTargets.filter((t) => t.kind === 'gold');
+      const { item: target } = nearestOf(me.x, me.y, golds.length > 0 ? golds : validTargets);
+      if (target) {
+        const tx = target.x + target.vx * 0.06;
+        const ty = target.y + target.vy * 0.06;
+        const aim = steerToward(me.x, me.y, tx, ty, tuning);
+        dx = aim.dx;
+        dy = aim.dy;
+        const d = Math.hypot(tx - me.x, ty - me.y);
+        if (d < 52 && me.cooldownA <= 0 && canAct()) {
+          a = true;
+          markActed();
+        } else if (d < 130 && me.cooldownB <= 0 && canAct() && validTargets.length >= 2) {
+          b = true;
+          markActed();
+        }
+      } else {
+        const home = steerToward(me.x, me.y, ARENA_WIDTH / 2, ARENA_HEIGHT * 0.45, tuning);
+        dx = home.dx;
+        dy = home.dy;
+      }
+      break;
+    }
+
+    case 'skee-roll': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const bestRing = [...snapshot.rings].sort((r1, r2) => r2.points - r1.points)[0];
+      const targetX = bestRing ? bestRing.x : 600;
+      if (Math.abs(targetX - me.aimX) > 22) {
+        dx = Math.sign(targetX - me.aimX);
+      } else if (me.charging) {
+        if (me.charge < 0.72) a = true;
+        else a = false;
+      } else if (me.cooldownA <= 0) {
+        a = true;
+      }
+      break;
+    }
+
+    case 'tunnel-dig': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || me.stunTimer > 0) break;
+      const { item: mon, dist: mDist } = nearestOf(me.x, me.y, snapshot.monsters);
+      if (mon && mDist < 1.8 && canAct()) {
+        const aim = steerToward(me.x, me.y, mon.x, mon.y, tuning);
+        dx = aim.dx;
+        dy = aim.dy;
+        a = true;
+        markActed();
+      } else {
+        const { item: gem } = nearestOf(me.x, me.y, snapshot.gems);
+        if (gem) {
+          const aim = steerToward(me.x, me.y, gem.x, gem.y, tuning, mem.wanderAngle);
+          dx = aim.dx;
+          dy = aim.dy;
+          if (me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+            b = true;
+            markActed();
+          }
+        }
+      }
+      break;
+    }
+
+    case 'bubble-pop-arc': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const matching = snapshot.bubbles.filter((bub) => bub.colorIdx === me.nextColorIdx);
+      const { item: target } = nearestOf(me.x, 630, matching.length > 0 ? matching : snapshot.bubbles);
+      if (target) {
+        const desiredAngle = Math.max(-Math.PI + 0.35, Math.min(-0.35, Math.atan2(target.y - 630, target.x - me.x)));
+        const diff = desiredAngle - me.aimAngle;
+        if (Math.abs(diff) > 0.08) {
+          dx = Math.sign(diff);
+        } else if (me.cooldownA <= 0 && canAct()) {
+          if (matching.length === 0 && Math.random() < 0.4) b = true;
+          else a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'pin-strike': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const standing = snapshot.pins.filter((pn) => !pn.knocked);
+      const targetX = standing.length > 0
+        ? standing.reduce((sum, pn) => sum + pn.x, 0) / standing.length
+        : 600;
+      if (Math.abs(targetX - me.laneX) > 20) {
+        dx = Math.sign(targetX - me.laneX);
+      } else if (me.charging) {
+        if (me.charge < 0.78) a = true;
+        else a = false;
+      } else if (me.cooldownA <= 0) {
+        a = true;
+      }
+      break;
+    }
+
+    case 'coin-dozer': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const gems = snapshot.coins.filter((c) => c.kind === 'gem');
+      const targetX = gems.length > 0
+        ? gems[me.slotIndex % gems.length].x
+        : 600 + Math.sin(mem.driftPhase) * 260;
+      if (Math.abs(targetX - me.x) > 28) {
+        dx = Math.sign(targetX - me.x);
+      }
+      if (me.cooldownA <= 0 && canAct()) {
+        a = true;
+        markActed();
+      } else if (me.megaReady && canAct()) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
 
     default: {
       // Universal fallback AI for any newly added future game without a custom tactic block:

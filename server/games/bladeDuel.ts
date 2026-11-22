@@ -249,6 +249,16 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       if (state.betweenRoundTimer <= 0) {
         const matchWinner = state.duelists.find((d) => d.roundsWon >= state.targetWins);
         if (matchWinner) {
+          for (const d of state.duelists) {
+            const heartsText = `${'♥'.repeat(Math.max(0, d.hp))}${'♡'.repeat(Math.max(0, d.maxHp - d.hp))}`;
+            hudUpdates[d.id] = {
+              score: d.roundsWon,
+              alive: d.alive,
+              statText: `${heartsText} · Wins ${d.roundsWon}/${state.targetWins}`,
+              cooldownA: 0,
+              cooldownB: 0,
+            };
+          }
           return {
             snapshot: this.getSnapshot(state),
             sounds,

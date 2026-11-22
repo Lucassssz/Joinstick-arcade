@@ -1,4 +1,11 @@
 import type { GameGenre, GameId, GameMetadata, PlayerFilterMode } from './types.ts';
+import { PACK_MALAYSIAN_GAME_CATALOG } from './packMalaysianCatalog.ts';
+import { PACK_CHINESE_VIRAL_GAME_CATALOG } from './packChineseViralCatalog.ts';
+import { PACK_GLOBAL_VIRAL_GAME_CATALOG } from './packGlobalViralCatalog.ts';
+import { PACK_RETRO_ARCADE_GAME_CATALOG } from './packRetroArcadeCatalog.ts';
+import { PACK_SPORTS_PHYSICS_GAME_CATALOG } from './packSportsPhysicsCatalog.ts';
+import { PACK_CHAOS_SURVIVAL_GAME_CATALOG } from './packChaosSurvivalCatalog.ts';
+import { PACK_STRATEGY_CLASSICS_CATALOG } from './packStrategyClassicsCatalog.ts';
 
 export const PLAYER_FILTER_OPTIONS: {
   id: PlayerFilterMode;
@@ -6,6 +13,7 @@ export const PLAYER_FILTER_OPTIONS: {
   shortLabel: string;
 }[] = [
   { id: 'all', label: 'All Games', shortLabel: 'All' },
+  { id: 'heritage', label: 'Malaysian Classics', shortLabel: 'MY Classics' },
   { id: 'arcade', label: 'Arcade Games', shortLabel: 'Arcade' },
   { id: 'board', label: 'Board Games', shortLabel: 'Board' },
   { id: 'card', label: 'Card Games', shortLabel: 'Cards' },
@@ -13,6 +21,20 @@ export const PLAYER_FILTER_OPTIONS: {
   { id: 'double', label: 'Double (2P)', shortLabel: '2P' },
   { id: 'multiplayer', label: 'Multiplayer (3+)', shortLabel: '3+P' },
 ];
+
+export const HERITAGE_GAME_IDS = new Set<GameId>([
+  'line-breakers',
+  'desk-flippers',
+  'spin-clash',
+  'marble-ring',
+  'rattan-volley',
+  'step-stomp',
+  'pit-harvest',
+  'big-two-royale',
+  'lucky-21',
+  'ten-pair-showdown',
+  'carrom-arena',
+]);
 
 export const BOARD_GAME_IDS = new Set<GameId>([
   'rich-street',
@@ -25,6 +47,24 @@ export const BOARD_GAME_IDS = new Set<GameId>([
   'neon-checkers',
   'carrom-arena',
   'dungeon-crawl-board',
+  'pit-harvest',
+  'tile-triple',
+  'truth-bomb',
+  'draw-guess-relay',
+  'tile-2048-blitz',
+  'mine-sweep-duel',
+  'geo-pin-rush',
+  'wavelength-sync',
+  'block-stack',
+  'mini-golf-pro',
+  'billiards-snooker',
+  'gomoku-blitz',
+  'chess-blitz',
+  'domino-chain',
+  'hexagon-conquest',
+  'backgammon-sprint',
+  'mancala-jewels',
+  'curling-masters',
 ]);
 
 export const CARD_GAME_IDS = new Set<GameId>([
@@ -36,6 +76,27 @@ export const CARD_GAME_IDS = new Set<GameId>([
   'royal-bluff',
   'dark-flip-clash',
   'sushi-draft',
+  'big-two-royale',
+  'lucky-21',
+  'ten-pair-showdown',
+  'landlord-clash',
+  'speed-mahjong',
+  'liars-dice-tavern',
+  'undercover-word',
+  'midnight-werewolf',
+  'idiom-chain',
+  'word-pulse',
+  'trivia-blitz',
+  'codenames-grid',
+  'fib-party',
+  'rummy-royale',
+  'hearts-breaker',
+  'spades-bidding',
+  'poker-showdown',
+  'tarot-arcana',
+  'baccarat-club',
+  'memory-pairs',
+  'sequence-jack',
 ]);
 
 export function getGameGenre(id: GameId): GameGenre {
@@ -2372,6 +2433,13 @@ export const GAME_CATALOG: GameMetadata[] = [
     ],
     defaultSetting: 3,
   },
+  ...PACK_MALAYSIAN_GAME_CATALOG,
+  ...PACK_CHINESE_VIRAL_GAME_CATALOG,
+  ...PACK_GLOBAL_VIRAL_GAME_CATALOG,
+  ...PACK_RETRO_ARCADE_GAME_CATALOG,
+  ...PACK_SPORTS_PHYSICS_GAME_CATALOG,
+  ...PACK_CHAOS_SURVIVAL_GAME_CATALOG,
+  ...PACK_STRATEGY_CLASSICS_CATALOG,
 ];
 
 export const GAME_BY_ID: Record<GameId, GameMetadata> = GAME_CATALOG.reduce(
@@ -2388,6 +2456,9 @@ export function getGameMeta(id: GameId): GameMetadata {
 
 export function filterGamesByPlayerMode(mode: PlayerFilterMode): GameMetadata[] {
   if (mode === 'all') return GAME_CATALOG;
+  if (mode === 'heritage') {
+    return GAME_CATALOG.filter((game) => HERITAGE_GAME_IDS.has(game.id));
+  }
   if (mode === 'arcade' || mode === 'board' || mode === 'card') {
     return GAME_CATALOG.filter((game) => getGameGenre(game.id) === mode);
   }

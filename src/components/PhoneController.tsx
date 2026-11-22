@@ -11,11 +11,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Clock,
   Crosshair,
   Crown,
   Dices,
   Flame,
   Footprints,
+  Gamepad2,
   Gauge,
   LogOut,
   Maximize2,
@@ -25,11 +27,16 @@ import {
   Pause,
   Power,
   RefreshCw,
+  Repeat,
   RotateCcw,
   Shield,
   SlidersHorizontal,
+  Smile,
+  Sparkles,
   Target,
   Trophy,
+  Users,
+  Vote,
   Waves,
   WifiOff,
   Wind,
@@ -44,6 +51,13 @@ import {
   loadControllerPrefs,
   saveControllerPrefs,
 } from './ControllerSettingsOverlay';
+import { EasyArrowsDeck, SwipeTrackpadDeck } from './GamePadDecks';
+import {
+  ArcadePadMode,
+  getGamePadProfile,
+  PadMode,
+} from '../shared/padProfiles';
+import { AvatarPickerGrid, PlayerAvatar } from './PlayerAvatar';
 import {
   CARD_GAME_IDS,
   filterGamesByPlayerMode,
@@ -51,12 +65,22 @@ import {
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
 import { getMutatorSpec } from '../shared/modifiers';
+import {
+  AVATAR_PRESETS,
+  getAvatarPreset,
+  getTeamsForMode,
+  getTeamSpec,
+  isValidAvatarId,
+  TEAM_MODE_OPTIONS,
+  type TeamId,
+} from '../shared/party';
 import { CardControllerDeck } from './CardControllerDeck';
 import {
   ActionButtonSpec,
   CardClientAction,
   CardPrivateState,
   ControllerInput,
+  GameId,
   PLAYER_PALETTE,
   RemoteDirection,
   RoomSnapshot,
@@ -138,6 +162,18 @@ export function PhoneController({
     () => defaultName || CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)]
   );
   const [preferredColor, setPreferredColor] = useState(PLAYER_PALETTE[0].id);
+  const [selectedAvatarId, setSelectedAvatarId] = useState<string>(() => {
+    if (!embedded && typeof window !== 'undefined') {
+      try {
+        const saved = window.localStorage.getItem('joinstick_avatar_v1');
+        if (saved && isValidAvatarId(saved)) return saved;
+      } catch {
+        // Ignore storage error
+      }
+    }
+    return AVATAR_PRESETS[Math.floor(Math.random() * AVATAR_PRESETS.length)].id;
+  });
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   const [wsConnected, setWsConnected] = useState(false);
   const [joinedPlayerId, setJoinedPlayerId] = useState<string | null>(null);
@@ -153,6 +189,9 @@ export function PhoneController({
   const [repositionMode, setRepositionMode] = useState(false);
   const [cardState, setCardState] = useState<CardPrivateState | null>(null);
   const [manualReconnecting, setManualReconnecting] = useState(false);
+  const [autoTapPinned, setAutoTapPinned] = useState(false);
+  const [emoteDrawerOpen, setEmoteDrawerOpen] = useState(false);
+  const [connectedGamepadName, setConnectedGamepadName] = useState<string | null>(null);
   const [floatingOriginOffset, setFloatingOriginOffset] = useState<{ x: number; y: number }>({
     x: 0,
     y: 0,
@@ -162,6 +201,10 @@ export function PhoneController({
   const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastReconnectTapRef = useRef<number>(0);
+  const lastEmoteAtRef = useRef<number>(0);
+  const autoTapPulseRef = useRef<boolean>(false);
+  const hwActiveRef = useRef<boolean>(false);
+  const pulseATimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
   const userExitedPhoneFsRef = useRef<boolean>(false);
   const dragTargetRef = useRef<{
@@ -192,6 +235,7 @@ export function PhoneController({
   const roomCodeRef = useRef<string>(roomCode);
   const playerNameRef = useRef<string>(playerName);
   const preferredColorRef = useRef<string>(preferredColor);
+  const selectedAvatarIdRef = useRef<string>(selectedAvatarId);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
 
   const inputRef = useRef<ControllerInput>({ dx: 0, dy: 0, a: false, b: false });
@@ -223,6 +267,9 @@ export function PhoneController({
   useEffect(() => {
     preferredColorRef.current = preferredColor;
   }, [preferredColor]);
+  useEffect(() => {
+    selectedAvatarIdRef.current = selectedAvatarId;
+  }, [selectedAvatarId]);
   useEffect(() => {
     isCssRotatedRef.current = isCssRotated;
   }, [isCssRotated]);
@@ -400,7 +447,7 @@ export function PhoneController({
     const rounded = {
       dx: Math.round(inp.dx * 100) / 100,
       dy: Math.round(inp.dy * 100) / 100,
-      a: inp.a,
+      a: Boolean(inp.a || autoTapPulseRef.current),
       b: inp.b,
     };
     const key = `${rounded.dx}|${rounded.dy}|${rounded.a ? 1 : 0}|${rounded.b ? 1 : 0}`;
@@ -416,12 +463,18 @@ export function PhoneController({
     ws.send({ type: 'controller:input', input: rounded });
   };
 
-  // Reset all pointer & button locks cleanly whenever game or room status transitions
-  const resetControlsState = () => {
+  // Reset all pointer & button locks cleanly whenever game, pad mode, or room status transitions
+  const resetControlsState = (clearAutoTap = false) => {
     stickPointerId.current = null;
     btnAPointers.current.clear();
     btnBPointers.current.clear();
     keysDownRef.current.clear();
+    if (pulseATimerRef.current) {
+      clearTimeout(pulseATimerRef.current);
+      pulseATimerRef.current = null;
+    }
+    autoTapPulseRef.current = false;
+    if (clearAutoTap) setAutoTapPinned(false);
     inputRef.current = { dx: 0, dy: 0, a: false, b: false };
     lastSentRef.current = '';
     setStickActive(false);
@@ -433,10 +486,11 @@ export function PhoneController({
   };
 
   useEffect(() => {
-    resetControlsState();
+    resetControlsState(true);
     setPassHostOpen(false);
     setCloseRoomConfirmOpen(false);
     setRepositionMode(false);
+    setEmoteDrawerOpen(false);
     if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN') {
       setCardState(null);
     }
@@ -532,6 +586,7 @@ export function PhoneController({
           name: playerNameRef.current.trim() || 'Player',
           playerId: storedPlayerIdRef.current,
           preferredColorId: preferredColorRef.current,
+          avatarId: selectedAvatarIdRef.current,
         });
       }
     }, 1_400);
@@ -552,6 +607,7 @@ export function PhoneController({
             name: playerNameRef.current.trim() || 'Player',
             playerId: storedPlayerIdRef.current,
             preferredColorId: preferredColorRef.current,
+            avatarId: selectedAvatarIdRef.current,
           });
         } else if (autoJoin && initialRoomCode.length === 4) {
           socket.send({
@@ -559,6 +615,7 @@ export function PhoneController({
             code: initialRoomCode.toUpperCase(),
             name: playerNameRef.current.trim() || 'Player',
             preferredColorId: preferredColorRef.current,
+            avatarId: selectedAvatarIdRef.current,
           });
         }
       },
@@ -661,6 +718,128 @@ export function PhoneController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joinedPlayerId]);
 
+  // Auto-Tap / Turbo Oscillator loop for Pad 1 & Pad 2
+  useEffect(() => {
+    if (
+      !autoTapPinned ||
+      !joinedPlayerId ||
+      !room ||
+      CARD_GAME_IDS.has(room.selectedGameId) ||
+      room.status !== 'PLAYING'
+    ) {
+      if (autoTapPulseRef.current) {
+        autoTapPulseRef.current = false;
+        setPressedA(inputRef.current.a);
+        sendCurrentInput(true);
+      }
+      return;
+    }
+    const halfPeriodMs = Math.max(28, Math.round(500 / controllerPrefs.autoTapRateHz));
+    const timer = window.setInterval(() => {
+      autoTapPulseRef.current = !autoTapPulseRef.current;
+      setPressedA(Boolean(inputRef.current.a || autoTapPulseRef.current));
+      sendCurrentInput(true);
+    }, halfPeriodMs);
+    return () => {
+      window.clearInterval(timer);
+      autoTapPulseRef.current = false;
+      setPressedA(inputRef.current.a);
+      sendCurrentInput(true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTapPinned, controllerPrefs.autoTapRateHz, joinedPlayerId, room?.selectedGameId, room?.status]);
+
+  // Physical Bluetooth / USB Hardware Gamepad Poller (Xbox, PS, Switch Pro, 8BitDo)
+  useEffect(() => {
+    if (embedded || !controllerPrefs.bluetoothEnabled || typeof navigator === 'undefined') {
+      setConnectedGamepadName(null);
+      return;
+    }
+    const scanConnected = () => {
+      try {
+        const pads = navigator.getGamepads?.() ?? [];
+        const first = Array.from(pads).find((gp) => gp && gp.connected);
+        setConnectedGamepadName(first ? first.id : null);
+      } catch {
+        setConnectedGamepadName(null);
+      }
+    };
+    scanConnected();
+    window.addEventListener('gamepadconnected', scanConnected);
+    window.addEventListener('gamepaddisconnected', scanConnected);
+    return () => {
+      window.removeEventListener('gamepadconnected', scanConnected);
+      window.removeEventListener('gamepaddisconnected', scanConnected);
+    };
+  }, [embedded, controllerPrefs.bluetoothEnabled]);
+
+  useEffect(() => {
+    if (
+      embedded ||
+      !controllerPrefs.bluetoothEnabled ||
+      !joinedPlayerId ||
+      !room ||
+      CARD_GAME_IDS.has(room.selectedGameId) ||
+      (room.status !== 'PLAYING' && room.status !== 'COUNTDOWN')
+    ) {
+      hwActiveRef.current = false;
+      return;
+    }
+
+    let rafId = 0;
+    const poll = () => {
+      try {
+        const pads = navigator.getGamepads?.() ?? [];
+        const gp = Array.from(pads).find((p) => p && p.connected);
+        if (gp) {
+          const ax = gp.axes[0] ?? 0;
+          const ay = gp.axes[1] ?? 0;
+          let dx = Math.abs(ax) > 0.15 ? ax : 0;
+          let dy = Math.abs(ay) > 0.15 ? ay : 0;
+          if (gp.buttons[14]?.pressed) dx -= 1;
+          if (gp.buttons[15]?.pressed) dx += 1;
+          if (gp.buttons[12]?.pressed) dy -= 1;
+          if (gp.buttons[13]?.pressed) dy += 1;
+          const len = Math.hypot(dx, dy);
+          if (len > 1) {
+            dx /= len;
+            dy /= len;
+          }
+          const a = Boolean(
+            gp.buttons[0]?.pressed || gp.buttons[2]?.pressed || gp.buttons[7]?.pressed
+          );
+          const b = Boolean(
+            gp.buttons[1]?.pressed || gp.buttons[3]?.pressed || gp.buttons[6]?.pressed
+          );
+          const hasHwSignal = Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01 || a || b;
+          if (hasHwSignal) {
+            hwActiveRef.current = true;
+            inputRef.current = { dx, dy, a, b };
+            setKnobOffset({ x: dx * 38, y: dy * 38 });
+            setStickActive(len > 0);
+            setPressedA(a || autoTapPulseRef.current);
+            setPressedB(b);
+            sendCurrentInput(false);
+          } else if (hwActiveRef.current) {
+            hwActiveRef.current = false;
+            inputRef.current = { dx: 0, dy: 0, a: false, b: false };
+            setKnobOffset({ x: 0, y: 0 });
+            setStickActive(false);
+            setPressedA(autoTapPulseRef.current);
+            setPressedB(false);
+            sendCurrentInput(true);
+          }
+        }
+      } catch {
+        // Ignore browser gamepad security errors
+      }
+      rafId = window.requestAnimationFrame(poll);
+    };
+    rafId = window.requestAnimationFrame(poll);
+    return () => window.cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, controllerPrefs.bluetoothEnabled, joinedPlayerId, room?.selectedGameId, room?.status]);
+
   // Optional Keyboard Support for Desktop Test Controller Mode
   useEffect(() => {
     if (keyboardProfile === 'none' || !joinedPlayerId) return;
@@ -753,7 +932,31 @@ export function PhoneController({
       name: playerName.trim() || 'Player',
       playerId: storedPlayerIdRef.current,
       preferredColorId: preferredColor,
+      avatarId: selectedAvatarId,
     });
+  };
+
+  const handleSelectAvatar = (avatarId: string) => {
+    setSelectedAvatarId(avatarId);
+    selectedAvatarIdRef.current = avatarId;
+    if (!embedded && typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem('joinstick_avatar_v1', avatarId);
+      } catch {
+        // Ignore storage failure
+      }
+    }
+    if (joinedPlayerIdRef.current) {
+      wsRef.current?.send({ type: 'player:set-avatar', avatarId });
+    }
+  };
+
+  const handleSelectTeam = (teamId: TeamId) => {
+    wsRef.current?.send({ type: 'player:set-team', teamId });
+  };
+
+  const handleCastCupVote = (gameId: GameId) => {
+    wsRef.current?.send({ type: 'tournament:vote', gameId });
   };
 
   const handleLeave = () => {
@@ -786,6 +989,80 @@ export function PhoneController({
   const me = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
   const gameMeta = room ? getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang) : null;
   const isCardGame = Boolean(room && CARD_GAME_IDS.has(room.selectedGameId));
+  const currentPadProfile = room ? getGamePadProfile(room.selectedGameId) : null;
+  const recommendedPadMode: PadMode = isCardGame
+    ? 'card'
+    : currentPadProfile && currentPadProfile.pad !== 'card'
+    ? currentPadProfile.pad
+    : 'analog';
+  const activeArcadePad: ArcadePadMode = (() => {
+    if (!room || isCardGame) return 'analog';
+    const override = controllerPrefs.perGamePadOverrides[room.selectedGameId];
+    if (override) return override;
+    if (controllerPrefs.autoSelectPadPerGame && currentPadProfile && currentPadProfile.pad !== 'card') {
+      return currentPadProfile.pad;
+    }
+    return controllerPrefs.padMode;
+  })();
+  const activePadMode: PadMode = isCardGame ? 'card' : activeArcadePad;
+  const effectiveArrowsStrictFourWay =
+    controllerPrefs.arrowsStrictFourWay !== null
+      ? controllerPrefs.arrowsStrictFourWay
+      : currentPadProfile?.arrowsStrictFourWay ?? true;
+  const effectiveTrackpadMode =
+    controllerPrefs.trackpadModeOverride ?? currentPadProfile?.trackpadMode ?? 'glide';
+  const effectiveTrackpadTapForA =
+    controllerPrefs.trackpadTapForAOverride !== null
+      ? controllerPrefs.trackpadTapForAOverride
+      : currentPadProfile?.trackpadTapForA ?? false;
+  const effectiveCardDefaultView = currentPadProfile?.cardDefaultView ?? 'fan';
+
+  const handleSelectArcadePad = (nextPad: ArcadePadMode) => {
+    if (!room) return;
+    resetControlsState(true);
+    setRepositionMode(false);
+    updateControllerPrefs({
+      ...controllerPrefsRef.current,
+      padMode: controllerPrefsRef.current.autoSelectPadPerGame
+        ? controllerPrefsRef.current.padMode
+        : nextPad,
+      perGamePadOverrides: {
+        ...controllerPrefsRef.current.perGamePadOverrides,
+        [room.selectedGameId]: nextPad,
+      },
+    });
+  };
+
+  const handleSetVector = (dx: number, dy: number) => {
+    inputRef.current.dx = dx;
+    inputRef.current.dy = dy;
+    sendCurrentInput(true);
+  };
+
+  const handlePulseActionA = () => {
+    if (repositionMode || settingsOpen) return;
+    if (pulseATimerRef.current) clearTimeout(pulseATimerRef.current);
+    inputRef.current.a = true;
+    setPressedA(true);
+    sendCurrentInput(true);
+    pulseATimerRef.current = setTimeout(() => {
+      pulseATimerRef.current = null;
+      if (btnAPointers.current.size === 0) {
+        inputRef.current.a = false;
+        setPressedA(Boolean(autoTapPulseRef.current));
+        sendCurrentInput(true);
+      }
+    }, 115);
+  };
+
+  const handleSendQuickEmote = (emoji: string) => {
+    const now = Date.now();
+    if (now - lastEmoteAtRef.current < 450) return;
+    lastEmoteAtRef.current = now;
+    wsRef.current?.send({ type: 'player:emote', emoji });
+    setEmoteDrawerOpen(false);
+  };
+
   const isCardRedWarning = Boolean(
     isCardGame &&
       room?.status === 'PLAYING' &&
@@ -1102,7 +1379,7 @@ export function PhoneController({
           onChange={updateControllerPrefs}
           onReset={handleResetControllerPrefs}
           onEnterDragMode={
-            room && (room.status === 'PLAYING' || room.status === 'COUNTDOWN')
+            room && (room.status === 'PLAYING' || room.status === 'COUNTDOWN') && activePadMode === 'analog'
               ? () => {
                   resetControlsState();
                   setSettingsOpen(false);
@@ -1116,6 +1393,9 @@ export function PhoneController({
           actionBLabel={gameMeta?.controllerSchema.actionB.label ?? 'B'}
           actionAHex={gameMeta?.controllerSchema.actionA.colorHex ?? '#FF4D2E'}
           actionBHex={gameMeta?.controllerSchema.actionB.colorHex ?? '#00C2FF'}
+          activePadMode={activePadMode}
+          recommendedPadMode={recommendedPadMode}
+          connectedGamepadName={connectedGamepadName}
         />
       </>
     );
@@ -1205,7 +1485,7 @@ export function PhoneController({
                 {t('Back', '返回')}
               </button>
             ) : (
-              <span className="font-display font-bold text-lg">Cloocade Party</span>
+              <span className="font-display font-bold text-lg">JoinStick Arcade</span>
             )}
             <div className="flex items-center gap-2.5">
               <LanguageToggle compact />
@@ -1267,6 +1547,25 @@ export function PhoneController({
                 onChange={(e) => setPlayerName(e.target.value)}
                 placeholder={t('Your arcade name', '输入你的昵称')}
                 className="w-full h-12 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none text-base font-medium text-white"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-[#A5AEBD]">
+                  {t('Choose Avatar (Preset Only)', '选择你的头像')}
+                </span>
+                <span className="text-[11px] font-bold text-[#00C2FF]">
+                  {(() => {
+                    const preset = getAvatarPreset(selectedAvatarId);
+                    return `${preset.emoji} ${lang === 'zh' ? preset.labelZh : preset.label}`;
+                  })()}
+                </span>
+              </div>
+              <AvatarPickerGrid
+                selectedAvatarId={selectedAvatarId}
+                onSelect={handleSelectAvatar}
+                compact
               />
             </div>
 
@@ -1450,12 +1749,7 @@ export function PhoneController({
                 className="tactile-btn min-h-[54px] px-4 py-2.5 rounded-xl bg-[#1A1E26] hover:bg-[#242A36] border border-[#2A303D] flex items-center justify-between gap-3 text-left cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span
-                    className="w-8 h-8 rounded-lg font-mono text-xs font-black flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: p.color.hex, color: p.color.textOnColor }}
-                  >
-                    P{p.slotIndex + 1}
-                  </span>
+                  <PlayerAvatar avatarId={p.avatarId} colorHex={p.color.hex} size="sm" />
                   <span className="font-display font-bold text-base text-white truncate">
                     {p.name}
                   </span>
@@ -1479,6 +1773,99 @@ export function PhoneController({
       </button>
     </div>
   );
+
+  const avatarPickerOverlay = avatarPickerOpen && (
+    <div className="absolute inset-0 z-50 bg-[#121419]/96 backdrop-blur-sm p-4 flex flex-col justify-between">
+      <div className="flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="sm" />
+          <div>
+            <div className="font-display text-base font-extrabold text-white leading-tight">
+              {t('Choose Your Avatar', '选择专属头像')}
+            </div>
+            <div className="text-[11px] text-[#9CA3AF]">
+              {t('Pick any preset avatar — updates live on the TV!', '点击预设头像，大屏实时更新！')}
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAvatarPickerOpen(false)}
+          aria-label={t('Close Avatar Picker', '关闭头像选择')}
+          className="h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto arcade-scrollbar my-3 pr-1 flex items-center">
+        <div className="w-full">
+          <AvatarPickerGrid
+            selectedAvatarId={me.avatarId}
+            onSelect={(id) => {
+              handleSelectAvatar(id);
+              setAvatarPickerOpen(false);
+            }}
+          />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setAvatarPickerOpen(false)}
+        className="h-9 w-full rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-white cursor-pointer shrink-0"
+      >
+        {t('Done', '完成')}
+      </button>
+    </div>
+  );
+
+  const renderTeamSelector = (compact = false) => {
+    if (room.teamMode === 'ffa') return null;
+    const teams = getTeamsForMode(room.teamMode);
+    if (teams.length === 0) return null;
+    const modeInfo = TEAM_MODE_OPTIONS.find((m) => m.id === room.teamMode);
+    return (
+      <div className={compact ? 'mt-2 pt-2 border-t border-[#262C38]' : 'mt-2.5 pt-2.5 border-t border-[#262C38]'}>
+        <div className="flex items-center justify-between text-[10px] font-bold text-[#9CA3AF] mb-1.5">
+          <span className="inline-flex items-center gap-1">
+            <Users className="w-3 h-3 text-[#FFB800]" />
+            {t('Your Team', '选择队伍')}
+          </span>
+          {modeInfo && (
+            <span className="text-[#FFB800]">
+              {modeInfo.icon} {lang === 'zh' ? modeInfo.labelZh : modeInfo.label}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {teams.map((tid) => {
+            const spec = getTeamSpec(tid);
+            if (!spec) return null;
+            const active = me.teamId === tid;
+            return (
+              <button
+                key={tid}
+                type="button"
+                onClick={() => handleSelectTeam(tid)}
+                className={`flex-1 min-w-[70px] h-7 px-2 rounded-lg text-[11px] font-extrabold inline-flex items-center justify-center gap-1 border transition-all cursor-pointer ${
+                  active ? 'scale-[1.03]' : 'opacity-70 hover:opacity-100'
+                }`}
+                style={{
+                  backgroundColor: active ? spec.colorHex : `${spec.colorHex}18`,
+                  borderColor: active ? '#FFFFFF' : `${spec.colorHex}88`,
+                  color: active ? spec.textColor : spec.colorHex,
+                }}
+              >
+                <span>{spec.emoji}</span>
+                <span>{lang === 'zh' ? spec.nameZh : spec.shortName}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   const closeRoomOverlay = closeRoomConfirmOpen && isRoomHost && (
     <div className="absolute inset-0 z-50 bg-[#121419]/95 backdrop-blur-sm p-4 flex flex-col items-center justify-center text-center">
@@ -1524,15 +1911,18 @@ export function PhoneController({
   if (room.status === 'SETUP') {
     return renderConnectedShell(
       <div className="relative flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+        {avatarPickerOverlay}
         {closeRoomOverlay}
         <div className="flex items-center justify-between gap-3 h-11 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span
-              className="w-8 h-8 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0"
-              style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+            <button
+              type="button"
+              onClick={() => setAvatarPickerOpen(true)}
+              title={t('Tap to change avatar', '点击更换头像')}
+              className="relative shrink-0 cursor-pointer hover:scale-105 transition-transform"
             >
-              P{me.slotIndex + 1}
-            </span>
+              <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="sm" />
+            </button>
             <div className="min-w-0 leading-tight">
               <div className="font-bold text-sm truncate flex items-center gap-1.5">
                 <span className="truncate">{me.name}</span>
@@ -1544,7 +1934,7 @@ export function PhoneController({
                 )}
               </div>
               <div className="text-[11px] text-[#9CA3AF] font-mono">
-                {t(`Room ${room.code} · Setup`, `房间 ${room.code} · 等待集结`)}
+                {t(`Room ${room.code} · Tap avatar to change`, `房间 ${room.code} · 点击头像可更换`)}
               </div>
             </div>
           </div>
@@ -1627,6 +2017,8 @@ export function PhoneController({
                 </span>
               </div>
             </div>
+
+            {renderTeamSelector(false)}
           </div>
 
           <div className="flex flex-col gap-3 justify-center">
@@ -1700,18 +2092,21 @@ export function PhoneController({
     if (isRoomHost) {
       return renderConnectedShell(
         <div className="relative flex flex-col justify-between h-full w-full max-w-4xl mx-auto">
+          {avatarPickerOverlay}
           {passHostOverlay}
           {closeRoomOverlay}
 
           {/* Slim Remote Top Bar */}
           <div className="flex items-center justify-between gap-2 h-10 shrink-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span
-                className="w-7 h-7 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0"
-                style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+              <button
+                type="button"
+                onClick={() => setAvatarPickerOpen(true)}
+                title={t('Tap to change avatar', '点击更换头像')}
+                className="shrink-0 cursor-pointer hover:scale-105 transition-transform"
               >
-                P{me.slotIndex + 1}
-              </span>
+                <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+              </button>
               <div className="min-w-0 leading-tight">
                 <div className="font-bold text-xs sm:text-sm truncate flex items-center gap-1.5">
                   <span className="truncate">{me.name}</span>
@@ -1888,6 +2283,7 @@ export function PhoneController({
                     </span>
                   </div>
                 )}
+                {renderTeamSelector(true)}
               </div>
 
               {/* Host's own Ready Toggle */}
@@ -1969,15 +2365,18 @@ export function PhoneController({
 
     // --- NON-HOST PLAYER READY CONTROLLER ---
     return renderConnectedShell(
-      <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+      <div className="relative flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+        {avatarPickerOverlay}
         <div className="flex items-center justify-between gap-3 h-11 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span
-              className="w-8 h-8 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0"
-              style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+            <button
+              type="button"
+              onClick={() => setAvatarPickerOpen(true)}
+              title={t('Tap to change avatar', '点击更换头像')}
+              className="shrink-0 cursor-pointer hover:scale-105 transition-transform"
             >
-              P{me.slotIndex + 1}
-            </span>
+              <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="sm" />
+            </button>
             <div className="min-w-0 leading-tight">
               <div className="font-bold text-sm truncate">{me.name}</div>
               <div className="text-[11px] text-[#9CA3AF] font-mono">
@@ -2077,6 +2476,7 @@ export function PhoneController({
                 </div>
               )}
             </div>
+            {renderTeamSelector(true)}
           </div>
 
           <div className="flex flex-col gap-2.5 justify-center">
@@ -2149,19 +2549,178 @@ export function PhoneController({
   }
 
   // =====================================================================
+  // STATE 3C: 5-GAME CUP GROUP GAME VOTING PAD (Every Match Selection!)
+  // =====================================================================
+  if (room.status === 'VOTING' && room.tournament?.vote) {
+    const vote = room.tournament.vote;
+    const isLocked = vote.phase === 'locked';
+    const myVotedGameId = vote.votes[me.id] ?? null;
+    const totalVotes = Object.keys(vote.votes).length;
+    const optionLetters = ['A', 'B', 'C'];
+
+    return renderConnectedShell(
+      <div className="relative flex flex-col justify-between h-full w-full max-w-4xl mx-auto gap-2">
+        {closeRoomOverlay}
+
+        {/* Voting Header */}
+        <div className="flex items-center justify-between gap-2 h-10 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FFB800]/20 border border-[#FFB800]/55 text-[#FFB800] font-mono text-[11px] font-black shrink-0">
+              <Trophy className="w-3 h-3" />
+              <span>
+                {t(
+                  `Cup ${vote.roundIndex + 1}/${room.tournament.totalGames}`,
+                  `锦标赛 ${vote.roundIndex + 1}/${room.tournament.totalGames}`
+                )}
+              </span>
+            </span>
+            <span className="font-display font-extrabold text-sm text-white truncate">
+              {isLocked
+                ? t('Winner Locked!', '投票已锁定！')
+                : t('Vote Next Game!', '投票选择本局游戏！')}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span
+              className={`h-8 px-2.5 rounded-lg border font-mono text-xs font-black inline-flex items-center gap-1 tabular-nums ${
+                isLocked
+                  ? 'bg-[#10D98B]/20 border-[#10D98B] text-[#10D98B]'
+                  : vote.secondsLeft <= 5
+                  ? 'bg-[#FF4D2E]/20 border-[#FF4D2E] text-[#FF9B8A] animate-pulse'
+                  : 'bg-[#1A1E26] border-[#2A303D] text-[#FFB800]'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>{isLocked ? t('GO!', '出发!') : `${vote.secondsLeft}s`}</span>
+            </span>
+            {isRoomHost && !isLocked && (
+              <button
+                type="button"
+                onClick={() => wsRef.current?.send({ type: 'tournament:force-lock-vote' })}
+                className="tactile-btn h-8 px-2.5 rounded-lg bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-[11px] font-extrabold cursor-pointer"
+              >
+                {t('Lock Now', '立即锁定')}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 3 Side-by-Side Candidate Game Vote Cards */}
+        <div className="flex-1 min-h-0 grid grid-cols-3 gap-2.5 items-stretch">
+          {vote.candidates.map((gameId, idx) => {
+            const gMeta = getLocalizedGameMeta(getGameMeta(gameId), lang);
+            const voteCount = Object.values(vote.votes).filter((v) => v === gameId).length;
+            const isMyVote = myVotedGameId === gameId;
+            const isWinner = isLocked && vote.winningGameId === gameId;
+            const isDimmed = isLocked && !isWinner;
+
+            return (
+              <button
+                key={gameId}
+                type="button"
+                disabled={isLocked}
+                onClick={() => handleCastCupVote(gameId)}
+                className={`tactile-btn relative rounded-2xl p-3 border-2 text-left flex flex-col justify-between gap-2 transition-all overflow-hidden ${
+                  isWinner
+                    ? 'bg-[#112B22] border-[#10D98B] shadow-[0_0_24px_rgba(16,217,139,0.35)] scale-[1.02]'
+                    : isMyVote
+                    ? 'bg-[#221D11] border-[#FFB800] shadow-[0_0_18px_rgba(255,184,0,0.28)]'
+                    : isDimmed
+                    ? 'bg-[#151820] border-[#242934] opacity-40'
+                    : 'bg-[#1A1E26] border-[#2C3344] hover:border-[#00C2FF] cursor-pointer'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span
+                    className={`h-6 px-2 rounded-md font-mono text-[11px] font-black inline-flex items-center justify-center ${
+                      isWinner
+                        ? 'bg-[#10D98B] text-[#0A1913]'
+                        : isMyVote
+                        ? 'bg-[#FFB800] text-[#14120B]'
+                        : 'bg-[#242A36] text-[#D1D5DB]'
+                    }`}
+                  >
+                    {optionLetters[idx] ?? idx + 1}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-[#101217] border border-[#2A303D] font-mono text-[11px] font-black text-white tabular-nums inline-flex items-center gap-1">
+                    <Vote className="w-3 h-3 text-[#00C2FF]" />
+                    {voteCount}
+                  </span>
+                </div>
+
+                <div className="min-w-0 flex-1 flex flex-col justify-center">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#00C2FF] truncate">
+                    {gMeta.category}
+                  </div>
+                  <div className="font-display text-sm sm:text-base font-extrabold text-white leading-tight line-clamp-2 mt-0.5">
+                    {gMeta.name}
+                  </div>
+                  <p className="text-[11px] text-[#A5AEBD] mt-1 line-clamp-2 leading-snug">
+                    {gMeta.tagline}
+                  </p>
+                </div>
+
+                <div
+                  className={`h-8 rounded-xl font-display font-extrabold text-xs flex items-center justify-center gap-1 ${
+                    isWinner
+                      ? 'bg-[#10D98B] text-[#0A1913]'
+                      : isMyVote
+                      ? 'bg-[#FFB800] text-[#14120B]'
+                      : 'bg-[#242A36] text-white'
+                  }`}
+                >
+                  {(isMyVote || isWinner) && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                  <span>
+                    {isWinner
+                      ? t('WINNER!', '本局胜出！')
+                      : isMyVote
+                      ? t('VOTED', '已投票')
+                      : t('Tap to Vote', '点击投票')}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Bottom Voting Hint */}
+        <div className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF] shrink-0">
+          <span>
+            {t(
+              'Watch all three 5-second live previews on the TV!',
+              '观看大屏上 3 个游戏的 5 秒实机视频，投出你的一票！'
+            )}
+          </span>
+          <span className="font-mono font-bold text-[#00C2FF] shrink-0 tabular-nums">
+            {totalVotes}/{room.players.length} {t('Voted', '已投')}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================================================
   // STATE 4: RESULTS SUMMARY ON PHONE (With Host Remote & Tournament Marks!)
   // =====================================================================
   if (room.status === 'RESULTS') {
     const myRank = room.rankings.find((r) => r.playerId === me.id);
     const myStanding = activeTournament?.standings.find((s) => s.playerId === me.id) ?? null;
+    const myTeamSpec = room.teamMode !== 'ffa' ? getTeamSpec(me.teamId) : null;
+    const myTeamStanding =
+      room.teamMode !== 'ffa'
+        ? (activeTournament?.teamStandings ?? room.teamRankings).find((tr) => tr.teamId === me.teamId) ??
+          null
+        : null;
 
     const resultsOptionLabel = activeTournament
       ? room.remoteFocus.modalIndex === 0
         ? activeTournament.completed
-          ? t('New Tournament', '再来一届锦标赛')
+          ? t('New 5-Game Cup', '再来一届锦标赛')
           : t(
-              `Next (${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames})`,
-              `下一局 (${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames})`
+              `Vote Next (${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames})`,
+              `投票第 ${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames} 局`
             )
         : t('Game Room', '返回游戏厅')
       : room.remoteFocus.modalIndex === 0
@@ -2199,11 +2758,14 @@ export function PhoneController({
             </span>
           </div>
         )}
-        <div
-          className="w-13 h-13 rounded-2xl flex items-center justify-center font-display text-2xl font-extrabold"
-          style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
-        >
-          #{activeTournament?.completed && myStanding ? myStanding.rank : myRank?.rank ?? '-'}
+        <div className="flex items-center justify-center gap-3">
+          <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="md" />
+          <div
+            className="w-13 h-13 rounded-2xl flex items-center justify-center font-display text-2xl font-extrabold"
+            style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
+          >
+            #{activeTournament?.completed && myStanding ? myStanding.rank : myRank?.rank ?? '-'}
+          </div>
         </div>
         <div>
           <h2 className="font-display text-2xl font-extrabold">
@@ -2219,6 +2781,22 @@ export function PhoneController({
             {me.name} · {myRank?.score ?? me.score} {t('pts', '分')}
             {myRank?.highlight ? ` · ${translateGameText(myRank.highlight, lang)}` : ''}
           </p>
+          {myTeamSpec && myTeamStanding && (
+            <div
+              className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-extrabold"
+              style={{
+                backgroundColor: `${myTeamSpec.colorHex}20`,
+                borderColor: `${myTeamSpec.colorHex}90`,
+                color: myTeamSpec.colorHex,
+              }}
+            >
+              <span>{myTeamSpec.emoji}</span>
+              <span>{lang === 'zh' ? myTeamSpec.nameZh : myTeamSpec.name}</span>
+              <span className="text-white font-mono">
+                #{myTeamStanding.rank} · {myTeamStanding.score}
+              </span>
+            </div>
+          )}
           {myStanding && (
             <div className="mt-1.5 inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#1A1E26] border border-[#2F3747] text-xs font-mono">
               <span className="text-[#10D98B] font-extrabold">
@@ -2373,12 +2951,18 @@ export function PhoneController({
       <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
         <div className="flex items-center justify-between gap-3 h-10 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span
-              className="w-7 h-7 rounded-md font-mono font-bold text-xs flex items-center justify-center shrink-0"
-              style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
-            >
-              P{me.slotIndex + 1}
-            </span>
+            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+            {room.teamMode !== 'ffa' && (() => {
+              const spec = getTeamSpec(me.teamId);
+              return spec ? (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black shrink-0"
+                  style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
+                >
+                  {spec.emoji}
+                </span>
+              ) : null;
+            })()}
             {activeTournament && (
               <span className="px-1.5 py-0.5 rounded bg-[#FFB800]/20 text-[#FFB800] font-mono text-[10px] font-black shrink-0">
                 🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
@@ -2455,6 +3039,52 @@ export function PhoneController({
                   {schema.actionB.label} · {schema.actionB.sublabel}
                 </span>
               </div>
+              {currentPadProfile && (
+                <div className="pt-1.5 mt-1 border-t border-[#262C38] space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-[#10D98B] font-bold inline-flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" />
+                      {t('Auto-Matched Pad', '已自动匹配最佳手柄')}
+                    </span>
+                    <span className="font-mono text-white font-bold">
+                      {activePadMode === 'card'
+                        ? t('Pad 4 · Card Table', '4号 · 扑克手牌台')
+                        : activePadMode === 'arrows'
+                        ? t('Pad 2 · Easy Arrows', '2号 · 简易大箭头')
+                        : activePadMode === 'trackpad'
+                        ? t('Pad 3 · Swipe Pad', '3号 · 触控滑板')
+                        : t('Pad 1 · Pro Stick', '1号 · 360° 摇杆')}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-[#9CA3AF] leading-snug">
+                    {lang === 'zh' ? currentPadProfile.reasonZh : currentPadProfile.reasonEn}
+                  </p>
+                  {!isCardGame && (
+                    <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-[#101217] border border-[#242934]">
+                      {(
+                        [
+                          { id: 'analog', en: '1 Stick', zh: '1 摇杆' },
+                          { id: 'arrows', en: '2 Arrows', zh: '2 箭头' },
+                          { id: 'trackpad', en: '3 Swipe', zh: '3 滑控' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => handleSelectArcadePad(opt.id)}
+                          className={`py-1 rounded text-[10px] font-bold cursor-pointer whitespace-nowrap ${
+                            activeArcadePad === opt.id
+                              ? 'bg-[#FF4D2E] text-white'
+                              : 'text-[#9CA3AF] hover:text-white'
+                          }`}
+                        >
+                          {t(opt.en, opt.zh)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -2666,14 +3296,22 @@ export function PhoneController({
       ) : (
         <div className="flex items-center justify-between gap-3 h-10 shrink-0 px-1">
           <div className="flex items-center gap-2 min-w-0">
-            <span
-              className="w-7 h-7 rounded-md font-mono font-bold text-xs flex items-center justify-center shrink-0"
-              style={{ backgroundColor: me.color.hex, color: me.color.textOnColor }}
-            >
-              P{me.slotIndex + 1}
-            </span>
+            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
             <div className="min-w-0 leading-tight">
-              <div className="text-xs font-bold text-white truncate">{me.name}</div>
+              <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                <span className="truncate">{me.name}</span>
+                {room.teamMode !== 'ffa' && (() => {
+                  const spec = getTeamSpec(me.teamId);
+                  return spec ? (
+                    <span
+                      className="px-1.5 py-0.2 rounded text-[9px] font-mono font-black shrink-0"
+                      style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
+                    >
+                      {spec.emoji} {lang === 'zh' ? spec.nameZh : spec.shortName}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
               <div className="text-[11px] font-mono text-[#9CA3AF] truncate tabular-nums">
                 {translateGameText(me.statText, lang)}
               </div>
@@ -2697,9 +3335,68 @@ export function PhoneController({
                 🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
               </span>
             )}
-            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden md:inline">
+            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden lg:inline">
               {gameMeta.name}
             </span>
+            {!isCardGame && (
+              <div
+                role="group"
+                aria-label={t('Switch controller pad', '切换手柄模式')}
+                className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#101217] border border-[#262C38]"
+              >
+                {(
+                  [
+                    { id: 'analog', en: 'Stick', zh: '摇杆' },
+                    { id: 'arrows', en: 'Arrows', zh: '箭头' },
+                    { id: 'trackpad', en: 'Swipe', zh: '滑控' },
+                  ] as const
+                ).map((opt, idx) => {
+                  const active = activeArcadePad === opt.id;
+                  const isSuggested = recommendedPadMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleSelectArcadePad(opt.id)}
+                      className={`h-7 px-2 rounded-md text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer transition-colors ${
+                        active
+                          ? 'bg-[#FF4D2E] text-white'
+                          : 'text-[#9CA3AF] hover:text-white'
+                      }`}
+                    >
+                      <span>{idx + 1}·{t(opt.en, opt.zh)}</span>
+                      {isSuggested && !active && (
+                        <span
+                          aria-hidden="true"
+                          className="w-1.5 h-1.5 rounded-full bg-[#10D98B]"
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {connectedGamepadName && !embedded && (
+              <span
+                title={`${t('Controller connected:', '已连接实体手柄：')} ${connectedGamepadName}`}
+                className="min-h-[34px] min-w-[30px] rounded-lg bg-[#10D98B]/15 border border-[#10D98B]/50 text-[#10D98B] flex items-center justify-center shrink-0"
+              >
+                <Gamepad2 className="w-4 h-4" />
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setEmoteDrawerOpen((v) => !v)}
+              aria-label={t('Send quick emote', '发送表情互动')}
+              title={t('Send Emote to TV', '发送大屏互动表情')}
+              className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+                emoteDrawerOpen
+                  ? 'bg-[#FFB800] text-[#14120B]'
+                  : 'bg-[#1E232D] hover:bg-[#242A36] text-[#FFB800]'
+              }`}
+            >
+              <Smile className="w-4 h-4" />
+            </button>
             {!embedded && <LanguageToggle compact />}
             {isRoomHost && room.status === 'PLAYING' && (
               <button
@@ -2718,7 +3415,7 @@ export function PhoneController({
                 {t('Reconnecting...', '正在重连...')}
               </span>
             )}
-            {!embedded && !isCardGame && (
+            {!embedded && (
               <button
                 type="button"
                 onClick={() => {
@@ -2726,7 +3423,7 @@ export function PhoneController({
                   setSettingsOpen(true);
                 }}
                 aria-label={t('Controller settings & calibration', '手柄位置与按键校准')}
-                title={t('Calibrate Joystick & Buttons', '校准摇杆与按键位置')}
+                title={t('Calibrate Pad & Settings', '4 合 1 手柄位置与功能设置')}
                 className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#00C2FF] flex items-center justify-center cursor-pointer"
               >
                 <SlidersHorizontal className="w-4 h-4" />
@@ -2754,17 +3451,128 @@ export function PhoneController({
         </div>
       )}
 
+      {/* Floating Quick Live Emote Bar (Available across ALL 4 Pads!) */}
+      {emoteDrawerOpen && (
+        <div className="absolute top-11 right-2 z-40 p-1.5 rounded-xl bg-[#181C24]/95 border border-[#2F3747] shadow-2xl flex items-center gap-1">
+          {QUICK_EMOTES.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => handleSendQuickEmote(emoji)}
+              className="w-9 h-9 rounded-lg bg-[#101217] hover:bg-[#242A36] active:scale-90 text-xl flex items-center justify-center cursor-pointer transition-transform"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
+
       {isCardGame ? (
+        /* PAD 4: Dedicated Private Card & Tabletop Pad */
         <CardControllerDeck
           cardState={cardState}
           playerColorHex={me.color.hex}
           embedded={embedded}
           isCountdown={room.status === 'COUNTDOWN'}
           countdownValue={room.countdownValue}
+          viewMode={controllerPrefs.cardViewMode}
+          recommendedView={effectiveCardDefaultView}
+          sortMode={controllerPrefs.cardSortMode}
+          privacyShield={controllerPrefs.cardPrivacyShield}
+          actionsSide={controllerPrefs.cardActionsSide}
+          onChangeViewMode={(next) =>
+            updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
+          }
+          onCycleSortMode={() => {
+            const order = ['server', 'playable', 'rank'] as const;
+            const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
+            updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
+          }}
+          onTogglePrivacy={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
+            })
+          }
+          onFlipActionsSide={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
+            })
+          }
           onAction={sendCardAction}
         />
+      ) : activeArcadePad === 'arrows' ? (
+        /* PAD 2: Beginner-Friendly Easy Tap Arrows + Verb-Labeled A/B + Auto-Tap */
+        <EasyArrowsDeck
+          schema={schema}
+          accentHex={me.color.hex}
+          cooldownA={cdA}
+          cooldownB={cdB}
+          pressedA={pressedA}
+          pressedB={pressedB}
+          strictFourWay={effectiveArrowsStrictFourWay}
+          autoTapActive={autoTapPinned}
+          preferAutoTap={Boolean(currentPadProfile?.preferAutoTap)}
+          swapAB={!embedded && controllerPrefs.swapAB}
+          embedded={embedded}
+          disabled={settingsOpen}
+          isTurboDrift={room.selectedGameId === 'turbo-drift'}
+          onVectorChange={handleSetVector}
+          onActionDown={onActionDown}
+          onActionUp={onActionUp}
+          onToggleAutoTap={() => setAutoTapPinned((v) => !v)}
+          onToggleStrictFourWay={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              arrowsStrictFourWay: !effectiveArrowsStrictFourWay,
+            })
+          }
+        />
+      ) : activeArcadePad === 'trackpad' ? (
+        /* PAD 3: Swipe Trackpad + Reversible Ergonomic Side Triggers */
+        <SwipeTrackpadDeck
+          schema={schema}
+          accentHex={me.color.hex}
+          cooldownA={cdA}
+          cooldownB={cdB}
+          pressedA={pressedA}
+          pressedB={pressedB}
+          trackpadMode={effectiveTrackpadMode}
+          handedness={controllerPrefs.trackpadHandedness}
+          tapForA={effectiveTrackpadTapForA}
+          sensitivity={controllerPrefs.trackpadSensitivity}
+          swapAB={!embedded && controllerPrefs.swapAB}
+          isCssRotated={isCssRotated}
+          embedded={embedded}
+          disabled={settingsOpen}
+          isTurboDrift={room.selectedGameId === 'turbo-drift'}
+          onVectorChange={handleSetVector}
+          onPulseActionA={handlePulseActionA}
+          onActionDown={onActionDown}
+          onActionUp={onActionUp}
+          onToggleTrackpadMode={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              trackpadModeOverride: effectiveTrackpadMode === 'glide' ? 'flick' : 'glide',
+            })
+          }
+          onToggleHandedness={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              trackpadHandedness:
+                controllerPrefs.trackpadHandedness === 'right' ? 'left' : 'right',
+            })
+          }
+          onToggleTapForA={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              trackpadTapForAOverride: !effectiveTrackpadTapForA,
+            })
+          }
+        />
       ) : (
-        /* Main Tactile Gamepad Deck: Joystick Anchored Left, Customizable Up-Down/Angled/Horizontal A/B Anchored Right */
+        /* PAD 1: Pro Analog Console (360° Thumbstick + A/B + Turbo Pin) */
         <div className="flex-1 grid grid-cols-2 items-center gap-2 min-h-0">
           {/* Left Half: Generous Touch Zone with Calibrated Virtual Joystick */}
           <div
@@ -2834,13 +3642,28 @@ export function PhoneController({
             </div>
           </div>
 
-          {/* Right Half: Calibrated Action Buttons A & B */}
+          {/* Right Half: Calibrated Action Buttons A & B + Turbo-A Pin */}
           <div
             onContextMenu={(e) => e.preventDefault()}
-            className={`h-full flex items-center touch-none select-none ${
+            className={`relative h-full flex items-center touch-none select-none ${
               embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
             }`}
           >
+            {!repositionMode && (
+              <button
+                type="button"
+                onClick={() => setAutoTapPinned((v) => !v)}
+                title={t('Toggle Auto-Tap A', '切换 A 键自动连点')}
+                className={`absolute top-1 right-1 sm:right-3 h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                  autoTapPinned
+                    ? 'bg-[#FFB800] border-[#FFE082] text-[#14120B]'
+                    : 'bg-[#181C24] border-[#2A303D] text-[#9CA3AF] hover:text-white'
+                }`}
+              >
+                <Repeat className={`w-3 h-3 ${autoTapPinned ? 'animate-spin' : ''}`} />
+                <span>{autoTapPinned ? t('Turbo ON', '连发开') : t('Turbo', '连发')}</span>
+              </button>
+            )}
             <div
               onPointerDown={(e) => startRepositionDrag('buttons', e)}
               onPointerMove={moveRepositionDrag}

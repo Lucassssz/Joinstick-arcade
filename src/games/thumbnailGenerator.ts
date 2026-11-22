@@ -8,25 +8,39 @@ type GameGenre = ReturnType<typeof getGameGenre>;
 const THUMB_W = 640;
 const THUMB_H = 360;
 
+const MAX_THUMB_CACHE = 64;
 const thumbnailCache = new Map<GameId, string>();
 const inflightMap = new Map<GameId, Promise<string | null>>();
 
 let activeWorkers = 0;
-const MAX_CONCURRENT = 3;
+const MAX_CONCURRENT = 2;
 const jobQueue: (() => void)[] = [];
+
+function scheduleIdle(fn: () => void) {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    (window as unknown as { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback(
+      fn,
+      { timeout: 120 }
+    );
+  } else {
+    setTimeout(fn, 0);
+  }
+}
 
 function runQueued<T>(task: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const execute = () => {
       activeWorkers += 1;
-      task()
-        .then(resolve)
-        .catch(reject)
-        .finally(() => {
-          activeWorkers -= 1;
-          const next = jobQueue.shift();
-          if (next) next();
-        });
+      scheduleIdle(() => {
+        task()
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            activeWorkers -= 1;
+            const next = jobQueue.shift();
+            if (next) next();
+          });
+      });
     };
     if (activeWorkers < MAX_CONCURRENT) {
       execute();
@@ -392,6 +406,97 @@ function drawCardGameHeroFan(
       primary: '#EF4444',
       secondary: '#1E293B',
       glyph: '♠',
+    },
+    'big-two-royale': {
+      label: '2♠',
+      sub: 'BIG 2',
+      primary: '#DC2626',
+      secondary: '#FFB800',
+      glyph: '♠',
+    },
+    'lucky-21': {
+      label: '21',
+      sub: 'BAN LUCK',
+      primary: '#E11D48',
+      secondary: '#F59E0B',
+      glyph: 'A',
+    },
+    'ten-pair-showdown': {
+      label: 'NGAU',
+      sub: '×5 GONG',
+      primary: '#F59E0B',
+      secondary: '#B91C1C',
+      glyph: '10',
+    },
+    'landlord-clash': {
+      label: '王炸',
+      sub: 'BOMB ×2',
+      primary: '#DC2626',
+      secondary: '#F59E0B',
+      glyph: '★',
+    },
+    'speed-mahjong': {
+      label: '發',
+      sub: 'HU! 胡',
+      primary: '#10B981',
+      secondary: '#065F46',
+      glyph: '中',
+    },
+    'liars-dice-tavern': {
+      label: '6×⚄',
+      sub: 'LIAR!',
+      primary: '#F59E0B',
+      secondary: '#7C2D12',
+      glyph: '⚄',
+    },
+    'undercover-word': {
+      label: 'SPY?',
+      sub: '卧底',
+      primary: '#8B5CF6',
+      secondary: '#312E81',
+      glyph: '?',
+    },
+    'midnight-werewolf': {
+      label: 'WOLF',
+      sub: '狼人杀',
+      primary: '#6366F1',
+      secondary: '#1E1B4B',
+      glyph: '☽',
+    },
+    'idiom-chain': {
+      label: '接龙',
+      sub: 'CHAIN!',
+      primary: '#F97316',
+      secondary: '#7C2D12',
+      glyph: '龍',
+    },
+    'word-pulse': {
+      label: 'WORD',
+      sub: '5-LTR',
+      primary: '#22C55E',
+      secondary: '#14532D',
+      glyph: 'W',
+    },
+    'trivia-blitz': {
+      label: 'QUIZ',
+      sub: 'BLITZ!',
+      primary: '#8B5CF6',
+      secondary: '#4C1D95',
+      glyph: '?',
+    },
+    'codenames-grid': {
+      label: 'CODE',
+      sub: 'SPY',
+      primary: '#14B8A6',
+      secondary: '#115E59',
+      glyph: '◆',
+    },
+    'fib-party': {
+      label: 'FIB!',
+      sub: 'TRUTH',
+      primary: '#F43F5E',
+      secondary: '#881337',
+      glyph: '!',
     },
   };
 
@@ -917,7 +1022,11 @@ function stylizeScreenshot(
 }
 
 export function getCachedGameThumbnail(gameId: GameId): string | null {
-  return thumbnailCache.get(gameId) ?? null;
+  const hit = thumbnailCache.get(gameId);
+  if (!hit) return null;
+  thumbnailCache.delete(gameId);
+  thumbnailCache.set(gameId, hit);
+  return hit;
 }
 
 export function getStylizedGameThumbnail(
@@ -925,7 +1034,7 @@ export function getStylizedGameThumbnail(
   accentHex: string,
   genre: GameGenre
 ): Promise<string | null> {
-  const cached = thumbnailCache.get(gameId);
+  const cached = getCachedGameThumbnail(gameId);
   if (cached) return Promise.resolve(cached);
 
   const existing = inflightMap.get(gameId);
@@ -951,6 +1060,10 @@ export function getStylizedGameThumbnail(
 
       const dataUrl = stylizeScreenshot(src, dst, gameId, accentHex, genre);
       if (dataUrl) {
+        if (thumbnailCache.size >= MAX_THUMB_CACHE) {
+          const oldest = thumbnailCache.keys().next().value;
+          if (oldest) thumbnailCache.delete(oldest);
+        }
         thumbnailCache.set(gameId, dataUrl);
       }
       return dataUrl || null;

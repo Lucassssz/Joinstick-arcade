@@ -258,6 +258,13 @@ export const gravityFlipModule: ServerGameModule<GravityFlipState> = {
           e.grounded = true;
           e.phaseTimer = 1.8;
         }
+        hudUpdates[p.id] = {
+          score: Math.round(e.score),
+          alive: e.alive,
+          statText: e.alive ? `${Math.round(e.distance)}m · ${e.coins} Coins` : 'RESPAWNING...',
+          cooldownA: Math.min(1, e.flipCd / FLIP_CD),
+          cooldownB: Math.min(1, e.phaseCd / PHASE_CD),
+        };
         continue;
       }
 

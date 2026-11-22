@@ -56,6 +56,131 @@ import { flipSevenModule } from './flipSeven.ts';
 import { royalBluffModule } from './royalBluff.ts';
 import { darkFlipClashModule } from './darkFlipClash.ts';
 import { sushiDraftModule } from './sushiDraft.ts';
+import {
+  deskFlippersModule,
+  lineBreakersModule,
+  marbleRingModule,
+  pitHarvestModule,
+  rattanVolleyModule,
+  spinClashModule,
+  stepStompModule,
+} from './packMalaysianArcade.ts';
+import {
+  bigTwoRoyaleModule,
+  lucky21Module,
+  tenPairShowdownModule,
+} from './packMalaysianCards.ts';
+import { adaptPackModule } from './packModuleAdapter.ts';
+import {
+  blockHopModule,
+  clawManiaModule,
+  drawGuessRelayModule,
+  eggRushModule,
+  gooseAlertModule,
+  hotpotRushModule,
+  melonMergeModule,
+  platformLeapModule,
+  tileTripleModule,
+  truthBombModule,
+} from './packChineseViralArcade.ts';
+import {
+  idiomChainModule,
+  landlordClashModule,
+  liarsDiceTavernModule,
+  midnightWerewolfModule,
+  speedMahjongModule,
+  undercoverWordModule,
+} from './packChineseViralCards.ts';
+import {
+  blobDevourModule,
+  dinoDashModule,
+  flappyFlockModule,
+  geoPinRushModule,
+  glassBridgeModule,
+  mineSweepDuelModule,
+  skyClimbModule,
+  slitherFeastModule,
+  tile2048BlitzModule,
+  tugTitanModule,
+  turfRibbonModule,
+  wavelengthSyncModule,
+} from './packGlobalViralArcade.ts';
+import {
+  codenamesGridModule,
+  fibPartyModule,
+  triviaBlitzModule,
+  wordPulseModule,
+} from './packGlobalViralCards.ts';
+import {
+  alienWaveModule,
+  barrelTowerModule,
+  blockStackModule,
+  brickClashModule,
+  frogCrossingModule,
+  mazeChomperModule,
+  rhythmPulseModule,
+  whackBlitzModule,
+} from './packRetroArcadeA.ts';
+import {
+  airHockeyNeoModule,
+  bubblePopArcModule,
+  claySkeetModule,
+  coinDozerModule,
+  pinStrikeModule,
+  skeeRollModule,
+  stackTowerModule,
+  tunnelDigModule,
+} from './packRetroArcadeB.ts';
+import {
+  archeryWindModule,
+  badmintonSmashModule,
+  billiardsSnookerModule,
+  boxingKoModule,
+  canoeSprintModule,
+  discArenaModule,
+  dodgeballRiotModule,
+  homeRunDerbyModule,
+  hoopBlitzModule,
+  miniGolfProModule,
+  penaltyDuelModule,
+  pingPongProModule,
+  sumoClashModule,
+  tetherJoustModule,
+} from './packSportsPhysics.ts';
+import {
+  bombTagArenaModule,
+  chainGangClimbModule,
+  confettiCaptureModule,
+  craneDropChaosModule,
+  fallingAnvilsModule,
+  hotLavaFloorModule,
+  kingOfHillNeoModule,
+  laserJumpRopeModule,
+  laserMazeHeistModule,
+  meteorDodgeXModule,
+  musicalThronesModule,
+  rouletteArenaModule,
+  seesawBalanceModule,
+  sumoIceDriftModule,
+  zombieOutbreakModule,
+} from './packChaosSurvival.ts';
+import {
+  baccaratClubModule,
+  backgammonSprintModule,
+  chessBlitzModule,
+  curlingMastersModule,
+  dominoChainModule,
+  gomokuBlitzModule,
+  heartsBreakerModule,
+  hexagonConquestModule,
+  mancalaJewelsModule,
+  memoryPairsModule,
+  pokerShowdownModule,
+  rummyRoyaleModule,
+  sequenceJackModule,
+  spadesBiddingModule,
+  tarotArcanaModule,
+} from './packStrategyClassics.ts';
 
 export interface ServerPlayerInputState {
   id: string;
@@ -95,6 +220,7 @@ export interface StepOutput {
 
 export interface ServerGameModule<TState = unknown> {
   id: GameId;
+  handlesOwnFrenzyMultiplier?: boolean;
   createState(players: ServerPlayerInputState[], settingValue: number): TState;
   addPlayer?(state: TState, player: ServerPlayerInputState): void;
   handleCardAction?(
@@ -104,7 +230,7 @@ export interface ServerGameModule<TState = unknown> {
     players: ServerPlayerInputState[]
   ): void;
   getPrivateStates?(state: TState, players: ServerPlayerInputState[]): Record<string, CardPrivateState>;
-  step(state: TState, players: ServerPlayerInputState[], dt: number): StepOutput;
+  step(state: TState, players: ServerPlayerInputState[], dt: number, frenzyActive?: boolean): StepOutput;
   getSnapshot(state: TState): GameSnapshot;
   getRankings(state: TState, players: ServerPlayerInputState[]): RankingEntry[];
 }
@@ -158,4 +284,112 @@ export const SERVER_GAMES: Record<GameId, ServerGameModule<any>> = {
   'royal-bluff': royalBluffModule,
   'dark-flip-clash': darkFlipClashModule,
   'sushi-draft': sushiDraftModule,
+  'line-breakers': lineBreakersModule,
+  'desk-flippers': deskFlippersModule,
+  'spin-clash': spinClashModule,
+  'marble-ring': marbleRingModule,
+  'rattan-volley': rattanVolleyModule,
+  'step-stomp': stepStompModule,
+  'pit-harvest': pitHarvestModule,
+  'big-two-royale': bigTwoRoyaleModule,
+  'lucky-21': lucky21Module,
+  'ten-pair-showdown': tenPairShowdownModule,
+  // Expansion Pack 2 — 16 Chinese Viral & Party Hits
+  'melon-merge': adaptPackModule(melonMergeModule),
+  'tile-triple': adaptPackModule(tileTripleModule),
+  'block-hop': adaptPackModule(blockHopModule),
+  'platform-leap': adaptPackModule(platformLeapModule),
+  'egg-rush': adaptPackModule(eggRushModule),
+  'goose-alert': adaptPackModule(gooseAlertModule),
+  'hotpot-rush': adaptPackModule(hotpotRushModule),
+  'claw-mania': adaptPackModule(clawManiaModule),
+  'truth-bomb': adaptPackModule(truthBombModule),
+  'draw-guess-relay': adaptPackModule(drawGuessRelayModule),
+  'landlord-clash': adaptPackModule(landlordClashModule),
+  'speed-mahjong': adaptPackModule(speedMahjongModule),
+  'liars-dice-tavern': adaptPackModule(liarsDiceTavernModule),
+  'undercover-word': adaptPackModule(undercoverWordModule),
+  'midnight-werewolf': adaptPackModule(midnightWerewolfModule),
+  'idiom-chain': adaptPackModule(idiomChainModule),
+  // Expansion Pack 3 — 16 Global & English Viral Internet Hits
+  'sky-climb': adaptPackModule(skyClimbModule),
+  'slither-feast': adaptPackModule(slitherFeastModule),
+  'blob-devour': adaptPackModule(blobDevourModule),
+  'turf-ribbon': adaptPackModule(turfRibbonModule),
+  'glass-bridge': adaptPackModule(glassBridgeModule),
+  'tug-titan': adaptPackModule(tugTitanModule),
+  'flappy-flock': adaptPackModule(flappyFlockModule),
+  'dino-dash': adaptPackModule(dinoDashModule),
+  'tile-2048-blitz': adaptPackModule(tile2048BlitzModule),
+  'mine-sweep-duel': adaptPackModule(mineSweepDuelModule),
+  'geo-pin-rush': adaptPackModule(geoPinRushModule),
+  'wavelength-sync': adaptPackModule(wavelengthSyncModule),
+  'word-pulse': adaptPackModule(wordPulseModule),
+  'trivia-blitz': adaptPackModule(triviaBlitzModule),
+  'codenames-grid': adaptPackModule(codenamesGridModule),
+  'fib-party': adaptPackModule(fibPartyModule),
+  // Expansion Pack 4 — 16 Retro Arcade & Classic Skill Hits
+  'maze-chomper': adaptPackModule(mazeChomperModule),
+  'brick-clash': adaptPackModule(brickClashModule),
+  'alien-wave': adaptPackModule(alienWaveModule),
+  'block-stack': adaptPackModule(blockStackModule),
+  'frog-crossing': adaptPackModule(frogCrossingModule),
+  'barrel-tower': adaptPackModule(barrelTowerModule),
+  'whack-blitz': adaptPackModule(whackBlitzModule),
+  'rhythm-pulse': adaptPackModule(rhythmPulseModule),
+  'clay-skeet': adaptPackModule(claySkeetModule),
+  'air-hockey-neo': adaptPackModule(airHockeyNeoModule),
+  'skee-roll': adaptPackModule(skeeRollModule),
+  'stack-tower': adaptPackModule(stackTowerModule),
+  'tunnel-dig': adaptPackModule(tunnelDigModule),
+  'bubble-pop-arc': adaptPackModule(bubblePopArcModule),
+  'pin-strike': adaptPackModule(pinStrikeModule),
+  'coin-dozer': adaptPackModule(coinDozerModule),
+  // Expansion Pack 5 — 14 Sports & Physics Showdowns
+  'hoop-blitz': adaptPackModule(hoopBlitzModule),
+  'penalty-duel': adaptPackModule(penaltyDuelModule),
+  'mini-golf-pro': adaptPackModule(miniGolfProModule),
+  'archery-wind': adaptPackModule(archeryWindModule),
+  'boxing-ko': adaptPackModule(boxingKoModule),
+  'ping-pong-pro': adaptPackModule(pingPongProModule),
+  'home-run-derby': adaptPackModule(homeRunDerbyModule),
+  'dodgeball-riot': adaptPackModule(dodgeballRiotModule),
+  'sumo-clash': adaptPackModule(sumoClashModule),
+  'canoe-sprint': adaptPackModule(canoeSprintModule),
+  'disc-arena': adaptPackModule(discArenaModule),
+  'badminton-smash': adaptPackModule(badmintonSmashModule),
+  'billiards-snooker': adaptPackModule(billiardsSnookerModule),
+  'tether-joust': adaptPackModule(tetherJoustModule),
+  // Expansion Pack 6 — 15 Chaos Party & Survival Games
+  'laser-jump-rope': adaptPackModule(laserJumpRopeModule),
+  'hot-lava-floor': adaptPackModule(hotLavaFloorModule),
+  'bomb-tag-arena': adaptPackModule(bombTagArenaModule),
+  'musical-thrones': adaptPackModule(musicalThronesModule),
+  'sumo-ice-drift': adaptPackModule(sumoIceDriftModule),
+  'meteor-dodge-x': adaptPackModule(meteorDodgeXModule),
+  'king-of-hill-neo': adaptPackModule(kingOfHillNeoModule),
+  'laser-maze-heist': adaptPackModule(laserMazeHeistModule),
+  'zombie-outbreak': adaptPackModule(zombieOutbreakModule),
+  'falling-anvils': adaptPackModule(fallingAnvilsModule),
+  'seesaw-balance': adaptPackModule(seesawBalanceModule),
+  'chain-gang-climb': adaptPackModule(chainGangClimbModule),
+  'confetti-capture': adaptPackModule(confettiCaptureModule),
+  'crane-drop-chaos': adaptPackModule(craneDropChaosModule),
+  'roulette-arena': adaptPackModule(rouletteArenaModule),
+  // Expansion Pack 7 — 15 Strategy Board & Card Classics (150 Total Games)
+  'gomoku-blitz': adaptPackModule(gomokuBlitzModule),
+  'chess-blitz': adaptPackModule(chessBlitzModule),
+  'domino-chain': adaptPackModule(dominoChainModule),
+  'hexagon-conquest': adaptPackModule(hexagonConquestModule),
+  'backgammon-sprint': adaptPackModule(backgammonSprintModule),
+  'mancala-jewels': adaptPackModule(mancalaJewelsModule),
+  'curling-masters': adaptPackModule(curlingMastersModule),
+  'rummy-royale': adaptPackModule(rummyRoyaleModule),
+  'hearts-breaker': adaptPackModule(heartsBreakerModule),
+  'spades-bidding': adaptPackModule(spadesBiddingModule),
+  'poker-showdown': adaptPackModule(pokerShowdownModule),
+  'tarot-arcana': adaptPackModule(tarotArcanaModule),
+  'baccarat-club': adaptPackModule(baccaratClubModule),
+  'memory-pairs': adaptPackModule(memoryPairsModule),
+  'sequence-jack': adaptPackModule(sequenceJackModule),
 };

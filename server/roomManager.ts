@@ -7,6 +7,7 @@ import {
   type CardPrivateState,
   type ClientMessage,
   type ControllerInput,
+  type CupVoteState,
   type FrenzyState,
   type GameId,
   type GameSnapshot,
@@ -26,6 +27,15 @@ import {
   type TournamentState,
 } from '../src/shared/types.ts';
 import {
+  AVATAR_PRESETS,
+  computeTeamStandings,
+  getTeamsForMode,
+  isValidAvatarId,
+  type TeamId,
+  type TeamMode,
+  type TeamStanding,
+} from '../src/shared/party.ts';
+import {
   CARD_GAME_IDS,
   filterGamesByPlayerMode,
   GAME_CATALOG,
@@ -37,18 +47,22 @@ import {
   computeTournamentMarks,
   getMutatorSpec,
   MUTATOR_BY_ID,
-  pickTournamentGameIds,
   TOURNAMENT_TOTAL_GAMES,
   type MutatorId,
 } from '../src/shared/modifiers.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
 import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
 
+const VALID_TEAM_MODES = new Set<TeamMode>(['ffa', 'teams-2', 'teams-3', 'teams-4', 'one-vs-all']);
+const CUP_VOTE_SECONDS = 15;
+
 interface ConnectedPlayer {
   id: string;
   slotIndex: number;
   name: string;
   color: PlayerColorSpec;
+  avatarId: string;
+  teamId: TeamId | null;
   ws: WebSocket | null;
   connected: boolean;
   ready: boolean;
@@ -135,6 +149,8 @@ interface RoomRecord {
   hostDisconnectedAt: number | null;
   hostPlayerId: string | null;
   botDifficulty: BotDifficulty;
+  teamMode: TeamMode;
+  teamRankings: TeamStanding[];
   status: RoomStatus;
   selectedGameId: GameId;
   gameSettingValue: number;
@@ -158,6 +174,8 @@ interface RoomRecord {
   createdAt: number;
   lastActivityAt: number;
   tickInterval: ReturnType<typeof setInterval> | null;
+  voteInterval: ReturnType<typeof setInterval> | null;
+  voteLockTimeout: ReturnType<typeof setTimeout> | null;
 }
 
 interface SocketBinding {
@@ -180,11 +198,11 @@ const BOT_CALLSIGNS = [
 const VALID_DIFFICULTIES = new Set<BotDifficulty>(['chill', 'arcade', 'spicy']);
 const ALLOWED_EMOTES = new Set(['🔥', '😂', '⚡', '👑', '🎉', '🤖', '👏', '😎']);
 const TICK_MS = 33; // ~30Hz authoritative server tick
-const PLAYER_RECONNECT_GRACE_MS = 5 * 60_000;
-const HOST_RECONNECT_GRACE_MS = 5 * 60_000;
-const IDLE_ROOM_TTL_MS = 30 * 60_000;
-const WS_HEARTBEAT_INTERVAL_MS = 5_000;
-const WS_HEARTBEAT_TIMEOUT_MS = 18_000;
+const PLAYER_RECONNECT_GRACE_MS = 10 * 60_000;
+const HOST_RECONNECT_GRACE_MS = 15 * 60_000;
+const IDLE_ROOM_TTL_MS = 90 * 60_000;
+const WS_HEARTBEAT_INTERVAL_MS = 10_000;
+const WS_HEARTBEAT_TIMEOUT_MS = 45_000;
 
 export class RoomManager {
   private rooms = new Map<string, RoomRecord>();
@@ -285,6 +303,8 @@ export class RoomManager {
       }
       this.socketAlive.set(ws, false);
       try {
+        // Send both RFC6455 ping AND a lightweight JSON pong data frame so proxies/Cloud Run/NAT firewalls never idle-close the monitor
+        this.send(ws, { type: 'pong' });
         if (typeof ws.ping === 'function') {
           ws.ping();
         }
@@ -404,6 +424,8 @@ export class RoomManager {
         slotIndex: p.slotIndex,
         name: p.name,
         color: p.color,
+        avatarId: p.avatarId,
+        teamId: p.teamId,
         connected: p.connected,
         ready: p.ready,
         isBot: p.isBot,
@@ -416,12 +438,24 @@ export class RoomManager {
         matchStats: { ...p.matchStats },
       }));
 
+    const liveTeamRankings =
+      room.teamMode === 'ffa'
+        ? []
+        : room.status === 'RESULTS' && room.teamRankings.length > 0
+        ? room.teamRankings.map((t) => ({ ...t, memberIds: [...t.memberIds] }))
+        : computeTeamStandings(
+            room.teamMode,
+            players.map((p) => ({ id: p.id, teamId: p.teamId, score: p.score }))
+          );
+
     return {
       code: room.code,
       status: room.status,
       selectedGameId: room.selectedGameId,
       gameSettingValue: room.gameSettingValue,
       botDifficulty: room.botDifficulty,
+      teamMode: room.teamMode,
+      teamRankings: liveTeamRankings,
       hostPlayerId: room.hostPlayerId,
       lobbyFilter: room.lobbyFilter,
       remoteFocus: { ...room.remoteFocus },
@@ -433,7 +467,20 @@ export class RoomManager {
             ...room.tournament,
             gameQueue: [...room.tournament.gameQueue],
             standings: room.tournament.standings.map((s) => ({ ...s })),
+            teamStandings: room.tournament.teamStandings
+              ? room.tournament.teamStandings.map((ts) => ({
+                  ...ts,
+                  memberIds: [...ts.memberIds],
+                }))
+              : undefined,
             history: room.tournament.history.map((h) => ({ ...h })),
+            vote: room.tournament.vote
+              ? {
+                  ...room.tournament.vote,
+                  candidates: [...room.tournament.vote.candidates],
+                  votes: { ...room.tournament.vote.votes },
+                }
+              : null,
           }
         : null,
       countdownValue: room.countdownValue,
@@ -480,6 +527,103 @@ export class RoomManager {
     return PLAYER_PALETTE.find((c) => !usedColors.has(c.id)) ?? defaultForSlot;
   }
 
+  private pickAvatar(room: RoomRecord, slotIndex: number, preferredAvatarId?: string): string {
+    if (isValidAvatarId(preferredAvatarId)) {
+      return preferredAvatarId;
+    }
+    const usedAvatars = new Set([...room.players.values()].map((p) => p.avatarId));
+    const defaultPreset = AVATAR_PRESETS[slotIndex % AVATAR_PRESETS.length];
+    if (!usedAvatars.has(defaultPreset.id)) return defaultPreset.id;
+    return AVATAR_PRESETS.find((a) => !usedAvatars.has(a.id))?.id ?? defaultPreset.id;
+  }
+
+  private pickTeamForNewPlayer(room: RoomRecord): TeamId | null {
+    if (room.teamMode === 'ffa') return null;
+    if (room.teamMode === 'one-vs-all') {
+      const hasBoss = [...room.players.values()].some((p) => p.teamId === 'boss');
+      return hasBoss ? 'squad' : 'boss';
+    }
+    const teams = getTeamsForMode(room.teamMode);
+    if (teams.length === 0) return null;
+    const counts = new Map<TeamId, number>(teams.map((t) => [t, 0]));
+    for (const p of room.players.values()) {
+      if (p.teamId && counts.has(p.teamId)) {
+        counts.set(p.teamId, (counts.get(p.teamId) ?? 0) + 1);
+      }
+    }
+    let bestTeam = teams[0];
+    let bestCount = Infinity;
+    for (const t of teams) {
+      const c = counts.get(t) ?? 0;
+      if (c < bestCount) {
+        bestCount = c;
+        bestTeam = t;
+      }
+    }
+    return bestTeam;
+  }
+
+  private assignBalancedTeams(room: RoomRecord, shuffle = false): void {
+    const list = [...room.players.values()].sort((a, b) => a.slotIndex - b.slotIndex);
+    if (room.teamMode === 'ffa') {
+      for (const p of list) p.teamId = null;
+      return;
+    }
+    if (shuffle) {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+    }
+    if (room.teamMode === 'one-vs-all') {
+      if (list.length === 0) return;
+      const bossCandidate = shuffle
+        ? list[0]
+        : list.find((p) => p.id === room.hostPlayerId) ?? list[0];
+      for (const p of list) {
+        p.teamId = p.id === bossCandidate.id ? 'boss' : 'squad';
+      }
+      return;
+    }
+    const teams = getTeamsForMode(room.teamMode);
+    list.forEach((p, idx) => {
+      p.teamId = teams[idx % teams.length];
+    });
+  }
+
+  private setPlayerTeam(room: RoomRecord, playerId: string, nextTeamId: TeamId): boolean {
+    if (room.teamMode === 'ffa') return false;
+    const validTeams = getTeamsForMode(room.teamMode);
+    if (!validTeams.includes(nextTeamId)) return false;
+    const target = room.players.get(playerId);
+    if (!target) return false;
+
+    if (room.teamMode === 'one-vs-all') {
+      if (nextTeamId === 'boss') {
+        for (const p of room.players.values()) {
+          p.teamId = p.id === target.id ? 'boss' : 'squad';
+        }
+      } else {
+        target.teamId = 'squad';
+        const remainingBoss = [...room.players.values()].find(
+          (p) => p.id !== target.id && p.teamId === 'boss'
+        );
+        if (!remainingBoss) {
+          const fallback = [...room.players.values()].find((p) => p.id !== target.id);
+          if (fallback) {
+            fallback.teamId = 'boss';
+          } else {
+            target.teamId = 'boss';
+          }
+        }
+      }
+      return true;
+    }
+
+    target.teamId = nextTeamId;
+    return true;
+  }
+
   private pickBotName(room: RoomRecord): string {
     const usedNames = new Set([...room.players.values()].map((p) => p.name));
     for (const candidate of BOT_CALLSIGNS) {
@@ -492,9 +636,17 @@ export class RoomManager {
 
   private handleMessage(ws: WebSocket, msg: ClientMessage): void {
     switch (msg.type) {
-      case 'ping':
+      case 'ping': {
+        const binding = this.bindings.get(ws);
+        if (binding) {
+          const boundRoom = this.rooms.get(binding.roomCode);
+          if (boundRoom) {
+            boundRoom.lastActivityAt = Date.now();
+          }
+        }
         this.send(ws, { type: 'pong' });
         return;
+      }
 
       case 'room:create': {
         this.detachSocket(ws);
@@ -513,6 +665,8 @@ export class RoomManager {
           hostDisconnectedAt: null,
           hostPlayerId: null,
           botDifficulty: 'arcade',
+          teamMode: 'ffa',
+          teamRankings: [],
           status: 'SETUP',
           selectedGameId: gameId,
           gameSettingValue: meta.defaultSetting,
@@ -542,6 +696,8 @@ export class RoomManager {
           createdAt: Date.now(),
           lastActivityAt: Date.now(),
           tickInterval: null,
+          voteInterval: null,
+          voteLockTimeout: null,
         };
 
         this.rooms.set(code, room);
@@ -566,6 +722,18 @@ export class RoomManager {
           return;
         }
         this.detachSocket(ws);
+        const staleHostWs = room.hostWs;
+        if (staleHostWs && staleHostWs !== ws) {
+          this.bindings.delete(staleHostWs);
+          this.cleanupSocketTracking(staleHostWs);
+          try {
+            if (staleHostWs.readyState === 1 || staleHostWs.readyState === 0) {
+              staleHostWs.close();
+            }
+          } catch {
+            // Ignore close errors on stale socket
+          }
+        }
         room.hostWs = ws;
         room.hostDisconnectedAt = null;
         room.lastActivityAt = Date.now();
@@ -607,6 +775,9 @@ export class RoomManager {
             existing.connected = true;
             existing.disconnectedAt = null;
             existing.name = cleanName;
+            if (isValidAvatarId(msg.avatarId)) {
+              existing.avatarId = msg.avatarId;
+            }
             this.ensureHostPlayer(room);
             this.bindings.set(ws, { role: 'player', roomCode: code, playerId: existing.id });
             this.send(ws, {
@@ -644,12 +815,16 @@ export class RoomManager {
         this.detachSocket(ws);
         const playerId = msg.playerId || crypto.randomUUID();
         const color = this.pickColor(room, slotIndex, msg.preferredColorId);
+        const avatarId = this.pickAvatar(room, slotIndex, msg.avatarId);
+        const teamId = this.pickTeamForNewPlayer(room);
 
         const player: ConnectedPlayer = {
           id: playerId,
           slotIndex,
           name: cleanName,
           color,
+          avatarId,
+          teamId,
           ws,
           connected: true,
           ready: false,
@@ -724,6 +899,9 @@ export class RoomManager {
         const target = room.players.get(msg.botId);
         if (!target || !target.isBot) return;
         room.players.delete(msg.botId);
+        if (room.teamMode === 'one-vs-all' && target.teamId === 'boss') {
+          this.assignBalancedTeams(room, false);
+        }
         room.lastActivityAt = Date.now();
         this.broadcastRoom(room);
         return;
@@ -747,6 +925,44 @@ export class RoomManager {
             }
           }
         }
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:set-team-mode': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (room.status !== 'SETUP' && room.status !== 'LOBBY') return;
+        if (!VALID_TEAM_MODES.has(msg.teamMode)) return;
+        room.teamMode = msg.teamMode;
+        room.teamRankings = [];
+        this.assignBalancedTeams(room, false);
+        room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'confirm');
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:set-player-team': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (room.status !== 'SETUP' && room.status !== 'LOBBY') return;
+        if (this.setPlayerTeam(room, msg.playerId, msg.teamId)) {
+          room.lastActivityAt = Date.now();
+          this.playHostSound(room, 'nav');
+          this.broadcastRoom(room);
+        }
+        return;
+      }
+
+      case 'room:shuffle-teams': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        if (room.status !== 'SETUP' && room.status !== 'LOBBY') return;
+        if (room.teamMode === 'ffa') return;
+        this.assignBalancedTeams(room, true);
+        room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'wheel');
         this.broadcastRoom(room);
         return;
       }
@@ -933,6 +1149,38 @@ export class RoomManager {
         return;
       }
 
+      case 'player:set-avatar': {
+        const binding = this.bindings.get(ws);
+        if (!binding || binding.role !== 'player' || !binding.playerId) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room) return;
+        const player = room.players.get(binding.playerId);
+        if (!player || player.isBot) return;
+        if (!isValidAvatarId(msg.avatarId)) return;
+        player.avatarId = msg.avatarId;
+        if (room.tournament) {
+          const st = room.tournament.standings.find((s) => s.playerId === player.id);
+          if (st) st.avatarId = player.avatarId;
+        }
+        room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'player:set-team': {
+        const binding = this.bindings.get(ws);
+        if (!binding || binding.role !== 'player' || !binding.playerId) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room || (room.status !== 'SETUP' && room.status !== 'LOBBY')) return;
+        if (this.setPlayerTeam(room, binding.playerId, msg.teamId)) {
+          room.lastActivityAt = Date.now();
+          this.playHostSound(room, 'nav');
+          this.broadcastRoom(room);
+        }
+        return;
+      }
+
       case 'player:emote': {
         const binding = this.bindings.get(ws);
         if (!binding || binding.role !== 'player' || !binding.playerId) return;
@@ -963,11 +1211,16 @@ export class RoomManager {
         if (!binding || binding.role !== 'player' || !binding.playerId) return;
         const room = this.rooms.get(binding.roomCode);
         if (!room) return;
+        const leavingPlayer = room.players.get(binding.playerId);
         room.players.delete(binding.playerId);
         this.bindings.delete(ws);
+        if (leavingPlayer && room.teamMode === 'one-vs-all' && leavingPlayer.teamId === 'boss') {
+          this.assignBalancedTeams(room, false);
+        }
         this.ensureHostPlayer(room);
         room.lastActivityAt = Date.now();
         if (this.checkBriefingReadyAdvance(room)) return;
+        if (this.checkCupVoteEarlyLock(room)) return;
         this.broadcastRoom(room);
         return;
       }
@@ -1056,18 +1309,43 @@ export class RoomManager {
         return;
       }
 
+      case 'tournament:vote': {
+        const binding = this.bindings.get(ws);
+        if (!binding) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room || room.status !== 'VOTING' || !room.tournament?.vote) return;
+        const vote = room.tournament.vote;
+        if (vote.phase !== 'voting') return;
+        if (!vote.candidates.includes(msg.gameId)) return;
+        if (binding.role === 'host') {
+          if (room.hostPlayerId) return;
+          this.lockCupVote(room, msg.gameId);
+          return;
+        }
+        if (binding.role !== 'player' || !binding.playerId) return;
+        vote.votes[binding.playerId] = msg.gameId;
+        room.lastActivityAt = Date.now();
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+        this.checkCupVoteEarlyLock(room);
+        return;
+      }
+
+      case 'tournament:force-lock-vote': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room || room.status !== 'VOTING' || !room.tournament?.vote) return;
+        if (room.tournament.vote.phase !== 'voting') return;
+        this.lockCupVote(room);
+        return;
+      }
+
       case 'tournament:next': {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         if (!room.tournament?.active || room.tournament.completed) return;
         const nextIdx = room.tournament.currentGameIndex + 1;
-        if (nextIdx >= room.tournament.gameQueue.length) return;
-        room.tournament.currentGameIndex = nextIdx;
-        const nextGameId = room.tournament.gameQueue[nextIdx];
-        room.selectedGameId = nextGameId;
-        room.gameSettingValue = getGameMeta(nextGameId).defaultSetting;
-        this.playHostSound(room, 'confirm');
-        this.startMatch(room, true);
+        if (nextIdx >= room.tournament.totalGames) return;
+        this.startCupVoteRound(room, nextIdx);
         return;
       }
 
@@ -1312,6 +1590,8 @@ export class RoomManager {
       slotIndex,
       name: this.pickBotName(room),
       color: this.pickColor(room, slotIndex),
+      avatarId: this.pickAvatar(room, slotIndex),
+      teamId: this.pickTeamForNewPlayer(room),
       ws: null,
       connected: true,
       ready: true,
@@ -1428,7 +1708,6 @@ export class RoomManager {
       return false;
     }
 
-    const gameQueue = pickTournamentGameIds(GAME_CATALOG, room.players.size, TOURNAMENT_TOTAL_GAMES);
     const standings: TournamentPlayerStanding[] = [...room.players.values()]
       .sort((a, b) => a.slotIndex - b.slotIndex)
       .map((p, idx) => ({
@@ -1436,6 +1715,8 @@ export class RoomManager {
         slotIndex: p.slotIndex,
         name: p.name,
         color: p.color,
+        avatarId: p.avatarId,
+        teamId: p.teamId,
         isBot: p.isBot,
         totalMarks: 0,
         wins: 0,
@@ -1447,18 +1728,228 @@ export class RoomManager {
       active: true,
       totalGames: TOURNAMENT_TOTAL_GAMES,
       currentGameIndex: 0,
-      gameQueue,
+      gameQueue: [],
       standings,
+      teamStandings:
+        room.teamMode === 'ffa'
+          ? undefined
+          : computeTeamStandings(
+              room.teamMode,
+              standings.map((s) => ({
+                id: s.playerId,
+                teamId: s.teamId ?? null,
+                score: 0,
+              }))
+            ),
       history: [],
+      vote: null,
       completed: false,
     };
 
-    const firstGameId = gameQueue[0];
-    room.selectedGameId = firstGameId;
-    room.gameSettingValue = getGameMeta(firstGameId).defaultSetting;
     this.playHostSound(room, 'confirm');
-    this.startMatch(room, true);
+    this.startCupVoteRound(room, 0);
     return true;
+  }
+
+  private pickCupVoteCandidates(room: RoomRecord, count = 3): GameId[] {
+    const playedSet = new Set<GameId>(room.tournament?.gameQueue ?? []);
+    const playerCount = Math.max(1, room.players.size);
+
+    const eligible = GAME_CATALOG.filter((g) => {
+      if (playedSet.has(g.id)) return false;
+      if (playerCount <= 1) return g.suitableFor.includes('solo');
+      return true;
+    });
+    const basePool = eligible.length >= count ? eligible : GAME_CATALOG.filter((g) => !playedSet.has(g.id));
+    const pool = basePool.length >= count ? basePool : [...GAME_CATALOG];
+
+    // Prefer variety across Arcade, Board, and Card genres when possible
+    const genres = ['arcade', 'board', 'card'] as const;
+    const picked: GameId[] = [];
+    const shuffleCopy = <T,>(arr: T[]): T[] => {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
+
+    const genreOrder = shuffleCopy([...genres]);
+    for (const genre of genreOrder) {
+      if (picked.length >= count) break;
+      const inGenre = shuffleCopy(
+        pool.filter((g) => (g.genre ?? 'arcade') === genre && !picked.includes(g.id))
+      );
+      if (inGenre.length > 0) {
+        picked.push(inGenre[0].id);
+      }
+    }
+
+    const remaining = shuffleCopy(pool.filter((g) => !picked.includes(g.id)));
+    for (const g of remaining) {
+      if (picked.length >= count) break;
+      picked.push(g.id);
+    }
+
+    return picked;
+  }
+
+  private startCupVoteRound(room: RoomRecord, roundIndex: number): void {
+    if (!room.tournament || !room.tournament.active) return;
+    this.stopGameLoop(room);
+    this.clearVoteTimers(room);
+    this.clearCardStates(room);
+
+    const candidates = this.pickCupVoteCandidates(room, 3);
+    const vote: CupVoteState = {
+      roundIndex,
+      candidates,
+      votes: {},
+      secondsLeft: CUP_VOTE_SECONDS,
+      totalSeconds: CUP_VOTE_SECONDS,
+      phase: 'voting',
+      winningGameId: null,
+    };
+
+    room.status = 'VOTING';
+    room.tournament.currentGameIndex = roundIndex;
+    room.tournament.vote = vote;
+    room.remoteFocus.modalIndex = 0;
+    room.gameState = null;
+    room.lastSnapshot = null;
+    room.rankings = [];
+    room.lastActivityAt = Date.now();
+
+    for (const p of room.players.values()) {
+      p.statText = p.isBot ? 'Voting...' : 'Pick Next Game!';
+      p.input = { dx: 0, dy: 0, a: false, b: false };
+      p.prevA = false;
+      p.prevB = false;
+    }
+
+    this.playHostSound(room, 'wheel');
+    this.broadcastRoom(room);
+
+    // Tick down every second; bots vote at elapsed = 2s
+    let elapsed = 0;
+    room.voteInterval = setInterval(() => {
+      if (room.status !== 'VOTING' || !room.tournament?.vote) {
+        this.clearVoteTimers(room);
+        return;
+      }
+      const curVote = room.tournament.vote;
+      if (curVote.phase !== 'voting') return;
+
+      elapsed += 1;
+      curVote.secondsLeft = Math.max(0, CUP_VOTE_SECONDS - elapsed);
+
+      // Bots cast automatic votes after 2s so solo/bot parties feel lively
+      if (elapsed === 2) {
+        for (const p of room.players.values()) {
+          if (p.isBot && !curVote.votes[p.id]) {
+            curVote.votes[p.id] =
+              curVote.candidates[Math.floor(Math.random() * curVote.candidates.length)];
+          }
+        }
+      }
+
+      if (curVote.secondsLeft <= 0) {
+        this.lockCupVote(room);
+      } else {
+        this.broadcastRoom(room);
+      }
+    }, 1000);
+  }
+
+  private checkCupVoteEarlyLock(room: RoomRecord): boolean {
+    if (room.status !== 'VOTING' || !room.tournament?.vote) return false;
+    const vote = room.tournament.vote;
+    if (vote.phase !== 'voting') return false;
+
+    const connectedHumans = [...room.players.values()].filter((p) => !p.isBot && p.connected);
+    if (connectedHumans.length === 0) return false;
+    const allHumansVoted = connectedHumans.every((p) => Boolean(vote.votes[p.id]));
+    if (!allHumansVoted) return false;
+
+    // Ensure bots also cast their votes before locking
+    for (const p of room.players.values()) {
+      if (p.isBot && !vote.votes[p.id]) {
+        vote.votes[p.id] = vote.candidates[Math.floor(Math.random() * vote.candidates.length)];
+      }
+    }
+
+    if (room.voteInterval) {
+      clearInterval(room.voteInterval);
+      room.voteInterval = null;
+    }
+    if (!room.voteLockTimeout) {
+      room.voteLockTimeout = setTimeout(() => {
+        room.voteLockTimeout = null;
+        this.lockCupVote(room);
+      }, 650);
+    }
+    return true;
+  }
+
+  private lockCupVote(room: RoomRecord, forcedWinnerId?: GameId): void {
+    if (room.status !== 'VOTING' || !room.tournament?.vote) return;
+    const vote = room.tournament.vote;
+    if (vote.phase === 'locked') return;
+
+    this.clearVoteTimers(room);
+
+    // Ensure bots cast votes if locking early
+    for (const p of room.players.values()) {
+      if (p.isBot && !vote.votes[p.id]) {
+        vote.votes[p.id] = vote.candidates[Math.floor(Math.random() * vote.candidates.length)];
+      }
+    }
+
+    const tally = new Map<GameId, number>(vote.candidates.map((id) => [id, 0]));
+    for (const chosen of Object.values(vote.votes)) {
+      if (tally.has(chosen)) {
+        tally.set(chosen, (tally.get(chosen) ?? 0) + 1);
+      }
+    }
+
+    let maxVotes = -1;
+    let topGames: GameId[] = [];
+    for (const [gId, count] of tally.entries()) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        topGames = [gId];
+      } else if (count === maxVotes) {
+        topGames.push(gId);
+      }
+    }
+    const winnerId =
+      forcedWinnerId && vote.candidates.includes(forcedWinnerId)
+        ? forcedWinnerId
+        : topGames.length > 0
+        ? topGames[Math.floor(Math.random() * topGames.length)]
+        : vote.candidates[0];
+
+    vote.phase = 'locked';
+    vote.winningGameId = winnerId;
+    vote.secondsLeft = 0;
+
+    // Record voted winner into the tournament gameQueue for this round
+    room.tournament.gameQueue[vote.roundIndex] = winnerId;
+    room.selectedGameId = winnerId;
+    room.gameSettingValue = getGameMeta(winnerId).defaultSetting;
+    room.lastActivityAt = Date.now();
+
+    this.playHostSound(room, 'confirm');
+    this.broadcastRoom(room);
+
+    // Celebrate the winning pick briefly, then open Rules Briefing
+    room.voteLockTimeout = setTimeout(() => {
+      room.voteLockTimeout = null;
+      if (room.status !== 'VOTING' || !room.tournament?.active) return;
+      room.tournament.vote = null;
+      this.startMatch(room, true);
+    }, 1800);
   }
 
   private returnToLobby(room: RoomRecord): void {
@@ -1536,6 +2027,33 @@ export class RoomManager {
   private handleRemoteAction(room: RoomRecord, senderWs: WebSocket, action: RemoteDirection): void {
     room.lastActivityAt = Date.now();
 
+    // --- CUP GROUP VOTING REMOTE ---
+    if (room.status === 'VOTING' && room.tournament?.vote) {
+      const vote = room.tournament.vote;
+      if (vote.phase !== 'voting') return;
+      const count = vote.candidates.length;
+      if (action === 'left' || action === 'up') {
+        room.remoteFocus.modalIndex = (room.remoteFocus.modalIndex - 1 + count) % count;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'right' || action === 'down') {
+        room.remoteFocus.modalIndex = (room.remoteFocus.modalIndex + 1) % count;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (action === 'ok') {
+        const chosen = vote.candidates[room.remoteFocus.modalIndex] ?? vote.candidates[0];
+        if (room.hostPlayerId) {
+          vote.votes[room.hostPlayerId] = chosen;
+          this.playHostSound(room, 'confirm');
+          this.broadcastRoom(room);
+          this.checkCupVoteEarlyLock(room);
+        } else {
+          this.lockCupVote(room);
+        }
+      }
+      return;
+    }
+
     // --- BRIEFING REMOTE ---
     if (room.status === 'BRIEFING') {
       if (action === 'left' || action === 'up') {
@@ -1597,13 +2115,8 @@ export class RoomManager {
           if (room.remoteFocus.modalIndex === 0) {
             if (!room.tournament.completed) {
               const nextIdx = room.tournament.currentGameIndex + 1;
-              if (nextIdx < room.tournament.gameQueue.length) {
-                room.tournament.currentGameIndex = nextIdx;
-                const nextGameId = room.tournament.gameQueue[nextIdx];
-                room.selectedGameId = nextGameId;
-                room.gameSettingValue = getGameMeta(nextGameId).defaultSetting;
-                this.playHostSound(room, 'confirm');
-                this.startMatch(room, true);
+              if (nextIdx < room.tournament.totalGames) {
+                this.startCupVoteRound(room, nextIdx);
               }
             } else {
               this.attemptStartTournament(room, senderWs);
@@ -1995,6 +2508,8 @@ export class RoomManager {
           slotIndex: p.slotIndex,
           name: p.name,
           color: p.color,
+          avatarId: p.avatarId,
+          teamId: p.teamId,
           isBot: p.isBot,
           totalMarks: 0,
           wins: 0,
@@ -2012,6 +2527,8 @@ export class RoomManager {
       if (pObj) {
         st.name = pObj.name;
         st.color = pObj.color;
+        st.avatarId = pObj.avatarId;
+        st.teamId = pObj.teamId;
       }
       st.lastGameMarks = gained;
       st.totalMarks += gained;
@@ -2029,6 +2546,18 @@ export class RoomManager {
     t.standings.forEach((st, idx) => {
       st.rank = idx + 1;
     });
+
+    t.teamStandings =
+      room.teamMode === 'ffa'
+        ? undefined
+        : computeTeamStandings(
+            room.teamMode,
+            t.standings.map((st) => ({
+              id: st.playerId,
+              teamId: st.teamId ?? null,
+              score: st.totalMarks,
+            }))
+          );
 
     const winner = room.rankings[0] ?? null;
     const record: TournamentMatchRecord = {
@@ -2260,10 +2789,10 @@ export class RoomManager {
         CARD_GAME_IDS.has(room.selectedGameId);
       const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);
-      const scoreMult = mutator.scoreMult * (room.frenzy.active ? 2 : 1);
+      const scoreMult = mutator.scoreMult * (room.frenzy.active && !engine.handlesOwnFrenzyMultiplier ? 2 : 1);
 
       const prevSnapshot = room.lastSnapshot;
-      const result = engine.step(room.gameState, currentInputs, simDt);
+      const result = engine.step(room.gameState, currentInputs, simDt, room.frenzy.active);
       const isCardMatch = CARD_GAME_IDS.has(room.selectedGameId);
 
       // Persist edge-trigger states & live HUD telemetry (with Frenzy + Mutator score multiplier)
@@ -2398,22 +2927,62 @@ export class RoomManager {
 
         const baseRankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
         const anyBonus = [...room.players.values()].some((p) => p.bonusScore > 0);
-        if (anyBonus) {
-          const merged = baseRankings.map((r) => {
-            const pObj = room.players.get(r.playerId);
-            return {
-              ...r,
-              score: r.score + (pObj?.bonusScore ?? 0),
-            };
-          });
-          merged.sort((a, b) => b.score - a.score);
-          merged.forEach((entry, idx) => {
+        const RANK_PRIORITY_GAMES = new Set<GameId>([
+          'boom-kittens',
+          'lava-hopper',
+          'royal-bluff',
+          'liars-deck',
+          'color-clash',
+          'property-deal',
+          'dark-flip-clash',
+          'ludo-royale',
+          'jungle-ladders',
+          'red-light-dash',
+          'fuse-pass',
+          'bomb-grid',
+          'big-two-royale',
+          'landlord-clash',
+          'speed-mahjong',
+          'liars-dice-tavern',
+          'undercover-word',
+          'midnight-werewolf',
+          'idiom-chain',
+          'goose-alert',
+          'truth-bomb',
+          'bomb-tag-arena',
+          'musical-thrones',
+          'laser-jump-rope',
+          'paint-rush',
+          'four-in-a-row',
+        ]);
+        const preserveOrder = RANK_PRIORITY_GAMES.has(room.selectedGameId);
+        const enriched = baseRankings.map((r) => {
+          const pObj = room.players.get(r.playerId);
+          return {
+            ...r,
+            avatarId: pObj?.avatarId,
+            teamId: pObj?.teamId ?? null,
+            score: anyBonus ? r.score + (pObj?.bonusScore ?? 0) : r.score,
+          };
+        });
+        if (anyBonus && !preserveOrder) {
+          enriched.sort((a, b) => b.score - a.score);
+          enriched.forEach((entry, idx) => {
             entry.rank = idx + 1;
           });
-          room.rankings = merged;
-        } else {
-          room.rankings = baseRankings;
         }
+        room.rankings = enriched;
+        room.teamRankings =
+          room.teamMode === 'ffa'
+            ? []
+            : computeTeamStandings(
+                room.teamMode,
+                enriched.map((r) => ({
+                  id: r.playerId,
+                  teamId: r.teamId ?? null,
+                  score: r.score,
+                }))
+              );
 
         for (const p of room.players.values()) {
           p.matchStats.matchesPlayed += 1;
@@ -2854,11 +3423,23 @@ export class RoomManager {
       }));
   }
 
+  private clearVoteTimers(room: RoomRecord): void {
+    if (room.voteInterval) {
+      clearInterval(room.voteInterval);
+      room.voteInterval = null;
+    }
+    if (room.voteLockTimeout) {
+      clearTimeout(room.voteLockTimeout);
+      room.voteLockTimeout = null;
+    }
+  }
+
   private stopGameLoop(room: RoomRecord): void {
     if (room.tickInterval) {
       clearInterval(room.tickInterval);
       room.tickInterval = null;
     }
+    this.clearVoteTimers(room);
   }
 
   private detachSocket(ws: WebSocket): void {
@@ -2903,6 +3484,7 @@ export class RoomManager {
         player.input = { dx: 0, dy: 0, a: false, b: false };
         this.ensureHostPlayer(room);
         if (this.checkBriefingReadyAdvance(room)) return;
+        if (this.checkCupVoteEarlyLock(room)) return;
         this.broadcastRoom(room);
       }
     }

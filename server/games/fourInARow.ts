@@ -27,6 +27,8 @@ interface FourInARowState {
   banner: string | null;
   eventText: string | null;
   players: FourInARowPlayerState[];
+  turnsTaken: number;
+  flushCount: number;
   finished: boolean;
 }
 
@@ -127,6 +129,8 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
       banner: null,
       eventText: rackPlayers[0] ? `${rackPlayers[0].name}'s Turn — Aim Column & Press A to Drop!` : null,
       players: rackPlayers,
+      turnsTaken: 0,
+      flushCount: 0,
       finished: false,
     };
   },
@@ -148,8 +152,10 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
     if (state.players.length === 0) state.finished = true;
 
     const checkFlushAndAdvance = () => {
+      state.turnsTaken += 1;
       const hasTopOpen = Array.from({ length: COLS }, (_, c) => state.grid[idxOf(c, 0)] === null).some(Boolean);
       if (!hasTopOpen) {
+        state.flushCount += 1;
         for (let r = ROWS - 1; r > 0; r--) {
           for (let c = 0; c < COLS; c++) {
             state.grid[idxOf(c, r)] = state.grid[idxOf(c, r - 1)];
@@ -161,6 +167,12 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
           state.colorGrid[idxOf(c, 0)] = null;
         }
         state.banner = 'RACK SHIFTED DOWN!';
+      }
+      if (state.flushCount >= 2 || state.turnsTaken >= Math.max(48, state.players.length * 16)) {
+        state.finished = true;
+        state.banner = 'RACK COMPLETE — FINAL SCORE!';
+        sounds.push({ type: 'win' });
+        return;
       }
       state.turnIndex = (state.turnIndex + 1) % state.players.length;
       state.turnTimeLeft = TURN_TIMEOUT;

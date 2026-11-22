@@ -154,6 +154,11 @@ function declareWinner(state: LiarsDeckState, winner: LiarPlayerInternal) {
 function advanceTurnToSelecting(state: LiarsDeckState, nextIdx?: number) {
   const n = state.players.length;
   if (n === 0) return;
+  if (state.round >= 18) {
+    const sorted = [...state.players].sort((a, b) => a.hand.length - b.hand.length || b.score - a.score);
+    if (sorted[0]) declareWinner(state, sorted[0]);
+    return;
+  }
   state.activePlayerIndex =
     nextIdx !== undefined ? ((nextIdx % n) + n) % n : (state.activePlayerIndex + 1) % n;
   state.phase = 'selecting';
@@ -162,7 +167,7 @@ function advanceTurnToSelecting(state: LiarsDeckState, nextIdx?: number) {
   state.trustedPlayerIds.clear();
   state.revealedCards = [];
   state.revealVerdict = null;
-  state.botThinkTimer = 1.85 + Math.random() * 0.95;
+  state.botThinkTimer = 1.6 + Math.random() * 0.8;
 }
 
 function startChallengeWindow(state: LiarsDeckState, claimant: LiarPlayerInternal, played: LiarCard[]) {
@@ -286,15 +291,17 @@ function triggerBluffCall(state: LiarsDeckState, challenger: LiarPlayerInternal)
     });
   });
 
-  const pileTotal = state.tablePile.length;
+  const penaltyBatch = state.tablePile.splice(0, state.tablePile.length);
+  const absorbedCards = penaltyBatch.slice(-4);
+  const pileTotal = absorbedCards.length;
 
   if (allTruth) {
-    // Truth! Challenger eats the entire pile
+    // Truth! Challenger eats up to 4 cards from the pile
     state.revealVerdict = 'truth-confirmed';
     claimant.truthsLanded += 1;
     claimant.score += 140;
     challenger.bustedCount += 1;
-    challenger.hand.push(...state.tablePile.splice(0, state.tablePile.length));
+    challenger.hand.push(...absorbedCards);
     challenger.lastAction = `DREW +${pileTotal}!`;
     challenger.lastActionTimer = 3.0;
 
@@ -339,12 +346,12 @@ function triggerBluffCall(state: LiarsDeckState, challenger: LiarPlayerInternal)
       state.pendingNextPlayerIndex = (claimantIdx + 1) % state.players.length;
     }
   } else {
-    // Liar caught! Claimant eats the entire pile
+    // Liar caught! Claimant eats up to 6 cards from the pile
     state.revealVerdict = 'bluff-caught';
     challenger.bluffsCaught += 1;
     challenger.score += 175;
     claimant.bustedCount += 1;
-    claimant.hand.push(...state.tablePile.splice(0, state.tablePile.length));
+    claimant.hand.push(...absorbedCards);
     claimant.lastAction = 'BLUFF CAUGHT!';
     claimant.lastActionTimer = 3.0;
 
@@ -403,7 +410,7 @@ function resolveChallengeNoCall(state: LiarsDeckState) {
   }
   setBanner(state, 'TRUSTED!', '#00C2FF', 1.2);
   // Rotate target rank if pile grows large
-  if (state.tablePile.length >= 10) {
+  if (state.tablePile.length >= 6) {
     state.round += 1;
     state.targetRank = TARGET_RANKS[(state.round - 1) % TARGET_RANKS.length];
     state.tablePile = [];
@@ -752,11 +759,10 @@ export const liarsDeckModule: ServerGameModule<LiarsDeckState> = {
             );
             let toPlay: LiarCard[];
             if (matching.length > 0) {
-              toPlay = matching.slice(0, Math.min(2, matching.length));
+              toPlay = matching.slice(0, Math.min(3, matching.length));
             } else {
-              // Bluff 1–2 cards!
-              const count = active.hand.length >= 2 && Math.random() < 0.35 ? 2 : 1;
-              toPlay = active.hand.slice(0, count);
+              // Bluff 1 card cleanly so games stay brisk
+              toPlay = active.hand.slice(0, 1);
             }
             playCardsFaceDown(
               state,
@@ -814,11 +820,18 @@ export const liarsDeckModule: ServerGameModule<LiarsDeckState> = {
       for (const p of state.players) {
         if (p.id === state.lastClaimPlayerId) continue;
         if (p.isBot) {
-          if (p.botWantsChallenge) {
-            p.botChallengeTimer -= dt;
-            if (p.botChallengeTimer <= 0) {
+          p.botChallengeTimer -= dt;
+          if (p.botChallengeTimer <= 0) {
+            if (p.botWantsChallenge) {
               triggerBluffCall(state, p);
               break;
+            } else if (!state.trustedPlayerIds.has(p.id)) {
+              state.trustedPlayerIds.add(p.id);
+              const nonClaimOthers = state.players.filter((o) => o.id !== state.lastClaimPlayerId);
+              if (nonClaimOthers.every((o) => state.trustedPlayerIds.has(o.id))) {
+                resolveChallengeNoCall(state);
+                break;
+              }
             }
           }
         } else {

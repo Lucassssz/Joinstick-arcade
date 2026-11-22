@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './server/roomManager.ts';
-import { getOrGenerateDemoClip, getOrGenerateDemoSnapshot } from './server/demoSnapshot.ts';
+import { getOrGenerateDemoClipAsync, getOrGenerateDemoSnapshotAsync } from './server/demoSnapshot.ts';
 import type { GameId } from './src/shared/types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,18 +21,18 @@ async function startServer() {
 
   app.get('/api/health', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, service: 'cloocade-party' });
+    res.json({ ok: true, service: 'joinstick-arcade' });
   });
 
-  app.get('/api/demo-snapshot/:gameId', (req, res) => {
+  app.get('/api/demo-snapshot/:gameId', async (req, res) => {
     const gameId = req.params.gameId as GameId;
     try {
-      const snapshot = getOrGenerateDemoSnapshot(gameId);
+      const snapshot = await getOrGenerateDemoSnapshotAsync(gameId);
       if (!snapshot) {
         res.status(404).json({ error: 'Unknown gameId' });
         return;
       }
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
       res.json(snapshot);
     } catch (err) {
       console.error(`[demo-snapshot] Failed for ${gameId}:`, err);
@@ -40,15 +40,15 @@ async function startServer() {
     }
   });
 
-  app.get('/api/demo-clip/:gameId', (req, res) => {
+  app.get('/api/demo-clip/:gameId', async (req, res) => {
     const gameId = req.params.gameId as GameId;
     try {
-      const clip = getOrGenerateDemoClip(gameId);
+      const clip = await getOrGenerateDemoClipAsync(gameId);
       if (!clip) {
         res.status(404).json({ error: 'Unknown gameId' });
         return;
       }
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
       res.json(clip);
     } catch (err) {
       console.error(`[demo-clip] Failed for ${gameId}:`, err);
@@ -69,9 +69,20 @@ async function startServer() {
   server.requestTimeout = 0;
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
+  server.on('connection', (socket) => {
+    socket.setKeepAlive(true, 15_000);
+    socket.setNoDelay(true);
+  });
 
   // Attach authoritative WebSocket server on /ws alongside HTTP
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    maxPayload: 2 * 1024 * 1024,
+  });
+  wss.on('error', (err) => {
+    console.error('[ws] WebSocketServer error:', err);
+  });
   wss.on('connection', (ws) => {
     roomManager.handleConnection(ws);
   });
@@ -92,7 +103,7 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Cloocade Party server listening on http://0.0.0.0:${PORT}`);
+    console.log(`JoinStick Arcade server listening on http://0.0.0.0:${PORT}`);
   });
 
   const shutdown = () => {

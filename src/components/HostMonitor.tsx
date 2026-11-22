@@ -23,6 +23,8 @@ import {
   Power,
   QrCode,
   RotateCcw,
+  Search,
+  Shuffle,
   Smartphone,
   Sparkles,
   Trophy,
@@ -40,13 +42,23 @@ import {
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
+import { getPadTutorialGuide } from '../shared/padProfiles';
 import { GameHoverPreview } from './GameHoverPreview';
 import { GameThumbnail } from './GameThumbnail';
+import { CupVotingStage } from './CupVotingStage';
+import { PlayerAvatar } from './PlayerAvatar';
 import {
   GAME_FRENZY_PERKS,
   getMutatorSpec,
   type MutatorId,
 } from '../shared/modifiers';
+import {
+  getTeamsForMode,
+  getTeamSpec,
+  TEAM_MODE_OPTIONS,
+  type TeamId,
+  type TeamMode,
+} from '../shared/party';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
@@ -112,6 +124,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const langRef = useRef(lang);
   langRef.current = lang;
   const [wsConnected, setWsConnected] = useState(false);
+  const [showDisconnectBanner, setShowDisconnectBanner] = useState(false);
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
@@ -128,7 +141,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [chaosWheelOpen, setChaosWheelOpen] = useState(false);
   const [rankShifts, setRankShifts] = useState<Record<string, number>>({});
   const [cardFlipDir, setCardFlipDir] = useState<1 | -1>(1);
-  const [lobbyCardHovered, setLobbyCardHovered] = useState(false);
+  const [lobbySearchQuery, setLobbySearchQuery] = useState('');
   const [liveTurnInfo, setLiveTurnInfo] = useState<{
     activePlayerId: string | null;
     turnElapsedSec: number;
@@ -165,30 +178,189 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     actionCols: 0,
   });
 
+  const roomRef = useRef<RoomSnapshot | null>(null);
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
+  const reattachRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disconnectGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  // Smooth 2.5s visual grace period before surfacing a disconnect indicator so sub-second proxy handoffs stay invisible
+  useEffect(() => {
+    if (wsConnected) {
+      if (disconnectGraceTimerRef.current) {
+        clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
+      setShowDisconnectBanner(false);
+      return;
+    }
+    if (!room) {
+      setShowDisconnectBanner(false);
+      return;
+    }
+    disconnectGraceTimerRef.current = setTimeout(() => {
+      setShowDisconnectBanner(true);
+    }, 2_500);
+    return () => {
+      if (disconnectGraceTimerRef.current) {
+        clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
+    };
+  }, [wsConnected, Boolean(room)]);
+
+  const saveHostSession = (code: string, hostToken: string) => {
+    const payload = JSON.stringify({ code, hostToken, savedAt: Date.now() });
+    try {
+      sessionStorage.setItem(HOST_SESSION_KEY, payload);
+    } catch {
+      // Ignore storage failure
+    }
+    try {
+      localStorage.setItem(HOST_SESSION_KEY, payload);
+    } catch {
+      // Ignore storage failure
+    }
+  };
+
+  const loadHostSession = (): { code: string; hostToken: string } | null => {
+    const MAX_AGE_MS = 2 * 60 * 60 * 1000;
+    const sources: (string | null)[] = [];
+    try {
+      sources.push(sessionStorage.getItem(HOST_SESSION_KEY));
+    } catch {
+      // Ignore storage failure
+    }
+    try {
+      sources.push(localStorage.getItem(HOST_SESSION_KEY));
+    } catch {
+      // Ignore storage failure
+    }
+    for (const raw of sources) {
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as { code?: string; hostToken?: string; savedAt?: number };
+        if (parsed.code && parsed.hostToken) {
+          if (!parsed.savedAt || Date.now() - parsed.savedAt < MAX_AGE_MS) {
+            return { code: parsed.code, hostToken: parsed.hostToken };
+          }
+        }
+      } catch {
+        // Ignore malformed entry
+      }
+    }
+    return null;
+  };
+
+  const clearHostSession = () => {
+    try {
+      sessionStorage.removeItem(HOST_SESSION_KEY);
+    } catch {
+      // Ignore storage failure
+    }
+    try {
+      localStorage.removeItem(HOST_SESSION_KEY);
+    } catch {
+      // Ignore storage failure
+    }
+  };
+
+  // Acquire Screen Wake Lock on the Monitor so TVs, laptops, and tablets never sleep/suspend timers mid-party
+  useEffect(() => {
+    let active = true;
+    const requestWakeLock = async () => {
+      if (!active || typeof navigator === 'undefined') return;
+      try {
+        const nav = navigator as Navigator & {
+          wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
+        };
+        if (nav.wakeLock && !wakeLockRef.current) {
+          const lock = await nav.wakeLock.request('screen');
+          if (!active) {
+            lock.release().catch(() => {});
+          } else {
+            wakeLockRef.current = lock;
+          }
+        }
+      } catch {
+        // Wake lock optional on unsupported browsers
+      }
+    };
+
+    requestWakeLock();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        wakeLockRef.current = null;
+        requestWakeLock();
+        if (wsRef.current && !wsRef.current.isConnected()) {
+          wsRef.current.reconnectNow(false);
+        }
+      }
+    };
+    const onFirstGesture = () => {
+      requestWakeLock();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pointerdown', onFirstGesture, { passive: true, once: true });
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pointerdown', onFirstGesture);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, []);
+
   // Manage Host WebSocket Connection
   useEffect(() => {
+    const clearReattachRetry = () => {
+      if (reattachRetryTimerRef.current) {
+        clearTimeout(reattachRetryTimerRef.current);
+        reattachRetryTimerRef.current = null;
+      }
+    };
+
+    const sendAttachOrCreate = (sock: ManagedWebSocket) => {
+      const saved = loadHostSession();
+      if (saved) {
+        sock.send({
+          type: 'room:host-reattach',
+          code: saved.code,
+          hostToken: saved.hostToken,
+        });
+      } else {
+        sock.send({ type: 'room:create', preferredGameId: initialGameId });
+      }
+      // Safety net: if the attach/create confirmation doesn't arrive within 3s while socket is open, retry automatically
+      clearReattachRetry();
+      reattachRetryTimerRef.current = setTimeout(() => {
+        if (wsRef.current === sock && sock.isConnected()) {
+          const retrySaved = loadHostSession();
+          if (retrySaved) {
+            sock.send({
+              type: 'room:host-reattach',
+              code: retrySaved.code,
+              hostToken: retrySaved.hostToken,
+            });
+          } else if (!roomRef.current) {
+            sock.send({ type: 'room:create', preferredGameId: initialGameId });
+          }
+        }
+      }, 3_000);
+    };
+
     const socket = new ManagedWebSocket({
       onOpen: () => {
         setWsConnected(true);
-        const savedRaw = sessionStorage.getItem(HOST_SESSION_KEY);
-        if (savedRaw) {
-          try {
-            const saved = JSON.parse(savedRaw) as { code: string; hostToken: string };
-            if (saved.code && saved.hostToken) {
-              socket.send({
-                type: 'room:host-reattach',
-                code: saved.code,
-                hostToken: saved.hostToken,
-              });
-              return;
-            }
-          } catch {
-            // Fall through to create new room
-          }
-        }
-        socket.send({ type: 'room:create', preferredGameId: initialGameId });
+        sendAttachOrCreate(socket);
       },
       onClose: () => {
+        clearReattachRetry();
         setWsConnected(false);
       },
       onStatusChange: (status) => {
@@ -197,15 +369,14 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       onMessage: (msg: ServerMessage) => {
         switch (msg.type) {
           case 'room:created':
-            sessionStorage.setItem(
-              HOST_SESSION_KEY,
-              JSON.stringify({ code: msg.code, hostToken: msg.hostToken })
-            );
+            clearReattachRetry();
+            saveHostSession(msg.code, msg.hostToken);
             setRoom(msg.room);
             setErrorMsg(null);
             enterMonitorFullscreen();
             break;
           case 'room:snapshot':
+            clearReattachRetry();
             setRoom(msg.room);
             setErrorMsg(null);
             break;
@@ -286,16 +457,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             }
             break;
           case 'room:closed':
+            clearReattachRetry();
             if (closeFallbackTimerRef.current) {
               clearTimeout(closeFallbackTimerRef.current);
               closeFallbackTimerRef.current = null;
             }
-            sessionStorage.removeItem(HOST_SESSION_KEY);
+            clearHostSession();
             onExit();
             break;
           case 'error':
             if (msg.code === 'ROOM_NOT_FOUND') {
-              sessionStorage.removeItem(HOST_SESSION_KEY);
+              clearReattachRetry();
+              clearHostSession();
               socket.send({ type: 'room:create', preferredGameId: initialGameId });
             } else {
               setErrorMsg(msg.message);
@@ -307,6 +480,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     wsRef.current = socket;
 
     return () => {
+      clearReattachRetry();
       if (closeFallbackTimerRef.current) {
         clearTimeout(closeFallbackTimerRef.current);
         closeFallbackTimerRef.current = null;
@@ -367,14 +541,14 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     };
   }, []);
 
-  // Keep free-tier HTTP hosts (e.g., Render's 15-min idle timer) awake only while a Host screen is open
+  // Keep Cloud Run / reverse-proxy HTTP hosts warm every 45s while the Host Monitor is open
   useEffect(() => {
     const ping = () => {
       fetch('/api/health', { cache: 'no-store' }).catch(() => {
         // Ignore transient network errors; WebSocket reconnect handles recovery
       });
     };
-    const intervalId = window.setInterval(ping, 4 * 60 * 1000);
+    const intervalId = window.setInterval(ping, 45_000);
     return () => window.clearInterval(intervalId);
   }, []);
 
@@ -552,7 +726,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   // Sync 3D card flip direction & proactively warm adjacent cards' renderers + thumbnails in LOBBY
   useEffect(() => {
     if (room?.status !== 'LOBBY') {
-      setLobbyCardHovered(false);
       return;
     }
     const list = filterGamesByPlayerMode(room.lobbyFilter);
@@ -593,6 +766,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     if (hasConnectedHumanHost) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      const targetTag = (e.target as HTMLElement | null)?.tagName;
+      if (targetTag === 'INPUT' || targetTag === 'TEXTAREA') return;
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       const list = filterGamesByPlayerMode(room.lobbyFilter);
       if (list.length <= 1) return;
@@ -703,6 +878,32 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const handleSetHostPlayer = (playerId: string) => {
     setErrorMsg(null);
     wsRef.current?.send({ type: 'room:set-host-player', playerId });
+  };
+
+  const handleSetTeamMode = (teamMode: TeamMode) => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:set-team-mode', teamMode });
+  };
+
+  const handleCyclePlayerTeam = (playerId: string, currentTeamId: TeamId | null) => {
+    if (!room || room.teamMode === 'ffa') return;
+    const teams = getTeamsForMode(room.teamMode);
+    if (teams.length === 0) return;
+    const curIdx = currentTeamId ? teams.indexOf(currentTeamId) : -1;
+    const nextTeam = teams[(curIdx + 1) % teams.length];
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:set-player-team', playerId, teamId: nextTeam });
+  };
+
+  const handleShuffleTeams = () => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:shuffle-teams' });
+  };
+
+  const handleForceLockCupVote = () => {
+    arcadeAudio.unlock();
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'tournament:force-lock-vote' });
   };
 
   const handleEnterGameRoom = () => {
@@ -847,7 +1048,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   }, []);
 
   const handleLeaveHost = () => {
-    sessionStorage.removeItem(HOST_SESSION_KEY);
+    clearHostSession();
     onExit();
   };
 
@@ -855,7 +1056,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     if (isClosingRoom) return;
     setIsClosingRoom(true);
     setCloseConfirmOpen(false);
-    sessionStorage.removeItem(HOST_SESSION_KEY);
+    clearHostSession();
     if (wsRef.current && wsConnected) {
       wsRef.current.send({ type: 'room:close' });
       closeFallbackTimerRef.current = setTimeout(() => {
@@ -888,9 +1089,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   }
 
   const selectedGame = getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang);
+  const selectedPadGuide = getPadTutorialGuide(selectedGame.id, lang);
   const joinUrl = getJoinUrl(room.code, lang);
   const displayJoinHost =
-    typeof window !== 'undefined' ? `${window.location.host}` : 'cloocade.party';
+    typeof window !== 'undefined' ? `${window.location.host}` : 'joinstick.arcade';
   const humans = room.players.filter((p) => !p.isBot);
   const connectedHumans = humans.filter((p) => p.connected);
   const bots = room.players.filter((p) => p.isBot);
@@ -1052,13 +1254,23 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 {t('Home', '首页')}
               </button>
               <span className="font-display text-sm sm:text-lg font-extrabold text-white truncate">
-                {t('Cloocade Party Stage', 'Cloocade Party 派对舞台')}
+                {t('JoinStick Party Stage', 'JoinStick 派对舞台')}
               </span>
               <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF] shrink-0">
                 <span
-                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
+                  className={`w-2 h-2 rounded-full ${!showDisconnectBanner ? 'bg-[#10D98B]' : 'bg-[#FFB800] animate-pulse'}`}
                 />
-                {wsConnected ? t('Live Room Open', '房间已开启') : t('Reconnecting...', '正在重连...')}
+                {!showDisconnectBanner ? (
+                  t('Live Room Open', '房间已开启')
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => wsRef.current?.reconnectNow(true)}
+                    className="text-[#FFB800] hover:text-white underline underline-offset-2 cursor-pointer"
+                  >
+                    {t('Reconnecting... Tap to retry', '正在重连... 点击重试')}
+                  </button>
+                )}
               </span>
             </div>
 
@@ -1278,6 +1490,57 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             </div>
           </section>
 
+          {/* FLEXIBLE TEAM MODE BAR */}
+          <section className="rounded-2xl bg-[#1A1E26] border border-[#282E3B] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-[#9CA3AF] inline-flex items-center gap-1.5 mr-1">
+                <Users className="w-3.5 h-3.5 text-[#FFB800]" />
+                {t('Team Mode', '组队模式')}
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {TEAM_MODE_OPTIONS.map((opt) => {
+                  const active = room.teamMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleSetTeamMode(opt.id)}
+                      className={`h-8 px-3 rounded-lg text-xs font-extrabold inline-flex items-center gap-1.5 border transition-all cursor-pointer ${
+                        active
+                          ? 'bg-[#FFB800] text-[#14120B] border-[#FFB800] shadow-[0_2px_0_#B38100]'
+                          : 'bg-[#101217] text-[#D1D5DB] border-[#262C38] hover:border-[#3D4659] hover:text-white'
+                      }`}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{lang === 'zh' ? opt.labelZh : opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              {(() => {
+                const activeTeamOpt = TEAM_MODE_OPTIONS.find((m) => m.id === room.teamMode);
+                return activeTeamOpt ? (
+                  <span className="text-[11px] text-[#9CA3AF] hidden sm:inline">
+                    {lang === 'zh' ? activeTeamOpt.hintZh : activeTeamOpt.hint}
+                  </span>
+                ) : null;
+              })()}
+              {room.teamMode !== 'ffa' && (
+                <button
+                  type="button"
+                  onClick={handleShuffleTeams}
+                  className="tactile-btn h-8 px-3 rounded-lg bg-[#242A36] hover:bg-[#2E3646] border border-[#353E50] text-xs font-bold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Shuffle className="w-3.5 h-3.5 text-[#00C2FF]" />
+                  <span>{t('Shuffle Teams', '随机分队')}</span>
+                </button>
+              )}
+            </div>
+          </section>
+
           {errorMsg && (
             <div className="p-3.5 rounded-xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/45 text-sm text-[#FF9B8A] font-medium">
               {translateServerMessage(errorMsg, lang)}
@@ -1351,6 +1614,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     {room.players.map((player) => {
                       const isHost = !player.isBot && room.hostPlayerId === player.id;
                       const botDiff = player.botDifficulty ?? room.botDifficulty;
+                      const teamSpec = room.teamMode !== 'ffa' ? getTeamSpec(player.teamId) : null;
                       return (
                         <motion.div
                           key={player.id}
@@ -1364,18 +1628,42 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                               ? 'bg-[#1F2430] border-[#FFB800]'
                               : 'bg-[#1A1E26] border-[#2A303D]'
                           }`}
+                          style={
+                            !isHost && teamSpec
+                              ? { borderColor: `${teamSpec.colorHex}88` }
+                              : undefined
+                          }
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span
-                              className="h-8 px-2.5 rounded-lg font-mono text-xs font-black inline-flex items-center gap-1"
-                              style={{
-                                backgroundColor: player.color.hex,
-                                color: player.color.textOnColor,
-                              }}
-                            >
-                              {player.isBot && <Bot className="w-3.5 h-3.5" />}
-                              P{player.slotIndex + 1}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="h-7 px-2 rounded-lg font-mono text-[11px] font-black inline-flex items-center gap-1"
+                                style={{
+                                  backgroundColor: player.color.hex,
+                                  color: player.color.textOnColor,
+                                }}
+                              >
+                                {player.isBot && <Bot className="w-3 h-3" />}
+                                P{player.slotIndex + 1}
+                              </span>
+
+                              {teamSpec && (
+                                <button
+                                  type="button"
+                                  title={t('Click to switch team', '点击切换队伍')}
+                                  onClick={() => handleCyclePlayerTeam(player.id, player.teamId)}
+                                  className="h-7 px-2 rounded-lg font-mono text-[11px] font-black inline-flex items-center gap-1 border transition-transform hover:scale-105 cursor-pointer"
+                                  style={{
+                                    backgroundColor: `${teamSpec.colorHex}24`,
+                                    borderColor: `${teamSpec.colorHex}AA`,
+                                    color: teamSpec.colorHex,
+                                  }}
+                                >
+                                  <span>{teamSpec.emoji}</span>
+                                  <span>{lang === 'zh' ? teamSpec.nameZh : teamSpec.shortName}</span>
+                                </button>
+                              )}
+                            </div>
 
                             {player.isBot ? (
                               <div className="flex items-center gap-1.5">
@@ -1422,18 +1710,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                             )}
                           </div>
 
-                          <div>
-                            <div className="font-display text-xl font-extrabold text-white truncate">
-                              {player.name}
-                            </div>
-                            <div className="text-xs text-[#A5AEBD] mt-0.5">
-                              {player.isBot
-                                ? t('AI Robot · Always Ready', 'AI 机器人 · 自动准备')
-                                : !player.connected
-                                ? t('Disconnected · Reconnecting...', '已断开 · 等待重连中...')
-                                : isHost
-                                ? t('Room Host · Can start games', '房主 · 可遥控选游并开始')
-                                : t('Phone Controller Connected', '手机手柄已连接')}
+                          <div className="flex items-center gap-3 min-w-0">
+                            <PlayerAvatar
+                              avatarId={player.avatarId}
+                              colorHex={player.color.hex}
+                              size="md"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-display text-xl font-extrabold text-white truncate">
+                                {player.name}
+                              </div>
+                              <div className="text-xs text-[#A5AEBD] mt-0.5 truncate">
+                                {player.isBot
+                                  ? t('AI Robot · Always Ready', 'AI 机器人 · 自动准备')
+                                  : !player.connected
+                                  ? t('Disconnected · Reconnecting...', '已断开 · 等待重连中...')
+                                  : isHost
+                                  ? t('Room Host · Can start games', '房主 · 可遥控选游并开始')
+                                  : t('Phone Controller Connected', '手机手柄已连接')}
+                              </div>
                             </div>
                           </div>
                         </motion.div>
@@ -1461,9 +1756,32 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   // VIEW A2: FULLSCREEN TV GAME ROOM (Controlled Exclusively by Host's Remote!)
   // =========================================================================
   if (room.status === 'LOBBY') {
-    const visibleGames = filterGamesByPlayerMode(room.lobbyFilter).map((g) =>
-      getLocalizedGameMeta(g, lang)
-    );
+    const baseFilterGames = filterGamesByPlayerMode(room.lobbyFilter);
+    const trimmedSearch = lobbySearchQuery.trim().toLowerCase();
+    const matchedGames = baseFilterGames
+      .map((raw) => ({ raw, loc: getLocalizedGameMeta(raw, lang) }))
+      .filter(({ raw, loc }) => {
+        if (!trimmedSearch) return true;
+        return [
+          raw.name,
+          raw.category,
+          raw.tagline,
+          raw.description,
+          loc.name,
+          loc.category,
+          loc.tagline,
+          loc.description,
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(trimmedSearch);
+      })
+      .map((item) => item.loc);
+    const visibleGames =
+      matchedGames.length > 0
+        ? matchedGames
+        : baseFilterGames.map((g) => getLocalizedGameMeta(g, lang));
+    const searchHadNoMatches = trimmedSearch.length > 0 && matchedGames.length === 0;
     const focus = room.remoteFocus;
     const activeSettingOpt =
       selectedGame.settingOptions.find((o) => o.value === room.gameSettingValue) ??
@@ -1480,7 +1798,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         <header className="h-14 border-b border-[#242934] bg-[#151820] px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4 shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
             <span className="font-display text-base sm:text-lg font-extrabold text-white truncate">
-              {t('Cloocade Party Game Room', 'Cloocade Party 游戏厅')}
+              {t('JoinStick Game Room', 'JoinStick 游戏厅')}
             </span>
             <span className="text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
               PIN <strong className="text-white">{room.code}</strong> · {room.players.length}/
@@ -1490,13 +1808,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
           {/* Center Host Remote Lock Indicator (shown inline on wide screens, compact on tablets) */}
           <div className="hidden xl:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#1A1E26] border border-[#FFB800]/55 text-xs font-bold text-[#FFB800] whitespace-nowrap">
-            {!wsConnected ? (
-              <>
+            {showDisconnectBanner ? (
+              <button
+                type="button"
+                onClick={() => wsRef.current?.reconnectNow(true)}
+                className="inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+              >
                 <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" />
                 <span className="text-[#FF9B8A]">
-                  {t('Server Reconnecting...', '服务器重连中...')}
+                  {t('Reconnecting... Click to retry', '服务器重连中... 点击重试')}
                 </span>
-              </>
+              </button>
             ) : activeHostPlayer ? (
               <>
                 <Crown className="w-3.5 h-3.5 text-[#FFB800] shrink-0" />
@@ -1620,11 +1942,13 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           })
                         )
                       }
-                      className={`px-2.5 xl:px-3.5 py-1.5 rounded-lg text-xs font-extrabold whitespace-nowrap transition-all border ${
+                      className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-extrabold whitespace-nowrap transition-all border ${
                         isRemoteFocused
                           ? `bg-[#FFB800] text-[#14120B] ${tvFocusRing}`
                           : isActiveFilter
-                          ? 'bg-[#FF4D2E] text-white border-transparent'
+                          ? opt.id === 'heritage'
+                            ? 'bg-[#F59E0B] text-[#141008] border-transparent'
+                            : 'bg-[#FF4D2E] text-white border-transparent'
                           : 'bg-transparent text-[#9CA3AF] border-transparent'
                       } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
                     >
@@ -1635,10 +1959,69 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 })}
               </div>
 
-              <div className="text-xs text-[#9CA3AF] font-medium whitespace-nowrap hidden xl:block">
-                {t('Use Host Remote', '房主遥控器')}{' '}
-                <strong className="text-white">▲ ▼ ◀ ▶</strong> {t('to browse ·', '浏览 ·')}{' '}
-                <strong className="text-[#FFB800]">OK</strong> {t('to select', '确认')}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="relative w-36 sm:w-44 xl:w-52">
+                  <Search className="w-3.5 h-3.5 text-[#6B7280] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={lobbySearchQuery}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setLobbySearchQuery(val);
+                      const q = val.trim().toLowerCase();
+                      if (q && !isScreenRemoteLocked) {
+                        const hit = baseFilterGames.find((raw) => {
+                          const loc = getLocalizedGameMeta(raw, lang);
+                          return [raw.name, raw.description, loc.name, loc.description]
+                            .join(' ')
+                            .toLowerCase()
+                            .includes(q);
+                        });
+                        if (hit && hit.id !== room.selectedGameId) {
+                          handleSelectGame(hit.id);
+                        }
+                      }
+                    }}
+                    placeholder={t('Quick search...', '快速搜索...')}
+                    aria-label={t('Search games in lobby', '在大厅搜索游戏')}
+                    className={`w-full h-8 pl-8 pr-7 rounded-lg bg-[#101217] border text-xs text-white placeholder:text-[#6B7280] focus:outline-none ${
+                      searchHadNoMatches
+                        ? 'border-[#FF4D2E]'
+                        : 'border-[#262C39] focus:border-[#00C2FF]'
+                    }`}
+                  />
+                  {lobbySearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setLobbySearchQuery('')}
+                      aria-label={t('Clear search', '清除搜索')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    guardHostOnlyClick(() => {
+                      const pool = visibleGames.filter((g) => g.id !== room.selectedGameId);
+                      const list = pool.length > 0 ? pool : visibleGames;
+                      if (list.length === 0) return;
+                      const pick = list[Math.floor(Math.random() * list.length)];
+                      setCardFlipDir(1);
+                      handleSelectGame(pick.id);
+                    })
+                  }
+                  title={t('Pick a random game', '随机选一款游戏')}
+                  className={`h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#272F3E] border border-[#30394A] text-xs font-extrabold text-[#FDE047] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                    isScreenRemoteLocked ? 'cursor-default opacity-75' : 'cursor-pointer'
+                  }`}
+                >
+                  <Dices className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{t('Random', '随机')}</span>
+                </button>
               </div>
             </div>
 
@@ -1658,6 +2041,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 totalVisible > 1 ? visibleGames[(currentIdx + 1) % totalVisible] : null;
               const isCardFocused = focus.zone === 'games';
               const activeGenre = getGameGenre(activeCardGame.id);
+              const activeCardPadGuide = getPadTutorialGuide(activeCardGame.id, lang);
 
               const stepGameCard = (dir: 1 | -1) => {
                 if (totalVisible <= 1) return;
@@ -1669,198 +2053,222 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               };
 
               return (
-                <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 px-1 sm:px-2 overflow-hidden">
-                  <div className="w-full max-w-[820px] flex items-center justify-center gap-2.5 sm:gap-5">
-                    {/* Left / Previous Flip Button */}
-                    <button
-                      type="button"
-                      onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
-                      disabled={totalVisible <= 1}
-                      aria-label={t('Previous game', '上一个游戏')}
-                      title={
-                        prevCardGame
-                          ? t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)
-                          : t('Previous game', '上一个游戏')
-                      }
-                      className={`tactile-btn group/nav w-11 h-16 sm:w-14 sm:h-24 rounded-2xl bg-[#1A1E26] border-2 border-[#2D3546] text-white flex flex-col items-center justify-center gap-1 shadow-lg transition-all shrink-0 disabled:opacity-35 ${
-                        isScreenRemoteLocked
-                          ? 'cursor-default'
-                          : 'hover:bg-[#232937] hover:border-[#00C2FF]/70 active:scale-95 cursor-pointer'
-                      }`}
-                    >
-                      <ChevronLeft className="w-6 h-6 sm:w-7 sm:h-7 text-[#00C2FF] transition-transform group-hover/nav:-translate-x-0.5" />
-                      <span className="text-[10px] font-mono font-bold text-[#9CA3AF] hidden sm:inline">
-                        {t('PREV', '上一款')}
-                      </span>
-                    </button>
-
-                    {/* 3D Flip Deck Showcase Stage */}
+                <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 px-1 sm:px-3 overflow-hidden">
+                  <div className="relative w-full max-w-[920px] flex items-center justify-center">
+                    {/* 3D Flip Deck Showcase Stage with Shadowed Prev & Next Cards */}
                     <div
-                      className="relative flex-1 max-w-[600px] min-w-0 py-2"
-                      style={{ perspective: '1400px' }}
+                      className="relative w-full flex items-center justify-center py-2"
+                      style={{ perspective: '1500px' }}
                     >
-                      {/* Subtle Back-Deck Peek Cards (Left & Right) */}
+                      {/* Shadowed Previous Card Silhouette (Left) */}
                       {prevCardGame && (
                         <button
                           type="button"
-                          tabIndex={-1}
-                          aria-hidden="true"
                           onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
-                          className={`hidden sm:block absolute inset-y-6 -left-3 w-12 rounded-2xl bg-[#161A22] border border-[#2A3140] -rotate-3 opacity-70 transition-opacity ${
+                          aria-label={t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)}
+                          title={t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)}
+                          style={{
+                            transform: 'translateX(-16%) scale(0.84) rotateY(18deg)',
+                          }}
+                          className={`group/prev hidden sm:flex flex-col absolute left-0 sm:left-2 lg:left-4 z-0 w-[56%] max-w-[440px] rounded-2xl sm:rounded-3xl overflow-hidden border border-[#2A3142]/80 bg-[#12151C] shadow-[0_24px_56px_rgba(0,0,0,0.85)] text-left transition-all duration-300 ${
                             isScreenRemoteLocked
-                              ? 'pointer-events-none'
-                              : 'hover:opacity-95 cursor-pointer'
+                              ? 'pointer-events-none opacity-65'
+                              : 'opacity-70 hover:opacity-95 hover:-translate-x-1.5 cursor-pointer'
                           }`}
-                        />
+                        >
+                          <div className="relative aspect-video w-full bg-[#0C0E14] overflow-hidden">
+                            <GameThumbnail
+                              gameId={prevCardGame.id}
+                              gameName={prevCardGame.name}
+                              accentHex={prevCardGame.accentHex}
+                              fallbackSrc={prevCardGame.coverImage}
+                              alt={prevCardGame.name}
+                              className="w-full h-full object-cover brightness-[0.36] saturate-[0.65] blur-[1px] transition-all duration-300 group-hover/prev:brightness-[0.52] group-hover/prev:blur-0"
+                            />
+                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0B0D12]/35 via-[#0B0D12]/55 to-[#0B0D12]/90" />
+                          </div>
+                          <div className="px-4 py-3 bg-[#10131A]">
+                            <div className="text-[10px] font-mono uppercase tracking-wider text-[#6B7280] truncate">
+                              {prevCardGame.category}
+                            </div>
+                            <div className="mt-0.5 font-display text-lg font-extrabold text-[#9CA3AF] truncate group-hover/prev:text-white transition-colors">
+                              {prevCardGame.name}
+                            </div>
+                            <div className="mt-1 h-4" />
+                          </div>
+                        </button>
                       )}
+
+                      {/* Shadowed Next Card Silhouette (Right) */}
                       {nextCardGame && (
                         <button
                           type="button"
-                          tabIndex={-1}
-                          aria-hidden="true"
                           onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
-                          className={`hidden sm:block absolute inset-y-6 -right-3 w-12 rounded-2xl bg-[#161A22] border border-[#2A3140] rotate-3 opacity-70 transition-opacity ${
+                          aria-label={t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)}
+                          title={t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)}
+                          style={{
+                            transform: 'translateX(16%) scale(0.84) rotateY(-18deg)',
+                          }}
+                          className={`group/next hidden sm:flex flex-col absolute right-0 sm:right-2 lg:right-4 z-0 w-[56%] max-w-[440px] rounded-2xl sm:rounded-3xl overflow-hidden border border-[#2A3142]/80 bg-[#12151C] shadow-[0_24px_56px_rgba(0,0,0,0.85)] text-right transition-all duration-300 ${
                             isScreenRemoteLocked
-                              ? 'pointer-events-none'
-                              : 'hover:opacity-95 cursor-pointer'
+                              ? 'pointer-events-none opacity-65'
+                              : 'opacity-70 hover:opacity-95 hover:translate-x-1.5 cursor-pointer'
                           }`}
-                        />
+                        >
+                          <div className="relative aspect-video w-full bg-[#0C0E14] overflow-hidden">
+                            <GameThumbnail
+                              gameId={nextCardGame.id}
+                              gameName={nextCardGame.name}
+                              accentHex={nextCardGame.accentHex}
+                              fallbackSrc={nextCardGame.coverImage}
+                              alt={nextCardGame.name}
+                              className="w-full h-full object-cover brightness-[0.36] saturate-[0.65] blur-[1px] transition-all duration-300 group-hover/next:brightness-[0.52] group-hover/next:blur-0"
+                            />
+                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-l from-[#0B0D12]/35 via-[#0B0D12]/55 to-[#0B0D12]/90" />
+                          </div>
+                          <div className="px-4 py-3 bg-[#10131A]">
+                            <div className="text-[10px] font-mono uppercase tracking-wider text-[#6B7280] truncate">
+                              {nextCardGame.category}
+                            </div>
+                            <div className="mt-0.5 font-display text-lg font-extrabold text-[#9CA3AF] truncate group-hover/next:text-white transition-colors">
+                              {nextCardGame.name}
+                            </div>
+                            <div className="mt-1 h-4" />
+                          </div>
+                        </button>
                       )}
 
-                      <AnimatePresence mode="wait" initial={false}>
-                        <motion.div
-                          key={`${room.lobbyFilter}-${activeCardGame.id}`}
-                          initial={{
-                            rotateY: cardFlipDir > 0 ? 86 : -86,
-                            opacity: 0,
-                            scale: 0.92,
-                          }}
-                          animate={{
-                            rotateY: 0,
-                            opacity: 1,
-                            scale: 1,
-                          }}
-                          exit={{
-                            rotateY: cardFlipDir > 0 ? -86 : 86,
-                            opacity: 0,
-                            scale: 0.92,
-                          }}
-                          transition={{
-                            duration: 0.24,
-                            ease: [0.22, 1, 0.36, 1],
-                          }}
-                          style={{
-                            transformStyle: 'preserve-3d',
-                            backfaceVisibility: 'hidden',
-                          }}
-                          onMouseEnter={() => setLobbyCardHovered(true)}
-                          onMouseLeave={() => setLobbyCardHovered(false)}
-                          onClick={() =>
-                            guardHostOnlyClick(() => {
-                              if (canStartMatch) {
-                                handleStartMatch();
-                              } else {
-                                handleSelectGame(activeCardGame.id);
-                              }
-                            })
-                          }
-                          className={`relative z-10 w-full rounded-2xl sm:rounded-3xl overflow-hidden border-2 bg-[#1A1E26] shadow-[0_22px_54px_rgba(0,0,0,0.62)] transition-colors ${
-                            isCardFocused
-                              ? tvFocusRing
-                              : 'border-[#333C4F] hover:border-[#00C2FF]/65'
-                          } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
-                        >
-                          {/* Large Hero Artwork Thumbnail + 5-Second Live Gameplay Hover Video */}
-                          <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
-                            <GameHoverPreview
-                              gameId={activeCardGame.id}
-                              gameName={activeCardGame.name}
-                              accentHex={activeCardGame.accentHex}
-                              fallbackSrc={activeCardGame.coverImage}
-                              alt={activeCardGame.name}
-                              active={lobbyCardHovered}
-                              eager
-                              timecodePosition="bottom-right"
-                              className="w-full h-full object-cover"
-                            />
+                      {/* Center Active Game Card (Auto-playing 5-Second Live Gameplay Video!) */}
+                      <div className="relative z-20 w-full max-w-[580px] min-w-0">
+                        <AnimatePresence mode="wait" initial={false}>
+                          <motion.div
+                            key={`${room.lobbyFilter}-${activeCardGame.id}`}
+                            initial={{
+                              rotateY: cardFlipDir > 0 ? 86 : -86,
+                              opacity: 0,
+                              scale: 0.92,
+                            }}
+                            animate={{
+                              rotateY: 0,
+                              opacity: 1,
+                              scale: 1,
+                            }}
+                            exit={{
+                              rotateY: cardFlipDir > 0 ? -86 : 86,
+                              opacity: 0,
+                              scale: 0.92,
+                            }}
+                            transition={{
+                              duration: 0.24,
+                              ease: [0.22, 1, 0.36, 1],
+                            }}
+                            style={{
+                              transformStyle: 'preserve-3d',
+                              backfaceVisibility: 'hidden',
+                            }}
+                            onClick={() =>
+                              guardHostOnlyClick(() => {
+                                if (canStartMatch) {
+                                  handleStartMatch();
+                                } else {
+                                  handleSelectGame(activeCardGame.id);
+                                }
+                              })
+                            }
+                            className={`relative z-10 w-full rounded-2xl sm:rounded-3xl overflow-hidden border-2 bg-[#1A1E26] shadow-[0_28px_68px_rgba(0,0,0,0.82)] transition-colors ${
+                              isCardFocused
+                                ? tvFocusRing
+                                : 'border-[#333C4F] hover:border-[#00C2FF]/65'
+                            } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
+                          >
+                            {/* Large Hero Artwork Thumbnail + Auto-Playing 5-Second Live Gameplay Video */}
+                            <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
+                              <GameHoverPreview
+                                gameId={activeCardGame.id}
+                                gameName={activeCardGame.name}
+                                accentHex={activeCardGame.accentHex}
+                                fallbackSrc={activeCardGame.coverImage}
+                                alt={activeCardGame.name}
+                                active={true}
+                                eager
+                                immediate
+                                timecodePosition="bottom-right"
+                                className="w-full h-full object-cover"
+                              />
 
-                            {/* Genre Label Top-Left */}
-                            <span
-                              className={`pointer-events-none absolute top-3 left-3 z-10 px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold uppercase tracking-wider shadow-md ${
-                                activeGenre === 'board'
-                                  ? 'bg-[#A855F7]/92 text-white'
-                                  : activeGenre === 'card'
-                                  ? 'bg-[#10D98B]/92 text-[#071710]'
-                                  : 'bg-[#101217]/88 text-[#00C2FF] border border-[#00C2FF]/45'
-                              }`}
-                            >
-                              {getLocalizedFilterLabel(activeGenre, lang, true)}
-                            </span>
-
-                            {/* Deck Position Counter & TV OK Badge Top-Right */}
-                            <div className="pointer-events-none absolute top-3 right-3 z-10 flex items-center gap-1.5">
-                              <span className="px-2.5 py-1 rounded-lg bg-[#0D1017]/85 backdrop-blur-xs border border-white/15 font-mono text-[11px] font-bold text-white tabular-nums shadow">
-                                {String(currentIdx + 1).padStart(2, '0')} /{' '}
-                                {String(Math.max(1, totalVisible)).padStart(2, '0')}
-                              </span>
-                              {isCardFocused && (
-                                <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-mono text-[11px] font-black shadow">
-                                  OK
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#1A1E26] to-transparent" />
-                          </div>
-
-                          {/* Card Body Details */}
-                          <div className="px-4 sm:px-6 pb-4 sm:pb-5 pt-2">
-                            <div className="flex items-center justify-between gap-2 text-xs text-[#9CA3AF]">
-                              <span className="truncate font-semibold">
-                                {activeCardGame.category} · {activeCardGame.playerModeLabel}
-                              </span>
+                              {/* Genre Label Top-Left */}
                               <span
-                                className="font-mono text-[11px] font-bold shrink-0"
-                                style={{ color: activeCardGame.accentHex }}
+                                className={`pointer-events-none absolute top-3 left-3 z-10 px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold uppercase tracking-wider shadow-md ${
+                                  activeGenre === 'board'
+                                    ? 'bg-[#A855F7]/92 text-white'
+                                    : activeGenre === 'card'
+                                    ? 'bg-[#10D98B]/92 text-[#071710]'
+                                    : 'bg-[#101217]/88 text-[#00C2FF] border border-[#00C2FF]/45'
+                                }`}
                               >
-                                {activeSettingOpt?.label ?? room.gameSettingValue}
+                                {getLocalizedFilterLabel(activeGenre, lang, true)}
                               </span>
+
+                              {/* Deck Position Counter & TV OK Badge Top-Right */}
+                              <div className="pointer-events-none absolute top-3 right-3 z-10 flex items-center gap-1.5">
+                                <span className="px-2.5 py-1 rounded-lg bg-[#0D1017]/85 backdrop-blur-xs border border-white/15 font-mono text-[11px] font-bold text-white tabular-nums shadow">
+                                  {String(currentIdx + 1).padStart(2, '0')} /{' '}
+                                  {String(Math.max(1, totalVisible)).padStart(2, '0')}
+                                </span>
+                                {isCardFocused && (
+                                  <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-mono text-[11px] font-black shadow">
+                                    OK
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#1A1E26] to-transparent" />
                             </div>
 
-                            <h2 className="mt-1 font-display text-2xl sm:text-3xl font-extrabold text-white truncate">
-                              {activeCardGame.name}
-                            </h2>
+                            {/* Card Body Details */}
+                            <div className="px-4 sm:px-6 pb-4 sm:pb-5 pt-2">
+                              <div className="flex items-center justify-between gap-2 text-xs text-[#9CA3AF]">
+                                <span className="truncate font-semibold">
+                                  {activeCardGame.category} · {activeCardGame.playerModeLabel}
+                                </span>
+                                <span
+                                  className="font-mono text-[11px] font-bold shrink-0"
+                                  style={{ color: activeCardGame.accentHex }}
+                                >
+                                  {activeSettingOpt?.label ?? room.gameSettingValue}
+                                </span>
+                              </div>
 
-                            <p className="mt-1.5 text-xs sm:text-sm text-[#B8C0CE] line-clamp-2 leading-relaxed">
-                              {activeCardGame.description}
-                            </p>
-                          </div>
-                        </motion.div>
-                      </AnimatePresence>
+                              <h2 className="mt-1 font-display text-2xl sm:text-3xl font-extrabold text-white truncate">
+                                {activeCardGame.name}
+                              </h2>
+
+                              <p className="mt-1.5 text-xs sm:text-sm text-[#B8C0CE] line-clamp-2 leading-relaxed">
+                                {activeCardGame.description}
+                              </p>
+
+                              <div className="mt-2.5 rounded-xl bg-[#101217]/90 border border-[#262C38] px-3 py-2 flex flex-col gap-1">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span
+                                    className="inline-flex items-center gap-1.5 text-[11px] font-extrabold"
+                                    style={{ color: activeCardPadGuide.accentHex }}
+                                  >
+                                    <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
+                                    <span>{activeCardPadGuide.padTitle}</span>
+                                  </span>
+                                  <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">
+                                    {activeCardPadGuide.presetTag}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] sm:text-xs text-[#D1D5DB] line-clamp-2 leading-snug">
+                                  {activeCardPadGuide.shortTutorial}
+                                </p>
+                              </div>
+                            </div>
+                          </motion.div>
+                        </AnimatePresence>
+                      </div>
                     </div>
-
-                    {/* Right / Next Flip Button */}
-                    <button
-                      type="button"
-                      onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
-                      disabled={totalVisible <= 1}
-                      aria-label={t('Next game', '下一个游戏')}
-                      title={
-                        nextCardGame
-                          ? t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)
-                          : t('Next game', '下一个游戏')
-                      }
-                      className={`tactile-btn group/nav w-11 h-16 sm:w-14 sm:h-24 rounded-2xl bg-[#1A1E26] border-2 border-[#2D3546] text-white flex flex-col items-center justify-center gap-1 shadow-lg transition-all shrink-0 disabled:opacity-35 ${
-                        isScreenRemoteLocked
-                          ? 'cursor-default'
-                          : 'hover:bg-[#232937] hover:border-[#00C2FF]/70 active:scale-95 cursor-pointer'
-                      }`}
-                    >
-                      <ChevronRight className="w-6 h-6 sm:w-7 sm:h-7 text-[#00C2FF] transition-transform group-hover/nav:translate-x-0.5" />
-                      <span className="text-[10px] font-mono font-bold text-[#9CA3AF] hidden sm:inline">
-                        {t('NEXT', '下一款')}
-                      </span>
-                    </button>
                   </div>
 
                   {/* Compact Adjacent Preview + Deck Progress Bar */}
@@ -1908,11 +2316,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           <section className="md:col-span-5 lg:col-span-4 flex flex-col min-h-0 gap-3 overflow-hidden">
             {/* Compact Tablet Remote Indicator */}
             <div className="xl:hidden flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#1A1E26] border border-[#282E3B] text-[11px] font-bold shrink-0">
-              {!wsConnected ? (
-                <span className="inline-flex items-center gap-1.5 text-[#FF9B8A] truncate">
+              {showDisconnectBanner ? (
+                <button
+                  type="button"
+                  onClick={() => wsRef.current?.reconnectNow(true)}
+                  className="inline-flex items-center gap-1.5 text-[#FF9B8A] truncate cursor-pointer"
+                >
                   <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" />
-                  <span>{t('Server Reconnecting...', '服务器重连中...')}</span>
-                </span>
+                  <span>{t('Reconnecting... Tap to retry', '重连中... 点击重试')}</span>
+                </button>
               ) : activeHostPlayer ? (
                 <span className="inline-flex items-center gap-1.5 text-[#FFB800] truncate">
                   <Crown className="w-3.5 h-3.5 shrink-0" />
@@ -2004,9 +2416,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               </div>
             </div>
 
-            {/* Live Ready Check Roster */}
-            <div className="flex-1 min-h-0 rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-4 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between mb-2.5 shrink-0">
+            {/* Live Ready Check Roster + Flexible Team Mode Switcher */}
+            <div className="flex-1 min-h-0 rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-3.5 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between mb-2 shrink-0">
                 <h3 className="font-display text-sm font-extrabold text-white">
                   {t('Ready Check', '准备状态')}
                 </h3>
@@ -2023,33 +2435,79 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 </span>
               </div>
 
+              {/* Compact Team Mode Pills inside Game Room */}
+              <div className="mb-2.5 pb-2 border-b border-[#262C38] flex flex-wrap items-center gap-1 shrink-0">
+                {TEAM_MODE_OPTIONS.map((opt) => {
+                  const active = room.teamMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleSetTeamMode(opt.id)}
+                      className={`h-6 px-2 rounded-md text-[10px] font-extrabold inline-flex items-center gap-1 border transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-[#FFB800] text-[#14120B] border-[#FFB800]'
+                          : 'bg-[#101217] text-[#A5AEBD] border-[#262C38] hover:text-white'
+                      }`}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{lang === 'zh' ? opt.labelZh : opt.label}</span>
+                    </button>
+                  );
+                })}
+                {room.teamMode !== 'ffa' && (
+                  <button
+                    type="button"
+                    onClick={handleShuffleTeams}
+                    title={t('Shuffle Teams', '随机分队')}
+                    className="h-6 px-2 rounded-md bg-[#242A36] hover:bg-[#2E3646] text-[10px] font-bold text-[#00C2FF] inline-flex items-center gap-1 cursor-pointer ml-auto"
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    <span>{t('Shuffle', '打乱')}</span>
+                  </button>
+                )}
+              </div>
+
               <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar space-y-1.5 pr-1">
                 {room.players.map((player) => {
                   const isHost = !player.isBot && room.hostPlayerId === player.id;
                   const botDiff = player.botDifficulty ?? room.botDifficulty;
+                  const teamSpec = room.teamMode !== 'ffa' ? getTeamSpec(player.teamId) : null;
                   return (
                     <motion.div
                       key={player.id}
                       layout
-                      className={`h-10 px-3 rounded-xl border flex items-center justify-between gap-2 ${
+                      className={`h-10 px-2.5 rounded-xl border flex items-center justify-between gap-2 ${
                         player.ready && player.connected
                           ? 'bg-[#112620] border-[#10D98B]/55'
                           : 'bg-[#1E232D] border-[#2F3747]'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-6 h-6 rounded-md font-mono text-[10px] font-black flex items-center justify-center shrink-0"
-                          style={{
-                            backgroundColor: player.color.hex,
-                            color: player.color.textOnColor,
-                          }}
-                        >
-                          P{player.slotIndex + 1}
-                        </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <PlayerAvatar
+                          avatarId={player.avatarId}
+                          colorHex={player.color.hex}
+                          size="xs"
+                        />
                         {player.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
                         {isHost && <Crown className="w-3.5 h-3.5 text-[#FFB800] shrink-0" />}
                         <span className="text-xs font-bold text-white truncate">{player.name}</span>
+                        {teamSpec && (
+                          <button
+                            type="button"
+                            title={t('Click to switch team', '点击切换队伍')}
+                            onClick={() => handleCyclePlayerTeam(player.id, player.teamId)}
+                            className="h-5 px-1.5 rounded text-[9px] font-mono font-black inline-flex items-center gap-0.5 border shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                            style={{
+                              backgroundColor: `${teamSpec.colorHex}22`,
+                              borderColor: `${teamSpec.colorHex}99`,
+                              color: teamSpec.colorHex,
+                            }}
+                          >
+                            <span>{teamSpec.emoji}</span>
+                            <span>{lang === 'zh' ? teamSpec.nameZh : teamSpec.shortName}</span>
+                          </button>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -2282,6 +2740,31 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   }
 
   // =========================================================================
+  // VIEW A3: 5-GAME CUP GROUP VOTING STAGE (3 Candidate Games w/ 5s Gameplay Clips!)
+  // =========================================================================
+  if (room.status === 'VOTING' && room.tournament?.vote) {
+    return (
+      <>
+        {floatingEmoteOverlay}
+        <CupVotingStage
+          room={room}
+          isScreenRemoteLocked={isScreenRemoteLocked}
+          onCastOrLockGame={(gameId) =>
+            guardHostOnlyClick(() => wsRef.current?.send({ type: 'tournament:vote', gameId }))
+          }
+          onForceLockVote={() => guardHostOnlyClick(handleForceLockCupVote)}
+          onExitCup={() => guardHostOnlyClick(handleExitTournament)}
+        />
+        <TestControllerDrawer
+          roomCode={room.code}
+          open={testDrawerOpen}
+          onClose={() => setTestDrawerOpen(false)}
+        />
+      </>
+    );
+  }
+
+  // =========================================================================
   // VIEW B: ACTIVE 60FPS GAME MONITOR STAGE (BRIEFING / COUNTDOWN / PLAYING / PAUSED / RESULTS)
   // =========================================================================
   const briefingReadyPercent =
@@ -2332,13 +2815,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {!wsConnected && (
-            <span className="h-8 px-2.5 rounded-lg bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF9B8A] text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap">
+          {showDisconnectBanner && (
+            <button
+              type="button"
+              onClick={() => wsRef.current?.reconnectNow(true)}
+              className="h-8 px-2.5 rounded-lg bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF9B8A] hover:text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            >
               <WifiOff className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('Reconnecting...', '重连中...')}</span>
-            </span>
+              <span className="hidden sm:inline">{t('Reconnect', '点击重连')}</span>
+            </button>
           )}
-          {wsConnected && !activeHostPlayer && (
+          {!showDisconnectBanner && !activeHostPlayer && (
             <span className="hidden xl:inline-flex h-8 px-2.5 rounded-lg bg-[#00C2FF]/15 border border-[#00C2FF]/40 text-[#00C2FF] text-xs font-bold items-center gap-1.5 whitespace-nowrap">
               <Gamepad2 className="w-3.5 h-3.5" />
               <span>{t('Mouse Control', '鼠标控制')}</span>
@@ -2430,8 +2917,46 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           (m, entry) => Math.max(m, entry.player.score),
           0
         );
+        const showTeamBar = room.teamMode !== 'ffa' && room.teamRankings.length > 0;
         return (
-          <div className="border-b border-[#242934] bg-[#10131A]/95 px-2.5 sm:px-5 py-1.5 shrink-0">
+          <div className="border-b border-[#242934] bg-[#10131A]/95 px-2.5 sm:px-5 py-1.5 shrink-0 space-y-1.5">
+            {showTeamBar && (
+              <LayoutGroup id="live-team-bar-standings">
+                <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-center gap-2">
+                  {room.teamRankings.map((team) => {
+                    const spec = getTeamSpec(team.teamId);
+                    if (!spec) return null;
+                    const isLeadingTeam = team.rank === 1 && team.score > 0;
+                    return (
+                      <motion.div
+                        key={team.teamId}
+                        layout="position"
+                        transition={{ type: 'spring', stiffness: 460, damping: 34 }}
+                        className={`px-2.5 py-0.5 rounded-lg border text-xs font-extrabold inline-flex items-center gap-1.5 ${
+                          isLeadingTeam ? 'shadow-[0_0_12px_rgba(255,184,0,0.2)]' : ''
+                        }`}
+                        style={{
+                          backgroundColor: `${spec.colorHex}1E`,
+                          borderColor: isLeadingTeam ? '#FFB800' : `${spec.colorHex}80`,
+                        }}
+                      >
+                        <span className="font-mono text-[10px] font-black text-[#FFB800]">
+                          #{team.rank}
+                        </span>
+                        <span>{spec.emoji}</span>
+                        <span style={{ color: spec.colorHex }}>
+                          {lang === 'zh' ? spec.nameZh : spec.name}
+                        </span>
+                        <span className="font-mono text-white tabular-nums">
+                          {team.score} {t('pts', '分')}
+                        </span>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </LayoutGroup>
+            )}
+
             <LayoutGroup id="live-top-bar-standings">
               <div className="max-w-[1440px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap items-center justify-center gap-1.5 sm:gap-2">
                 {rankedLivePlayers.map(({ player: p, position }) => {
@@ -2439,6 +2964,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   const isTurnActive =
                     room.status === 'PLAYING' && liveTurnInfo.activePlayerId === p.id;
                   const shift = rankShifts[p.id] ?? 0;
+                  const teamSpec = room.teamMode !== 'ffa' ? getTeamSpec(p.teamId) : null;
                   const rankBadgeClass =
                     position === 1 && maxLiveScore > 0
                       ? 'bg-[#FFB800] text-[#14120B]'
@@ -2494,15 +3020,22 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           </motion.span>
                         )}
 
-                        <span
-                          className="w-5 h-5 rounded font-mono text-[10px] font-black flex items-center justify-center shrink-0"
-                          style={{
-                            backgroundColor: p.color.hex,
-                            color: p.color.textOnColor,
-                          }}
-                        >
-                          P{p.slotIndex + 1}
-                        </span>
+                        <PlayerAvatar
+                          avatarId={p.avatarId}
+                          colorHex={p.color.hex}
+                          size="xs"
+                        />
+                        {teamSpec && (
+                          <span
+                            className="px-1 py-0.5 rounded text-[9px] font-mono font-black shrink-0"
+                            style={{
+                              backgroundColor: `${teamSpec.colorHex}25`,
+                              color: teamSpec.colorHex,
+                            }}
+                          >
+                            {teamSpec.emoji}
+                          </span>
+                        )}
                         {p.isBot && <Bot className="w-3 h-3 text-[#00C2FF] shrink-0" />}
                         <span className="font-bold text-white truncate max-w-[74px] sm:max-w-[104px]">
                           {p.name}
@@ -2853,9 +3386,36 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
                   <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4 flex flex-col justify-between">
                     <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF] mb-3">
-                        {t('Your Phone Controls', '手机按键说明')}
-                      </h3>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
+                          {t('Your Phone Controls', '手机按键说明')}
+                        </h3>
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-display text-[11px] font-extrabold border"
+                          style={{
+                            color: selectedPadGuide.accentHex,
+                            borderColor: `${selectedPadGuide.accentHex}55`,
+                            backgroundColor: `${selectedPadGuide.accentHex}16`,
+                          }}
+                        >
+                          <Gamepad2 className="w-3 h-3 shrink-0" />
+                          <span>{selectedPadGuide.padTitle}</span>
+                        </span>
+                      </div>
+
+                      <div className="mb-3 rounded-xl bg-[#151922] border border-[#242B38] px-3 py-2 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <span className="font-mono text-[10px] font-bold uppercase text-[#9CA3AF]">
+                            {selectedPadGuide.presetTag}
+                          </span>
+                          <span className="text-[11px] text-[#9CA3AF] truncate">
+                            {selectedPadGuide.whyText}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#E5E7EB] leading-snug">
+                          {selectedPadGuide.tutorialText}
+                        </p>
+                      </div>
 
                       <div className="space-y-3">
                         <div className="flex items-center gap-3">
@@ -2958,21 +3518,31 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   <div className="flex flex-wrap items-center gap-2">
                     {room.players.map((p) => {
                       const isReady = p.isBot || (p.connected && p.ready);
+                      const teamSpec = room.teamMode !== 'ffa' ? getTeamSpec(p.teamId) : null;
                       return (
                         <motion.div
                           key={p.id}
                           animate={{ scale: isReady ? [1, 1.08, 1] : 1 }}
                           transition={{ duration: 0.28 }}
-                          className={`px-3 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 ${
+                          className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 ${
                             isReady
                               ? 'bg-[#10D98B]/20 border-[#10D98B] text-[#6EE7B7]'
                               : 'bg-[#1E232D] border-[#2F3747] text-[#D1D5DB]'
                           }`}
                         >
-                          <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: p.color.hex }}
+                          <PlayerAvatar
+                            avatarId={p.avatarId}
+                            colorHex={p.color.hex}
+                            size="xs"
                           />
+                          {teamSpec && (
+                            <span
+                              className="text-[10px] font-black"
+                              style={{ color: teamSpec.colorHex }}
+                            >
+                              {teamSpec.emoji}
+                            </span>
+                          )}
                           {p.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF]" />}
                           <span>{p.name}</span>
                           {isReady ? (
@@ -3104,17 +3674,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           {/* Victory Podium / Tournament Standings Modal Overlay */}
           {room.status === 'RESULTS' && (() => {
             const tournament = room.tournament?.active ? room.tournament : null;
-            const nextGameRaw =
-              tournament && !tournament.completed
-                ? tournament.gameQueue[tournament.currentGameIndex + 1]
-                : null;
-            const nextGameMeta = nextGameRaw
-              ? getLocalizedGameMeta(getGameMeta(nextGameRaw), lang)
-              : null;
             const isFinaleGame =
               Boolean(tournament) &&
               tournament!.currentGameIndex + 1 >= tournament!.totalGames;
             const champ = tournament?.standings[0] ?? null;
+            const isTeamMode = room.teamMode !== 'ffa';
+            const cupTeamStandings = tournament?.teamStandings ?? [];
+            const winningCupTeam = isTeamMode ? cupTeamStandings[0] ?? null : null;
+            const winningCupTeamSpec = winningCupTeam ? getTeamSpec(winningCupTeam.teamId) : null;
+            const winningMatchTeam = isTeamMode ? room.teamRankings[0] ?? null : null;
+            const winningMatchTeamSpec = winningMatchTeam ? getTeamSpec(winningMatchTeam.teamId) : null;
 
             return (
               <div className="absolute inset-0 flex items-center justify-center bg-[#0B0D12]/84 backdrop-blur-xs rounded-2xl p-3 sm:p-6 z-20">
@@ -3134,10 +3703,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         <Trophy className="w-3.5 h-3.5" />
                         <span>
                           {tournament.completed
-                            ? t('5-GAME TOURNAMENT FINAL', '5局锦标赛总决赛落幕')
+                            ? t('5-GAME CUP FINAL', '5局锦标赛总决赛落幕')
                             : t(
-                                `TOURNAMENT GAME ${tournament.currentGameIndex + 1}/${tournament.totalGames}`,
-                                `锦标赛 第 ${tournament.currentGameIndex + 1} / ${tournament.totalGames} 局`
+                                `5-GAME CUP · MATCH ${tournament.currentGameIndex + 1}/${tournament.totalGames}`,
+                                `5局锦标赛 · 第 ${tournament.currentGameIndex + 1} / ${tournament.totalGames} 局`
                               )}
                         </span>
                         {isFinaleGame && (
@@ -3149,12 +3718,22 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
                       <h2 className="mt-2.5 font-display text-2xl sm:text-3xl font-extrabold text-white">
                         {tournament.completed
-                          ? champ
+                          ? winningCupTeamSpec
+                            ? t(
+                                `${winningCupTeamSpec.emoji} ${winningCupTeamSpec.name} Wins the Cup!`,
+                                `${winningCupTeamSpec.emoji} ${winningCupTeamSpec.nameZh} 夺得锦标赛总冠军！`
+                              )
+                            : champ
                             ? t(
                                 `👑 ${champ.name} is Grand Champion!`,
                                 `👑 ${champ.name} 夺得总冠军！`
                               )
                             : t('Tournament Complete!', '锦标赛圆满结束！')
+                          : winningMatchTeamSpec
+                          ? t(
+                              `${winningMatchTeamSpec.emoji} ${winningMatchTeamSpec.name} Wins ${selectedGame.name}!`,
+                              `${winningMatchTeamSpec.emoji} ${winningMatchTeamSpec.nameZh} 拿下 ${selectedGame.name}！`
+                            )
                           : room.rankings[0]
                           ? t(
                               `${room.rankings[0].name} Wins ${selectedGame.name}!`,
@@ -3166,24 +3745,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       <p className="text-xs sm:text-sm text-[#9CA3AF] mt-1">
                         {tournament.completed
                           ? t(
-                              'Cumulative Marks across all 5 random games decide the champion!',
-                              '5局随机挑战累计总积分（Marks）最高者登顶总冠军！'
+                              'Cumulative Marks across all 5 group-voted games decide the champion!',
+                              '5局全员投票对决累计总积分（Marks）最高者登顶总冠军！'
                             )
                           : t(
-                              `This Round: ${selectedGame.name} · Highest Total Marks after 5 games wins!`,
-                              `本局：${selectedGame.name} · 5局总积分（Marks）最高者夺冠！`
+                              `This Round: ${selectedGame.name} · Next game will be chosen by group vote!`,
+                              `本局：${selectedGame.name} · 下一局将由全员看 5 秒实机视频投票决定！`
                             )}
                       </p>
 
-                      {/* 5-Game Queue Progress Pills */}
+                      {/* 5-Game Cup Progress Pills (Played + Upcoming Group Vote Slots) */}
                       <div className="mt-3.5 flex flex-wrap items-center justify-center gap-1.5">
-                        {tournament.gameQueue.map((gId, idx) => {
-                          const gMeta = getLocalizedGameMeta(getGameMeta(gId), lang);
+                        {Array.from({ length: tournament.totalGames }).map((_, idx) => {
+                          const gId = tournament.gameQueue[idx];
+                          const gMeta = gId ? getLocalizedGameMeta(getGameMeta(gId), lang) : null;
                           const played = tournament.history[idx];
                           const isCurrent = idx === tournament.currentGameIndex;
                           return (
                             <div
-                              key={`${gId}-${idx}`}
+                              key={`cup-slot-${idx}`}
                               className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1.5 ${
                                 isCurrent
                                   ? 'bg-[#262C38] border-[#FFB800] text-white'
@@ -3193,80 +3773,127 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                               }`}
                             >
                               <span className="font-mono text-[10px]">#{idx + 1}</span>
-                              <span className="truncate max-w-[100px]">{gMeta.name}</span>
+                              <span className="truncate max-w-[100px]">
+                                {gMeta ? gMeta.name : t('Group Vote', '待投票')}
+                              </span>
                             </div>
                           );
                         })}
                       </div>
 
-                      {/* Cumulative Tournament Standings */}
-                      <div className="mt-4 space-y-2 text-left max-h-[250px] overflow-y-auto arcade-scrollbar pr-1.5">
-                        {tournament.standings.map((entry) => (
-                          <div
-                            key={entry.playerId}
-                            className={`flex items-center justify-between px-4 py-2.5 rounded-xl border ${
-                              entry.rank === 1
-                                ? 'bg-[#221D11] border-[#FFB800]/70'
-                                : 'bg-[#101217] border-[#262C38]'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span
-                                className={`font-mono text-sm font-black w-6 tabular-nums ${
-                                  entry.rank === 1 ? 'text-[#FFB800]' : 'text-[#9CA3AF]'
-                                }`}
-                              >
-                                #{entry.rank}
-                              </span>
-                              <span
-                                className="w-7 h-7 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0"
+                      {/* Cup Team Standings Breakdown when Team Mode is active */}
+                      {isTeamMode && cupTeamStandings.length > 0 && (
+                        <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
+                          {cupTeamStandings.map((team) => {
+                            const spec = getTeamSpec(team.teamId);
+                            if (!spec) return null;
+                            return (
+                              <div
+                                key={team.teamId}
+                                className="px-3.5 py-2 rounded-xl border flex items-center justify-between gap-2"
                                 style={{
-                                  backgroundColor: entry.color.hex,
-                                  color: entry.color.textOnColor,
+                                  backgroundColor: `${spec.colorHex}18`,
+                                  borderColor: team.rank === 1 ? '#FFB800' : `${spec.colorHex}75`,
                                 }}
                               >
-                                P{entry.slotIndex + 1}
-                              </span>
-                              {entry.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
-                              <div className="min-w-0">
-                                <div className="font-semibold text-white truncate">{entry.name}</div>
-                                <div className="text-[10px] text-[#9CA3AF]">
-                                  {entry.wins > 0
-                                    ? t(`${entry.wins} win${entry.wins > 1 ? 's' : ''}`, `${entry.wins} 次头名`)
-                                    : t('Contender', '角逐中')}
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-mono text-xs font-black text-[#FFB800]">
+                                    #{team.rank}
+                                  </span>
+                                  <span>{spec.emoji}</span>
+                                  <span className="font-bold text-sm truncate" style={{ color: spec.colorHex }}>
+                                    {lang === 'zh' ? spec.nameZh : spec.name}
+                                  </span>
+                                </div>
+                                <span className="font-mono text-sm font-black text-white tabular-nums shrink-0">
+                                  {team.score} {t('Marks', '积分')}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Cumulative Tournament Standings */}
+                      <div className="mt-4 space-y-2 text-left max-h-[240px] overflow-y-auto arcade-scrollbar pr-1.5">
+                        {tournament.standings.map((entry) => {
+                          const teamSpec = isTeamMode ? getTeamSpec(entry.teamId) : null;
+                          return (
+                            <div
+                              key={entry.playerId}
+                              className={`flex items-center justify-between px-4 py-2.5 rounded-xl border ${
+                                entry.rank === 1
+                                  ? 'bg-[#221D11] border-[#FFB800]/70'
+                                  : 'bg-[#101217] border-[#262C38]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span
+                                  className={`font-mono text-sm font-black w-6 tabular-nums ${
+                                    entry.rank === 1 ? 'text-[#FFB800]' : 'text-[#9CA3AF]'
+                                  }`}
+                                >
+                                  #{entry.rank}
+                                </span>
+                                <PlayerAvatar
+                                  avatarId={entry.avatarId}
+                                  colorHex={entry.color.hex}
+                                  size="sm"
+                                />
+                                {entry.isBot && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-white truncate flex items-center gap-1.5">
+                                    <span className="truncate">{entry.name}</span>
+                                    {teamSpec && (
+                                      <span
+                                        className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black shrink-0"
+                                        style={{
+                                          backgroundColor: `${teamSpec.colorHex}22`,
+                                          color: teamSpec.colorHex,
+                                        }}
+                                      >
+                                        {teamSpec.emoji} {lang === 'zh' ? teamSpec.nameZh : teamSpec.shortName}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-[#9CA3AF]">
+                                    {entry.wins > 0
+                                      ? t(`${entry.wins} win${entry.wins > 1 ? 's' : ''}`, `${entry.wins} 次头名`)
+                                      : t('Contender', '角逐中')}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                {entry.lastGameMarks > 0 && (
+                                  <span className="px-2 py-0.5 rounded-md bg-[#10D98B]/18 text-[#10D98B] font-mono text-xs font-extrabold tabular-nums">
+                                    +{entry.lastGameMarks}
+                                  </span>
+                                )}
+                                <div className="text-right">
+                                  <span className="font-mono text-base font-black text-[#FFB800] tabular-nums">
+                                    {entry.totalMarks}
+                                  </span>
+                                  <span className="text-[11px] text-[#A5AEBD] ml-1">
+                                    {t('Marks', '积分')}
+                                  </span>
                                 </div>
                               </div>
                             </div>
-
-                            <div className="flex items-center gap-2.5 shrink-0">
-                              {entry.lastGameMarks > 0 && (
-                                <span className="px-2 py-0.5 rounded-md bg-[#10D98B]/18 text-[#10D98B] font-mono text-xs font-extrabold tabular-nums">
-                                  +{entry.lastGameMarks}
-                                </span>
-                              )}
-                              <div className="text-right">
-                                <span className="font-mono text-base font-black text-[#FFB800] tabular-nums">
-                                  {entry.totalMarks}
-                                </span>
-                                <span className="text-[11px] text-[#A5AEBD] ml-1">
-                                  {t('Marks', '积分')}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
-                      {nextGameMeta && (
+                      {!tournament.completed && (
                         <div className="mt-4 px-4 py-2.5 rounded-xl bg-[#101217] border border-[#00C2FF]/45 flex items-center justify-between gap-2 text-xs">
                           <span className="font-bold text-[#00C2FF]">
                             {t(
-                              `Up Next · Game ${tournament.currentGameIndex + 2}/${tournament.totalGames}`,
+                              `Up Next · Match ${tournament.currentGameIndex + 2}/${tournament.totalGames}`,
                               `下一局 · 第 ${tournament.currentGameIndex + 2}/${tournament.totalGames} 局`
                             )}
                           </span>
                           <span className="font-display font-extrabold text-sm text-white truncate">
-                            {nextGameMeta.name}
+                            {t('Live 3-Game Group Vote (5s Clips)', '全员 3 选 1 实机视频投票')}
                           </span>
                         </div>
                       )}
@@ -3297,15 +3924,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           {tournament.completed ? (
                             <>
                               <RotateCcw className="w-4 h-4" />
-                              <span>{t('New 5-Game Tournament', '再来一届 5 局锦标赛')}</span>
+                              <span>{t('New 5-Game Cup', '再来一届 5 局锦标赛')}</span>
                             </>
                           ) : (
                             <>
                               <Play className="w-4 h-4 fill-current" />
                               <span>
                                 {t(
-                                  `Next Game (${tournament.currentGameIndex + 2}/${tournament.totalGames})`,
-                                  `进入第 ${tournament.currentGameIndex + 2} 局`
+                                  `Vote Next Game (${tournament.currentGameIndex + 2}/${tournament.totalGames})`,
+                                  `投票选第 ${tournament.currentGameIndex + 2} 局`
                                 )}
                               </span>
                             </>
@@ -3327,7 +3954,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     <>
                       <Trophy className="w-11 h-11 text-[#FFB800] mx-auto" />
                       <h2 className="mt-2 font-display text-3xl font-extrabold text-white">
-                        {room.rankings[0]
+                        {winningMatchTeamSpec
+                          ? t(
+                              `${winningMatchTeamSpec.emoji} ${winningMatchTeamSpec.name} Wins!`,
+                              `${winningMatchTeamSpec.emoji} ${winningMatchTeamSpec.nameZh} 获胜！`
+                            )
+                          : room.rankings[0]
                           ? t(`${room.rankings[0].name} Wins!`, `${room.rankings[0].name} 获胜！`)
                           : t('Match Complete', '本局结束')}
                       </h2>
@@ -3338,29 +3970,72 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           : ''}
                       </p>
 
-                      <div className="mt-5 space-y-2 text-left max-h-[280px] overflow-y-auto arcade-scrollbar pr-1.5">
+                      {isTeamMode && room.teamRankings.length > 0 && (
+                        <div className="mt-4 space-y-1.5 text-left">
+                          {room.teamRankings.map((team) => {
+                            const spec = getTeamSpec(team.teamId);
+                            if (!spec) return null;
+                            return (
+                              <div
+                                key={team.teamId}
+                                className="flex items-center justify-between px-3.5 py-2 rounded-xl border"
+                                style={{
+                                  backgroundColor: `${spec.colorHex}18`,
+                                  borderColor: team.rank === 1 ? '#FFB800' : `${spec.colorHex}75`,
+                                }}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-mono text-xs font-black text-[#FFB800]">
+                                    #{team.rank}
+                                  </span>
+                                  <span>{spec.emoji}</span>
+                                  <span className="font-bold text-sm" style={{ color: spec.colorHex }}>
+                                    {lang === 'zh' ? spec.nameZh : spec.name}
+                                  </span>
+                                  <span className="text-[11px] text-[#9CA3AF] truncate">
+                                    ({team.memberCount} {t('players', '人')})
+                                  </span>
+                                </div>
+                                <span className="font-mono text-sm font-black text-white tabular-nums">
+                                  {team.score} {t('pts', '分')}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="mt-4 space-y-2 text-left max-h-[260px] overflow-y-auto arcade-scrollbar pr-1.5">
                         {room.rankings.map((entry) => {
                           const isBotEntry = room.players.find((p) => p.id === entry.playerId)?.isBot;
+                          const teamSpec = isTeamMode ? getTeamSpec(entry.teamId) : null;
                           return (
                             <div
                               key={entry.playerId}
-                              className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#101217] border border-[#262C38]"
+                              className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-[#101217] border border-[#262C38]"
                             >
-                              <div className="flex items-center gap-3 min-w-0">
+                              <div className="flex items-center gap-2.5 min-w-0">
                                 <span className="font-mono text-sm font-bold text-[#FFB800] w-6 tabular-nums">
                                   #{entry.rank}
                                 </span>
-                                <span
-                                  className="w-7 h-7 rounded-md font-mono text-xs font-bold flex items-center justify-center shrink-0"
-                                  style={{
-                                    backgroundColor: entry.color.hex,
-                                    color: entry.color.textOnColor,
-                                  }}
-                                >
-                                  P{entry.slotIndex + 1}
-                                </span>
+                                <PlayerAvatar
+                                  avatarId={entry.avatarId}
+                                  colorHex={entry.color.hex}
+                                  size="sm"
+                                />
                                 {isBotEntry && <Bot className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />}
                                 <span className="font-semibold text-white truncate">{entry.name}</span>
+                                {teamSpec && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black shrink-0"
+                                    style={{
+                                      backgroundColor: `${teamSpec.colorHex}22`,
+                                      color: teamSpec.colorHex,
+                                    }}
+                                  >
+                                    {teamSpec.emoji} {lang === 'zh' ? teamSpec.nameZh : teamSpec.shortName}
+                                  </span>
+                                )}
                               </div>
 
                               <div className="text-right shrink-0">

@@ -1,4 +1,46 @@
 import type { MutatorId } from './modifiers.ts';
+import type { TeamId, TeamMode, TeamStanding } from './party.ts';
+import type {
+  PackMalaysianCardGameId,
+  PackMalaysianGameId,
+  PackMalaysianSnapshot,
+  PlayingCardRank,
+} from './packMalaysianTypes.ts';
+import type {
+  PackChineseViralCardGameId,
+  PackChineseViralGameId,
+  PackChineseViralSnapshot,
+} from './packChineseViralTypes.ts';
+import type {
+  PackGlobalViralCardGameId,
+  PackGlobalViralGameId,
+  PackGlobalViralSnapshot,
+} from './packGlobalViralTypes.ts';
+import type {
+  PackRetroArcadeGameId,
+  PackRetroArcadeSnapshot,
+} from './packRetroArcadeTypes.ts';
+import type {
+  PackSportsPhysicsGameId,
+  PackSportsPhysicsSnapshot,
+} from './packSportsPhysicsTypes.ts';
+import type {
+  PackChaosSurvivalGameId,
+  PackChaosSurvivalSnapshot,
+} from './packChaosSurvivalTypes.ts';
+import type {
+  PackStrategyCardGameId,
+  PackStrategyGameId,
+  PackStrategySnapshot,
+} from './packStrategyClassicsTypes.ts';
+
+export * from './packMalaysianTypes.ts';
+export * from './packChineseViralTypes.ts';
+export * from './packGlobalViralTypes.ts';
+export * from './packRetroArcadeTypes.ts';
+export * from './packSportsPhysicsTypes.ts';
+export * from './packChaosSurvivalTypes.ts';
+export * from './packStrategyClassicsTypes.ts';
 
 export type GameId =
   | 'bumper-brawl'
@@ -48,7 +90,14 @@ export type GameId =
   | 'flip-seven'
   | 'royal-bluff'
   | 'dark-flip-clash'
-  | 'sushi-draft';
+  | 'sushi-draft'
+  | PackMalaysianGameId
+  | PackChineseViralGameId
+  | PackGlobalViralGameId
+  | PackRetroArcadeGameId
+  | PackSportsPhysicsGameId
+  | PackChaosSurvivalGameId
+  | PackStrategyGameId;
 
 export type CardGameId =
   | 'color-clash'
@@ -58,15 +107,27 @@ export type CardGameId =
   | 'flip-seven'
   | 'royal-bluff'
   | 'dark-flip-clash'
-  | 'sushi-draft';
+  | 'sushi-draft'
+  | PackMalaysianCardGameId
+  | PackChineseViralCardGameId
+  | PackGlobalViralCardGameId
+  | PackStrategyCardGameId;
 
-export type RoomStatus = 'SETUP' | 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
+export type RoomStatus =
+  | 'SETUP'
+  | 'LOBBY'
+  | 'VOTING'
+  | 'BRIEFING'
+  | 'COUNTDOWN'
+  | 'PLAYING'
+  | 'PAUSED'
+  | 'RESULTS';
 
 export type BotDifficulty = 'chill' | 'arcade' | 'spicy';
 
 export type GameGenre = 'arcade' | 'board' | 'card';
 export type GameSuitability = 'solo' | 'double' | 'multiplayer';
-export type PlayerFilterMode = 'all' | GameGenre | GameSuitability;
+export type PlayerFilterMode = 'all' | 'heritage' | GameGenre | GameSuitability;
 export type RemoteDirection = 'up' | 'down' | 'left' | 'right' | 'ok';
 export type LobbyFocusZone = 'filter' | 'games' | 'actions';
 
@@ -173,6 +234,8 @@ export interface PlayerSummary {
   slotIndex: number;
   name: string;
   color: PlayerColorSpec;
+  avatarId: string;
+  teamId: TeamId | null;
   connected: boolean;
   ready: boolean;
   isBot?: boolean;
@@ -190,6 +253,8 @@ export interface RankingEntry {
   slotIndex: number;
   name: string;
   color: PlayerColorSpec;
+  avatarId?: string;
+  teamId?: TeamId | null;
   rank: number;
   score: number;
   highlight: string;
@@ -1574,7 +1639,14 @@ export type GameSnapshot =
   | FlipSevenSnapshot
   | RoyalBluffSnapshot
   | DarkFlipClashSnapshot
-  | SushiDraftSnapshot;
+  | SushiDraftSnapshot
+  | PackMalaysianSnapshot
+  | PackChineseViralSnapshot
+  | PackGlobalViralSnapshot
+  | PackRetroArcadeSnapshot
+  | PackSportsPhysicsSnapshot
+  | PackChaosSurvivalSnapshot
+  | PackStrategySnapshot;
 
 // --- 33. Volley Smash (Arcade Beach Volleyball) ---
 export interface VolleyPlayerState {
@@ -2347,7 +2419,7 @@ export interface CardPrivateHandItem {
   kind: 'clash' | 'liar' | 'party';
   color?: CardColor;
   value?: string;
-  rank?: LiarRank;
+  rank?: PlayingCardRank;
   suit?: LiarSuit;
   title?: string;
   subtitle?: string;
@@ -2427,11 +2499,23 @@ export interface TournamentPlayerStanding {
   slotIndex: number;
   name: string;
   color: PlayerColorSpec;
+  avatarId?: string;
+  teamId?: TeamId | null;
   isBot?: boolean;
   totalMarks: number;
   wins: number;
   lastGameMarks: number;
   rank: number;
+}
+
+export interface CupVoteState {
+  roundIndex: number;
+  candidates: GameId[];
+  votes: Record<string, GameId>;
+  secondsLeft: number;
+  totalSeconds: number;
+  phase: 'voting' | 'locked';
+  winningGameId: GameId | null;
 }
 
 export interface TournamentState {
@@ -2440,7 +2524,9 @@ export interface TournamentState {
   currentGameIndex: number;
   gameQueue: GameId[];
   standings: TournamentPlayerStanding[];
+  teamStandings?: TeamStanding[];
   history: TournamentMatchRecord[];
+  vote: CupVoteState | null;
   completed: boolean;
 }
 
@@ -2451,6 +2537,8 @@ export interface RoomSnapshot {
   gameSettingValue: number;
   countdownValue: number;
   botDifficulty: BotDifficulty;
+  teamMode: TeamMode;
+  teamRankings: TeamStanding[];
   hostPlayerId: string | null;
   lobbyFilter: PlayerFilterMode;
   remoteFocus: RemoteFocusState;
@@ -2468,10 +2556,20 @@ export interface RoomSnapshot {
 export type ClientMessage =
   | { type: 'room:create'; preferredGameId?: GameId }
   | { type: 'room:host-reattach'; code: string; hostToken: string }
-  | { type: 'room:join'; code: string; name: string; playerId?: string; preferredColorId?: string }
+  | {
+      type: 'room:join';
+      code: string;
+      name: string;
+      playerId?: string;
+      preferredColorId?: string;
+      avatarId?: string;
+    }
   | { type: 'room:add-bot'; difficulty?: BotDifficulty }
   | { type: 'room:remove-bot'; botId: string }
   | { type: 'room:set-bot-difficulty'; difficulty: BotDifficulty; botId?: string }
+  | { type: 'room:set-team-mode'; teamMode: TeamMode }
+  | { type: 'room:set-player-team'; playerId: string; teamId: TeamId }
+  | { type: 'room:shuffle-teams' }
   | { type: 'room:set-host-player'; playerId: string }
   | { type: 'room:set-mutator'; mutatorId: MutatorId }
   | { type: 'room:spin-mutator' }
@@ -2482,6 +2580,8 @@ export type ClientMessage =
   | { type: 'room:layout'; gameCols: number; actionCols: number }
   | { type: 'remote:action'; action: RemoteDirection }
   | { type: 'player:ready'; ready: boolean }
+  | { type: 'player:set-avatar'; avatarId: string }
+  | { type: 'player:set-team'; teamId: TeamId }
   | { type: 'player:emote'; emoji: string }
   | { type: 'player:leave' }
   | { type: 'game:select'; gameId: GameId; settingValue?: number }
@@ -2491,6 +2591,8 @@ export type ClientMessage =
   | { type: 'game:restart' }
   | { type: 'game:return-lobby' }
   | { type: 'tournament:start' }
+  | { type: 'tournament:vote'; gameId: GameId }
+  | { type: 'tournament:force-lock-vote' }
   | { type: 'tournament:next' }
   | { type: 'tournament:exit' }
   | { type: 'card:action'; action: CardClientAction }
