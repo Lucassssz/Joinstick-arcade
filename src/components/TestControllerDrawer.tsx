@@ -30,7 +30,7 @@ export function TestControllerDrawer({ roomCode, open, onClose }: TestController
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[min(95vw,440px)] max-h-[82vh] overflow-y-auto arcade-scrollbar rounded-2xl bg-[#1A1E26] border border-[#2A303D] shadow-2xl p-4 space-y-3">
+    <div className="fixed bottom-3 right-3 sm:bottom-4 sm:right-4 z-50 w-[min(calc(100vw-1.5rem),440px)] max-h-[82dvh] overflow-y-auto arcade-scrollbar rounded-2xl bg-[#1A1E26] border border-[#2A303D] shadow-2xl p-3.5 sm:p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Smartphone className="w-4 h-4 text-[#00C2FF]" />

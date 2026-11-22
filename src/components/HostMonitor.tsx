@@ -1163,10 +1163,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -16 }}
             transition={{ duration: 0.2 }}
-            className="pointer-events-none fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl bg-[#1A1E26]/95 border-2 border-[#FFB800] text-white font-display font-bold text-sm shadow-2xl inline-flex items-center gap-2 whitespace-nowrap"
+            className="pointer-events-none fixed top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 max-w-[calc(100vw-1.5rem)] px-4 sm:px-5 py-2.5 rounded-2xl bg-[#1A1E26]/95 border-2 border-[#FFB800] text-white font-display font-bold text-xs sm:text-sm text-center shadow-2xl inline-flex items-center gap-2"
           >
             <Crown className="w-4 h-4 text-[#FFB800] shrink-0" />
-            <span>{bannerToast}</span>
+            <span className="leading-snug">{bannerToast}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1788,19 +1788,19 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       selectedGame.settingOptions[0];
 
     const tvFocusRing =
-      'ring-3 ring-[#FFB800] border-[#FFB800] shadow-[0_0_26px_rgba(255,184,0,0.45)] scale-[1.03] z-10';
+      'ring-3 ring-[#FFB800] border-[#FFB800] shadow-[0_0_24px_rgba(255,184,0,0.45)] scale-[1.015] z-10';
 
     return (
-      <div className="fixed inset-0 h-dvh w-full bg-[#121419] text-[#F4F6FA] flex flex-col overflow-hidden select-none">
+      <div className="monitor-shell bg-[#121419] text-[#F4F6FA] flex flex-col relative select-none">
         {floatingEmoteOverlay}
 
         {/* Slim Fullscreen TV Console Header */}
-        <header className="h-14 border-b border-[#242934] bg-[#151820] px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4 shrink-0">
-          <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-            <span className="font-display text-base sm:text-lg font-extrabold text-white truncate">
+        <header className="min-h-13 sm:min-h-14 py-1.5 border-b border-[#242934] bg-[#151820] px-2.5 sm:px-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3.5 min-w-0">
+            <span className="font-display text-sm sm:text-lg font-extrabold text-white truncate">
               {t('JoinStick Game Room', 'JoinStick 游戏厅')}
             </span>
-            <span className="text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
+            <span className="text-[11px] sm:text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
               PIN <strong className="text-white">{room.code}</strong> · {room.players.length}/
               {MAX_PLAYERS_PER_ROOM} {t('Players', '人')}
             </span>
@@ -1848,15 +1848,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           </div>
 
           {/* Passive Display Utilities Only (Audio Unlock, Language, Fullscreen, Audio, Test Pad) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto sm:ml-0">
             {audioUnlockButton}
-            <LanguageToggle compact className="h-9" />
+            <LanguageToggle compact className="h-8 sm:h-9" />
 
             <button
               type="button"
               onClick={() => setTestDrawerOpen((v) => !v)}
               title={t('Test Remote', '测试遥控器')}
-              className={`h-9 px-2.5 xl:px-3 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              className={`h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                 testDrawerOpen
                   ? 'bg-[#00C2FF] text-[#0B1219]'
                   : 'bg-[#242A36] hover:bg-[#2E3646] text-white'
@@ -1876,7 +1876,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               title={
                 isMonitorFullscreen ? t('Exit Fullscreen', '退出全屏') : t('Enter Fullscreen', '进入全屏')
               }
-              className={`h-9 px-2.5 xl:px-3 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              className={`h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                 isMonitorFullscreen
                   ? 'bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB]'
                   : 'bg-[#FFB800] text-[#14120B] hover:bg-[#FFC933]'
@@ -1896,7 +1896,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               type="button"
               onClick={toggleMute}
               aria-label={muted ? t('Unmute audio', '取消静音') : t('Mute audio', '静音')}
-              className="h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+              className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
             >
               {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
@@ -1905,7 +1905,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               type="button"
               onClick={handleRequestCloseRoom}
               title={t('Close Entire Room', '关闭整个房间')}
-              className="h-9 px-2.5 xl:px-3 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
+              className="h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
             >
               <Power className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{t('Close Room', '关闭房间')}</span>
@@ -1913,16 +1913,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           </div>
         </header>
 
-        {/* Main Fullscreen Console Body (Tablet-Responsive Side-by-Side Split) */}
-        <main className="flex-1 min-h-0 px-3 sm:px-5 py-3 sm:py-4 grid grid-cols-1 md:grid-cols-12 gap-3.5 sm:gap-4 xl:gap-5 overflow-hidden">
-          {/* LEFT / CENTER (7-8 cols): Filter Bar + Spacious Responsive TV Game Grid */}
-          <section className="md:col-span-7 lg:col-span-8 flex flex-col min-h-0 gap-2.5 sm:gap-3">
+        {/* Main Fullscreen Console Body (Responsive Side-by-Side on iPad/PC, Clean Vertical Scroll on Phone) */}
+        <main className="monitor-main flex-1 min-h-0 px-2.5 sm:px-5 py-2.5 sm:py-3.5 grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4 xl:gap-5">
+          {/* LEFT / CENTER (7-8 cols): Filter Bar + Spacious Responsive TV Game Deck */}
+          <section className="md:col-span-7 lg:col-span-8 flex flex-col min-h-0 gap-2 sm:gap-2.5">
             {/* Row 0: Filter Bar (zone === 'filter') */}
-            <div className="flex items-center justify-between gap-3 shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
               <div
                 role="tablist"
                 aria-label={t('Filter games by player count', '按游玩人数筛选游戏')}
-                className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-[#101217] border border-[#262C39]"
+                className="flex items-center gap-1 p-1.5 rounded-xl bg-[#101217] border border-[#262C39] overflow-x-auto no-scrollbar max-w-full min-w-0"
               >
                 {PLAYER_FILTER_OPTIONS.map((opt, idx) => {
                   const isActiveFilter = room.lobbyFilter === opt.id;
@@ -1942,7 +1942,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           })
                         )
                       }
-                      className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-extrabold whitespace-nowrap transition-all border ${
+                      className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-extrabold whitespace-nowrap shrink-0 transition-all border ${
                         isRemoteFocused
                           ? `bg-[#FFB800] text-[#14120B] ${tvFocusRing}`
                           : isActiveFilter
@@ -1960,7 +1960,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                <div className="relative w-36 sm:w-44 xl:w-52">
+                <div className="relative flex-1 sm:flex-initial sm:w-36 lg:w-44 xl:w-48">
                   <Search className="w-3.5 h-3.5 text-[#6B7280] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
@@ -2053,269 +2053,293 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               };
 
               return (
-                <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 px-1 sm:px-3 overflow-hidden">
-                  <div className="relative w-full max-w-[920px] flex items-center justify-center">
-                    {/* 3D Flip Deck Showcase Stage with Shadowed Prev & Next Cards */}
-                    <div
-                      className="relative w-full flex items-center justify-center py-2"
-                      style={{ perspective: '1500px' }}
-                    >
-                      {/* Shadowed Previous Card Silhouette (Left) */}
-                      {prevCardGame && (
+                <div className="flex-1 min-h-0 w-full flex flex-col items-center px-0.5 sm:px-2 md:overflow-y-auto no-scrollbar">
+                  <div className="my-auto w-full flex flex-col items-center gap-2 sm:gap-3 py-1">
+                    <div className="relative w-full max-w-[920px] flex items-center justify-center">
+                      {/* 3D Flip Deck Showcase Stage with Generous Padding so Borders & Focus Ring Never Clip */}
+                      <div
+                        className="relative w-full flex items-center justify-center p-2.5 sm:p-4"
+                        style={{ perspective: '1500px' }}
+                      >
+                        {/* Shadowed Previous Card Silhouette (Left — lg+ where width cleanly holds side deck) */}
+                        {prevCardGame && (
+                          <button
+                            type="button"
+                            onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
+                            aria-label={t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)}
+                            title={t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)}
+                            style={{
+                              transform: 'scale(0.86) rotateY(16deg)',
+                            }}
+                            className={`group/prev hidden lg:flex flex-col absolute left-2 xl:left-4 z-0 w-[40%] max-w-[330px] rounded-2xl sm:rounded-3xl overflow-hidden border border-[#2A3142]/80 bg-[#12151C] shadow-[0_24px_56px_rgba(0,0,0,0.85)] text-left transition-all duration-300 ${
+                              isScreenRemoteLocked
+                                ? 'pointer-events-none opacity-65'
+                                : 'opacity-70 hover:opacity-95 hover:-translate-x-1 cursor-pointer'
+                            }`}
+                          >
+                            <div className="relative h-[clamp(115px,18dvh,190px)] w-full bg-[#0C0E14] overflow-hidden">
+                              <GameThumbnail
+                                gameId={prevCardGame.id}
+                                gameName={prevCardGame.name}
+                                accentHex={prevCardGame.accentHex}
+                                fallbackSrc={prevCardGame.coverImage}
+                                alt={prevCardGame.name}
+                                className="w-full h-full object-cover brightness-[0.36] saturate-[0.65] blur-[1px] transition-all duration-300 group-hover/prev:brightness-[0.52] group-hover/prev:blur-0"
+                              />
+                              <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0B0D12]/35 via-[#0B0D12]/55 to-[#0B0D12]/90" />
+                            </div>
+                            <div className="px-3.5 py-2.5 bg-[#10131A]">
+                              <div className="text-[10px] font-mono uppercase tracking-wider text-[#6B7280] truncate">
+                                {prevCardGame.category}
+                              </div>
+                              <div className="mt-0.5 font-display text-base font-extrabold text-[#9CA3AF] truncate group-hover/prev:text-white transition-colors">
+                                {prevCardGame.name}
+                              </div>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Shadowed Next Card Silhouette (Right — lg+ where width cleanly holds side deck) */}
+                        {nextCardGame && (
+                          <button
+                            type="button"
+                            onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
+                            aria-label={t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)}
+                            title={t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)}
+                            style={{
+                              transform: 'scale(0.86) rotateY(-16deg)',
+                            }}
+                            className={`group/next hidden lg:flex flex-col absolute right-2 xl:right-4 z-0 w-[40%] max-w-[330px] rounded-2xl sm:rounded-3xl overflow-hidden border border-[#2A3142]/80 bg-[#12151C] shadow-[0_24px_56px_rgba(0,0,0,0.85)] text-right transition-all duration-300 ${
+                              isScreenRemoteLocked
+                                ? 'pointer-events-none opacity-65'
+                                : 'opacity-70 hover:opacity-95 hover:translate-x-1 cursor-pointer'
+                            }`}
+                          >
+                            <div className="relative h-[clamp(115px,18dvh,190px)] w-full bg-[#0C0E14] overflow-hidden">
+                              <GameThumbnail
+                                gameId={nextCardGame.id}
+                                gameName={nextCardGame.name}
+                                accentHex={nextCardGame.accentHex}
+                                fallbackSrc={nextCardGame.coverImage}
+                                alt={nextCardGame.name}
+                                className="w-full h-full object-cover brightness-[0.36] saturate-[0.65] blur-[1px] transition-all duration-300 group-hover/next:brightness-[0.52] group-hover/next:blur-0"
+                              />
+                              <div className="pointer-events-none absolute inset-0 bg-gradient-to-l from-[#0B0D12]/35 via-[#0B0D12]/55 to-[#0B0D12]/90" />
+                            </div>
+                            <div className="px-3.5 py-2.5 bg-[#10131A]">
+                              <div className="text-[10px] font-mono uppercase tracking-wider text-[#6B7280] truncate">
+                                {nextCardGame.category}
+                              </div>
+                              <div className="mt-0.5 font-display text-base font-extrabold text-[#9CA3AF] truncate group-hover/next:text-white transition-colors">
+                                {nextCardGame.name}
+                              </div>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Touch/Tablet Prev Button (< lg screens where tilted side cards are hidden) */}
+                        {totalVisible > 1 && !isScreenRemoteLocked && (
+                          <button
+                            type="button"
+                            onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
+                            aria-label={t('Previous game', '上一个游戏')}
+                            className="lg:hidden absolute left-0.5 sm:left-1 top-1/2 -translate-y-1/2 z-30 w-9 h-9 rounded-full bg-[#101217]/90 hover:bg-[#242A36] border border-[#384257] text-white flex items-center justify-center shadow-lg cursor-pointer"
+                          >
+                            <ChevronLeft className="w-5 h-5" />
+                          </button>
+                        )}
+
+                        {/* Center Active Game Card (Viewport-Scaled so Full Border Is Always Visible) */}
+                        <div className="relative z-20 w-full max-w-[540px] min-w-0 px-2 sm:px-0">
+                          <AnimatePresence mode="wait" initial={false}>
+                            <motion.div
+                              key={`${room.lobbyFilter}-${activeCardGame.id}`}
+                              initial={{
+                                rotateY: cardFlipDir > 0 ? 86 : -86,
+                                opacity: 0,
+                                scale: 0.92,
+                              }}
+                              animate={{
+                                rotateY: 0,
+                                opacity: 1,
+                                scale: 1,
+                              }}
+                              exit={{
+                                rotateY: cardFlipDir > 0 ? -86 : 86,
+                                opacity: 0,
+                                scale: 0.92,
+                              }}
+                              transition={{
+                                duration: 0.24,
+                                ease: [0.22, 1, 0.36, 1],
+                              }}
+                              style={{
+                                transformStyle: 'preserve-3d',
+                                backfaceVisibility: 'hidden',
+                              }}
+                              onClick={() =>
+                                guardHostOnlyClick(() => {
+                                  if (canStartMatch) {
+                                    handleStartMatch();
+                                  } else {
+                                    handleSelectGame(activeCardGame.id);
+                                  }
+                                })
+                              }
+                              className={`relative z-10 w-full rounded-2xl sm:rounded-3xl overflow-hidden border-2 bg-[#1A1E26] shadow-[0_24px_56px_rgba(0,0,0,0.82)] transition-colors ${
+                                isCardFocused
+                                  ? tvFocusRing
+                                  : 'border-[#333C4F] hover:border-[#00C2FF]/65'
+                              } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
+                            >
+                              {/* Hero Artwork Thumbnail + Auto-Playing 5s Clip (Fluid Height Clamped to Viewport) */}
+                              <div className="relative w-full h-[clamp(140px,22dvh,240px)] sm:h-[clamp(150px,24dvh,250px)] bg-[#101217] overflow-hidden">
+                                <GameHoverPreview
+                                  gameId={activeCardGame.id}
+                                  gameName={activeCardGame.name}
+                                  accentHex={activeCardGame.accentHex}
+                                  fallbackSrc={activeCardGame.coverImage}
+                                  alt={activeCardGame.name}
+                                  active={true}
+                                  eager
+                                  immediate
+                                  timecodePosition="bottom-right"
+                                  className="w-full h-full object-cover"
+                                />
+
+                                {/* Genre Label Top-Left */}
+                                <span
+                                  className={`pointer-events-none absolute top-2.5 left-2.5 sm:top-3 sm:left-3 z-10 px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold uppercase tracking-wider shadow-md ${
+                                    activeGenre === 'board'
+                                      ? 'bg-[#A855F7]/92 text-white'
+                                      : activeGenre === 'card'
+                                      ? 'bg-[#10D98B]/92 text-[#071710]'
+                                      : 'bg-[#101217]/88 text-[#00C2FF] border border-[#00C2FF]/45'
+                                  }`}
+                                >
+                                  {getLocalizedFilterLabel(activeGenre, lang, true)}
+                                </span>
+
+                                {/* Deck Position Counter & TV OK Badge Top-Right */}
+                                <div className="pointer-events-none absolute top-2.5 right-2.5 sm:top-3 sm:right-3 z-10 flex items-center gap-1.5">
+                                  <span className="px-2.5 py-1 rounded-lg bg-[#0D1017]/85 backdrop-blur-xs border border-white/15 font-mono text-[11px] font-bold text-white tabular-nums shadow">
+                                    {String(currentIdx + 1).padStart(2, '0')} /{' '}
+                                    {String(Math.max(1, totalVisible)).padStart(2, '0')}
+                                  </span>
+                                  {isCardFocused && (
+                                    <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-mono text-[11px] font-black shadow">
+                                      OK
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#1A1E26] to-transparent" />
+                              </div>
+
+                              {/* Card Body Details */}
+                              <div className="px-3.5 sm:px-5 pb-3 sm:pb-4 pt-1.5 sm:pt-2">
+                                <div className="flex items-center justify-between gap-2 text-[11px] sm:text-xs text-[#9CA3AF]">
+                                  <span className="truncate font-semibold">
+                                    {activeCardGame.category} · {activeCardGame.playerModeLabel}
+                                  </span>
+                                  <span
+                                    className="font-mono text-[11px] font-bold shrink-0"
+                                    style={{ color: activeCardGame.accentHex }}
+                                  >
+                                    {activeSettingOpt?.label ?? room.gameSettingValue}
+                                  </span>
+                                </div>
+
+                                <h2 className="mt-0.5 font-display text-xl sm:text-2xl xl:text-[26px] font-extrabold text-white truncate">
+                                  {activeCardGame.name}
+                                </h2>
+
+                                <p className="mt-1 text-xs sm:text-[13px] text-[#B8C0CE] line-clamp-2 leading-snug">
+                                  {activeCardGame.description}
+                                </p>
+
+                                <div className="mt-2 rounded-xl bg-[#101217]/90 border border-[#262C38] px-2.5 sm:px-3 py-1.5 sm:py-2 flex flex-col gap-0.5">
+                                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                    <span
+                                      className="inline-flex items-center gap-1.5 text-[11px] font-extrabold"
+                                      style={{ color: activeCardPadGuide.accentHex }}
+                                    >
+                                      <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
+                                      <span>{activeCardPadGuide.padTitle}</span>
+                                    </span>
+                                    <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">
+                                      {activeCardPadGuide.presetTag}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] sm:text-xs text-[#D1D5DB] line-clamp-2 leading-snug">
+                                    {activeCardPadGuide.shortTutorial}
+                                  </p>
+                                </div>
+                              </div>
+                            </motion.div>
+                          </AnimatePresence>
+                        </div>
+
+                        {/* Touch/Tablet Next Button (< lg screens where tilted side cards are hidden) */}
+                        {totalVisible > 1 && !isScreenRemoteLocked && (
+                          <button
+                            type="button"
+                            onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
+                            aria-label={t('Next game', '下一个游戏')}
+                            className="lg:hidden absolute right-0.5 sm:right-1 top-1/2 -translate-y-1/2 z-30 w-9 h-9 rounded-full bg-[#101217]/90 hover:bg-[#242A36] border border-[#384257] text-white flex items-center justify-center shadow-lg cursor-pointer"
+                          >
+                            <ChevronRight className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Compact Adjacent Preview + Deck Progress Bar */}
+                    {totalVisible > 1 && (
+                      <div className="w-full max-w-[560px] flex items-center justify-between gap-3 px-2 text-xs shrink-0">
                         <button
                           type="button"
                           onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
-                          aria-label={t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)}
-                          title={t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)}
-                          style={{
-                            transform: 'translateX(-16%) scale(0.84) rotateY(18deg)',
-                          }}
-                          className={`group/prev hidden sm:flex flex-col absolute left-0 sm:left-2 lg:left-4 z-0 w-[56%] max-w-[440px] rounded-2xl sm:rounded-3xl overflow-hidden border border-[#2A3142]/80 bg-[#12151C] shadow-[0_24px_56px_rgba(0,0,0,0.85)] text-left transition-all duration-300 ${
-                            isScreenRemoteLocked
-                              ? 'pointer-events-none opacity-65'
-                              : 'opacity-70 hover:opacity-95 hover:-translate-x-1.5 cursor-pointer'
+                          className={`text-[#9CA3AF] inline-flex items-center gap-1 truncate max-w-[36%] transition-colors ${
+                            isScreenRemoteLocked ? 'cursor-default' : 'hover:text-white cursor-pointer'
                           }`}
                         >
-                          <div className="relative aspect-video w-full bg-[#0C0E14] overflow-hidden">
-                            <GameThumbnail
-                              gameId={prevCardGame.id}
-                              gameName={prevCardGame.name}
-                              accentHex={prevCardGame.accentHex}
-                              fallbackSrc={prevCardGame.coverImage}
-                              alt={prevCardGame.name}
-                              className="w-full h-full object-cover brightness-[0.36] saturate-[0.65] blur-[1px] transition-all duration-300 group-hover/prev:brightness-[0.52] group-hover/prev:blur-0"
-                            />
-                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0B0D12]/35 via-[#0B0D12]/55 to-[#0B0D12]/90" />
-                          </div>
-                          <div className="px-4 py-3 bg-[#10131A]">
-                            <div className="text-[10px] font-mono uppercase tracking-wider text-[#6B7280] truncate">
-                              {prevCardGame.category}
-                            </div>
-                            <div className="mt-0.5 font-display text-lg font-extrabold text-[#9CA3AF] truncate group-hover/prev:text-white transition-colors">
-                              {prevCardGame.name}
-                            </div>
-                            <div className="mt-1 h-4" />
-                          </div>
+                          <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{prevCardGame?.name}</span>
                         </button>
-                      )}
 
-                      {/* Shadowed Next Card Silhouette (Right) */}
-                      {nextCardGame && (
+                        <div className="flex-1 max-w-[160px] h-1.5 rounded-full bg-[#242A36] overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-200"
+                            style={{
+                              width: `${((currentIdx + 1) / totalVisible) * 100}%`,
+                              backgroundColor: activeCardGame.accentHex,
+                            }}
+                          />
+                        </div>
+
                         <button
                           type="button"
                           onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
-                          aria-label={t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)}
-                          title={t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)}
-                          style={{
-                            transform: 'translateX(16%) scale(0.84) rotateY(-18deg)',
-                          }}
-                          className={`group/next hidden sm:flex flex-col absolute right-0 sm:right-2 lg:right-4 z-0 w-[56%] max-w-[440px] rounded-2xl sm:rounded-3xl overflow-hidden border border-[#2A3142]/80 bg-[#12151C] shadow-[0_24px_56px_rgba(0,0,0,0.85)] text-right transition-all duration-300 ${
-                            isScreenRemoteLocked
-                              ? 'pointer-events-none opacity-65'
-                              : 'opacity-70 hover:opacity-95 hover:translate-x-1.5 cursor-pointer'
+                          className={`text-[#9CA3AF] inline-flex items-center justify-end gap-1 truncate max-w-[36%] transition-colors ${
+                            isScreenRemoteLocked ? 'cursor-default' : 'hover:text-white cursor-pointer'
                           }`}
                         >
-                          <div className="relative aspect-video w-full bg-[#0C0E14] overflow-hidden">
-                            <GameThumbnail
-                              gameId={nextCardGame.id}
-                              gameName={nextCardGame.name}
-                              accentHex={nextCardGame.accentHex}
-                              fallbackSrc={nextCardGame.coverImage}
-                              alt={nextCardGame.name}
-                              className="w-full h-full object-cover brightness-[0.36] saturate-[0.65] blur-[1px] transition-all duration-300 group-hover/next:brightness-[0.52] group-hover/next:blur-0"
-                            />
-                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-l from-[#0B0D12]/35 via-[#0B0D12]/55 to-[#0B0D12]/90" />
-                          </div>
-                          <div className="px-4 py-3 bg-[#10131A]">
-                            <div className="text-[10px] font-mono uppercase tracking-wider text-[#6B7280] truncate">
-                              {nextCardGame.category}
-                            </div>
-                            <div className="mt-0.5 font-display text-lg font-extrabold text-[#9CA3AF] truncate group-hover/next:text-white transition-colors">
-                              {nextCardGame.name}
-                            </div>
-                            <div className="mt-1 h-4" />
-                          </div>
+                          <span className="truncate">{nextCardGame?.name}</span>
+                          <ChevronRight className="w-3.5 h-3.5 shrink-0" />
                         </button>
-                      )}
-
-                      {/* Center Active Game Card (Auto-playing 5-Second Live Gameplay Video!) */}
-                      <div className="relative z-20 w-full max-w-[580px] min-w-0">
-                        <AnimatePresence mode="wait" initial={false}>
-                          <motion.div
-                            key={`${room.lobbyFilter}-${activeCardGame.id}`}
-                            initial={{
-                              rotateY: cardFlipDir > 0 ? 86 : -86,
-                              opacity: 0,
-                              scale: 0.92,
-                            }}
-                            animate={{
-                              rotateY: 0,
-                              opacity: 1,
-                              scale: 1,
-                            }}
-                            exit={{
-                              rotateY: cardFlipDir > 0 ? -86 : 86,
-                              opacity: 0,
-                              scale: 0.92,
-                            }}
-                            transition={{
-                              duration: 0.24,
-                              ease: [0.22, 1, 0.36, 1],
-                            }}
-                            style={{
-                              transformStyle: 'preserve-3d',
-                              backfaceVisibility: 'hidden',
-                            }}
-                            onClick={() =>
-                              guardHostOnlyClick(() => {
-                                if (canStartMatch) {
-                                  handleStartMatch();
-                                } else {
-                                  handleSelectGame(activeCardGame.id);
-                                }
-                              })
-                            }
-                            className={`relative z-10 w-full rounded-2xl sm:rounded-3xl overflow-hidden border-2 bg-[#1A1E26] shadow-[0_28px_68px_rgba(0,0,0,0.82)] transition-colors ${
-                              isCardFocused
-                                ? tvFocusRing
-                                : 'border-[#333C4F] hover:border-[#00C2FF]/65'
-                            } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
-                          >
-                            {/* Large Hero Artwork Thumbnail + Auto-Playing 5-Second Live Gameplay Video */}
-                            <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
-                              <GameHoverPreview
-                                gameId={activeCardGame.id}
-                                gameName={activeCardGame.name}
-                                accentHex={activeCardGame.accentHex}
-                                fallbackSrc={activeCardGame.coverImage}
-                                alt={activeCardGame.name}
-                                active={true}
-                                eager
-                                immediate
-                                timecodePosition="bottom-right"
-                                className="w-full h-full object-cover"
-                              />
-
-                              {/* Genre Label Top-Left */}
-                              <span
-                                className={`pointer-events-none absolute top-3 left-3 z-10 px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold uppercase tracking-wider shadow-md ${
-                                  activeGenre === 'board'
-                                    ? 'bg-[#A855F7]/92 text-white'
-                                    : activeGenre === 'card'
-                                    ? 'bg-[#10D98B]/92 text-[#071710]'
-                                    : 'bg-[#101217]/88 text-[#00C2FF] border border-[#00C2FF]/45'
-                                }`}
-                              >
-                                {getLocalizedFilterLabel(activeGenre, lang, true)}
-                              </span>
-
-                              {/* Deck Position Counter & TV OK Badge Top-Right */}
-                              <div className="pointer-events-none absolute top-3 right-3 z-10 flex items-center gap-1.5">
-                                <span className="px-2.5 py-1 rounded-lg bg-[#0D1017]/85 backdrop-blur-xs border border-white/15 font-mono text-[11px] font-bold text-white tabular-nums shadow">
-                                  {String(currentIdx + 1).padStart(2, '0')} /{' '}
-                                  {String(Math.max(1, totalVisible)).padStart(2, '0')}
-                                </span>
-                                {isCardFocused && (
-                                  <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-mono text-[11px] font-black shadow">
-                                    OK
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#1A1E26] to-transparent" />
-                            </div>
-
-                            {/* Card Body Details */}
-                            <div className="px-4 sm:px-6 pb-4 sm:pb-5 pt-2">
-                              <div className="flex items-center justify-between gap-2 text-xs text-[#9CA3AF]">
-                                <span className="truncate font-semibold">
-                                  {activeCardGame.category} · {activeCardGame.playerModeLabel}
-                                </span>
-                                <span
-                                  className="font-mono text-[11px] font-bold shrink-0"
-                                  style={{ color: activeCardGame.accentHex }}
-                                >
-                                  {activeSettingOpt?.label ?? room.gameSettingValue}
-                                </span>
-                              </div>
-
-                              <h2 className="mt-1 font-display text-2xl sm:text-3xl font-extrabold text-white truncate">
-                                {activeCardGame.name}
-                              </h2>
-
-                              <p className="mt-1.5 text-xs sm:text-sm text-[#B8C0CE] line-clamp-2 leading-relaxed">
-                                {activeCardGame.description}
-                              </p>
-
-                              <div className="mt-2.5 rounded-xl bg-[#101217]/90 border border-[#262C38] px-3 py-2 flex flex-col gap-1">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span
-                                    className="inline-flex items-center gap-1.5 text-[11px] font-extrabold"
-                                    style={{ color: activeCardPadGuide.accentHex }}
-                                  >
-                                    <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
-                                    <span>{activeCardPadGuide.padTitle}</span>
-                                  </span>
-                                  <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">
-                                    {activeCardPadGuide.presetTag}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] sm:text-xs text-[#D1D5DB] line-clamp-2 leading-snug">
-                                  {activeCardPadGuide.shortTutorial}
-                                </p>
-                              </div>
-                            </div>
-                          </motion.div>
-                        </AnimatePresence>
                       </div>
-                    </div>
+                    )}
                   </div>
-
-                  {/* Compact Adjacent Preview + Deck Progress Bar */}
-                  {totalVisible > 1 && (
-                    <div className="w-full max-w-[600px] flex items-center justify-between gap-3 px-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
-                        className={`text-[#9CA3AF] inline-flex items-center gap-1 truncate max-w-[36%] transition-colors ${
-                          isScreenRemoteLocked ? 'cursor-default' : 'hover:text-white cursor-pointer'
-                        }`}
-                      >
-                        <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">{prevCardGame?.name}</span>
-                      </button>
-
-                      <div className="flex-1 max-w-[160px] h-1.5 rounded-full bg-[#242A36] overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-200"
-                          style={{
-                            width: `${((currentIdx + 1) / totalVisible) * 100}%`,
-                            backgroundColor: activeCardGame.accentHex,
-                          }}
-                        />
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
-                        className={`text-[#9CA3AF] inline-flex items-center justify-end gap-1 truncate max-w-[36%] transition-colors ${
-                          isScreenRemoteLocked ? 'cursor-default' : 'hover:text-white cursor-pointer'
-                        }`}
-                      >
-                        <span className="truncate">{nextCardGame?.name}</span>
-                        <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                      </button>
-                    </div>
-                  )}
                 </div>
               );
             })()}
           </section>
 
-          {/* RIGHT PANEL (5 cols tablet portrait / 4 cols landscape): Spotlight + Live Ready Check */}
-          <section className="md:col-span-5 lg:col-span-4 flex flex-col min-h-0 gap-3 overflow-hidden">
+          {/* RIGHT PANEL (5 cols tablet / 4 cols landscape): Spotlight + Live Ready Check */}
+          <section className="md:col-span-5 lg:col-span-4 flex flex-col min-h-0 gap-2.5 sm:gap-3 md:overflow-y-auto no-scrollbar">
             {/* Compact Tablet Remote Indicator */}
-            <div className="xl:hidden flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#1A1E26] border border-[#282E3B] text-[11px] font-bold shrink-0">
+            <div className="xl:hidden flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[#1A1E26] border border-[#282E3B] text-[11px] font-bold shrink-0">
               {showDisconnectBanner ? (
                 <button
                   type="button"
@@ -2343,13 +2367,13 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             </div>
 
             {/* Highlighted Game Card */}
-            <div className="rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-3.5 sm:p-4 shrink-0">
+            <div className="rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-3 sm:p-3.5 shrink-0">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-[11px] font-bold text-[#00C2FF] truncate">
                     {selectedGame.category} · {selectedGame.playerModeLabel}
                   </div>
-                  <h2 className="font-display text-xl font-extrabold text-white truncate mt-0.5">
+                  <h2 className="font-display text-lg sm:text-xl font-extrabold text-white truncate mt-0.5">
                     {selectedGame.name}
                   </h2>
                 </div>
@@ -2358,7 +2382,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 </span>
               </div>
 
-              <p className="text-xs text-[#A5AEBD] mt-1.5 leading-snug">{selectedGame.tagline}</p>
+              <p className="text-xs text-[#A5AEBD] mt-1 leading-snug line-clamp-2">{selectedGame.tagline}</p>
 
               {/* Active Chaos Mutator Strip */}
               <div
@@ -2417,7 +2441,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             </div>
 
             {/* Live Ready Check Roster + Flexible Team Mode Switcher */}
-            <div className="flex-1 min-h-0 rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-3.5 flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-[180px] rounded-2xl bg-[#1A1E26] border border-[#282E3B] p-3 sm:p-3.5 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between mb-2 shrink-0">
                 <h3 className="font-display text-sm font-extrabold text-white">
                   {t('Ready Check', '准备状态')}
@@ -2564,8 +2588,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         </main>
 
         {/* Bottom TV Remote Action Dock (zone === 'actions', indices 0..6) */}
-        <footer className="border-t border-[#242934] bg-[#151820] px-3 sm:px-5 py-2.5 sm:py-3 shrink-0">
-          <div ref={actionsGridRef} className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
+        <footer className="border-t border-[#242934] bg-[#151820] px-2.5 sm:px-5 py-2.5 sm:py-3 shrink-0">
+          <div ref={actionsGridRef} className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2 p-0.5">
             {/* Action 0: Start / Open Game */}
             <button
               type="button"
@@ -2775,12 +2799,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const frenzyPerks = GAME_FRENZY_PERKS[room.selectedGameId];
 
   return (
-    <div className="h-dvh w-full bg-[#121419] text-[#F4F6FA] flex flex-col overflow-hidden relative">
+    <div className="fixed inset-0 h-dvh w-full bg-[#121419] text-[#F4F6FA] flex flex-col overflow-hidden select-none">
       {floatingEmoteOverlay}
 
       {/* Streamlined Top Control Header (Never Crushes Player Stats) */}
-      <header className="h-12 sm:h-13 border-b border-[#242934] bg-[#151820] px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-3 shrink-0">
-        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+      <header className="min-h-12 py-1.5 border-b border-[#242934] bg-[#151820] px-2.5 sm:px-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
           {activeTournament && (
             <span className="h-7 px-2 rounded-lg bg-[#FFB800]/18 border border-[#FFB800]/55 text-[#FFB800] font-mono text-[11px] font-black inline-flex items-center gap-1 shrink-0">
               <Trophy className="w-3.5 h-3.5" />
@@ -2809,12 +2833,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               <span>{t('FRENZY 2×', '狂热 2×')}</span>
             </span>
           )}
-          <span className="text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
+          <span className="text-[11px] sm:text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
             · PIN <strong className="text-white">{room.code}</strong>
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto sm:ml-0">
           {showDisconnectBanner && (
             <button
               type="button"
@@ -2958,7 +2982,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             )}
 
             <LayoutGroup id="live-top-bar-standings">
-              <div className="max-w-[1440px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+              <div className="monitor-standings-strip max-w-[1440px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap items-center justify-center gap-1.5 sm:gap-2">
                 {rankedLivePlayers.map(({ player: p, position }) => {
                   const isLeader = maxLiveScore > 0 && p.score === maxLiveScore;
                   const isTurnActive =
@@ -3178,23 +3202,23 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   }}
                   className="absolute inset-0 flex items-center justify-center px-4"
                 >
-                  <div className="relative max-w-2xl w-[92%] rounded-3xl bg-gradient-to-r from-[#2D0D09]/95 via-[#43140A]/96 to-[#1D0B0E]/95 border-2 border-[#FF8A00] px-6 py-7 sm:px-10 sm:py-9 text-center shadow-[0_0_80px_rgba(255,77,46,0.85)]">
+                  <div className="relative max-w-2xl w-[92%] rounded-3xl bg-gradient-to-r from-[#2D0D09]/95 via-[#43140A]/96 to-[#1D0B0E]/95 border-2 border-[#FF8A00] px-4 py-5 sm:px-10 sm:py-9 text-center shadow-[0_0_80px_rgba(255,77,46,0.85)]">
                     {/* Trailing Fire Tail on the Right Edge */}
                     <div className="pointer-events-none absolute -right-14 inset-y-4 w-20 bg-gradient-to-l from-transparent via-[#FF5E1A]/45 to-[#FFB800]/65 blur-xl rounded-full" />
                     <div className="pointer-events-none absolute -left-8 inset-y-6 w-14 bg-gradient-to-r from-transparent to-[#FF4D2E]/50 blur-lg rounded-full" />
 
-                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#FF4D2E]/30 border border-[#FFB800]/75 text-[#FFE066] font-mono text-xs sm:text-sm font-black tracking-widest uppercase shadow-[0_0_20px_rgba(255,138,0,0.45)]">
-                      <Flame className="w-4 h-4 text-[#FFB800] animate-pulse" />
+                    <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#FF4D2E]/30 border border-[#FFB800]/75 text-[#FFE066] font-mono text-[11px] sm:text-sm font-black tracking-widest uppercase shadow-[0_0_20px_rgba(255,138,0,0.45)]">
+                      <Flame className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FFB800] animate-pulse shrink-0" />
                       <span>{t('FINAL STRETCH · OVERDRIVE UNLOCKED', '终局高能时刻 · 全场沸腾')}</span>
-                      <Flame className="w-4 h-4 text-[#FFB800] animate-pulse" />
+                      <Flame className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FFB800] animate-pulse shrink-0" />
                     </div>
 
-                    <div className="mt-4 flex items-center justify-center gap-3 sm:gap-4">
-                      <Flame className="w-10 h-10 sm:w-12 sm:h-12 text-[#FFB800] drop-shadow-[0_0_18px_#FF5E1A] shrink-0 animate-pulse" />
-                      <h2 className="font-display text-4xl sm:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-[#FFF7CC] via-[#FFB800] to-[#FF4D2E] drop-shadow-[0_4px_24px_rgba(255,77,46,0.95)]">
+                    <div className="mt-3 sm:mt-4 flex items-center justify-center gap-2 sm:gap-4">
+                      <Flame className="w-8 h-8 sm:w-12 sm:h-12 text-[#FFB800] drop-shadow-[0_0_18px_#FF5E1A] shrink-0 animate-pulse" />
+                      <h2 className="font-display text-2xl sm:text-5xl lg:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-[#FFF7CC] via-[#FFB800] to-[#FF4D2E] drop-shadow-[0_4px_24px_rgba(255,77,46,0.95)]">
                         {t('FRENZY MODE!', '烈焰狂热模式！')}
                       </h2>
-                      <Flame className="w-10 h-10 sm:w-12 sm:h-12 text-[#FFB800] drop-shadow-[0_0_18px_#FF5E1A] shrink-0 animate-pulse" />
+                      <Flame className="w-8 h-8 sm:w-12 sm:h-12 text-[#FFB800] drop-shadow-[0_0_18px_#FF5E1A] shrink-0 animate-pulse" />
                     </div>
                   </div>
                 </motion.div>
@@ -3280,7 +3304,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 initial={{ opacity: 0, scale: 0.94, y: 12 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
-                className="max-w-3xl w-full max-h-full flex flex-col overflow-hidden rounded-2xl sm:rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl"
+                className="max-w-3xl w-full max-h-full flex flex-col overflow-y-auto arcade-scrollbar rounded-2xl sm:rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl"
               >
                 {/* Tournament Progress Strip when playing 5-Game Tournament */}
                 {activeTournament && (
@@ -3323,8 +3347,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 )}
 
                 {/* Header strip with game artwork thumbnail */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 sm:p-5 border-b border-[#262C38] bg-[#151820] shrink-0">
-                  <div className="w-full sm:w-36 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
+                <div className="flex flex-row items-center gap-3 sm:gap-4 p-3.5 sm:p-5 border-b border-[#262C38] bg-[#151820] shrink-0">
+                  <div className="w-24 sm:w-36 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
                     <GameThumbnail
                       gameId={selectedGame.id}
                       gameName={selectedGame.name}
@@ -3338,7 +3362,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[#00C2FF]">
+                      <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-[#00C2FF]">
                         {t('How to Play', '玩法说明')} · {selectedGame.category}
                       </span>
                       {room.activeMutator !== 'normal' && (
@@ -3353,15 +3377,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         </span>
                       )}
                     </div>
-                    <h2 className="font-display text-xl sm:text-3xl font-extrabold text-white mt-0.5 truncate">
+                    <h2 className="font-display text-lg sm:text-3xl font-extrabold text-white mt-0.5 truncate">
                       {selectedGame.name}
                     </h2>
-                    <p className="text-xs sm:text-base text-[#D1D5DB] mt-1">{selectedGame.tagline}</p>
+                    <p className="text-xs sm:text-base text-[#D1D5DB] mt-0.5 sm:mt-1 line-clamp-2">{selectedGame.tagline}</p>
                   </div>
                 </div>
 
                 {/* Body: Simple Rules + Clear Phone Controls (Scrollable if tablet height is tight) */}
-                <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 flex-1 min-h-0 overflow-y-auto arcade-scrollbar">
+                <div className="p-3.5 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 md:flex-1 md:min-h-0 md:overflow-y-auto arcade-scrollbar">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF] mb-3">
                       {t('Simple Rules', '简单规则')}
@@ -3515,7 +3539,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   </div>
 
                   {/* Player Ready Chips */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 max-h-24 overflow-y-auto arcade-scrollbar">
                     {room.players.map((p) => {
                       const isReady = p.isBot || (p.connected && p.ready);
                       const teamSpec = room.teamMode !== 'ffa' ? getTeamSpec(p.teamId) : null;
@@ -3619,8 +3643,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
           {/* Paused Overlay */}
           {room.status === 'PAUSED' && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/65 backdrop-blur-xs rounded-2xl">
-              <h2 className="font-display text-4xl font-extrabold text-white">
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/65 backdrop-blur-xs rounded-2xl p-3 sm:p-6 overflow-y-auto">
+              <h2 className="font-display text-2xl sm:text-4xl font-extrabold text-white">
                 {t('Game Paused', '游戏已暂停')}
               </h2>
               {activeHostPlayer && (
@@ -4060,7 +4084,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         </p>
                       )}
 
-                      <div className="mt-4 flex items-center justify-center gap-3">
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
                         <button
                           type="button"
                           onClick={() =>

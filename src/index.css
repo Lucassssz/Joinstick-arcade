@@ -174,3 +174,51 @@
   }
 }
 
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Monitor shell: fills viewport cleanly on PC & iPad, gracefully scrolls on phones & short landscape screens */
+.monitor-shell {
+  min-height: 100dvh;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.monitor-main {
+  overflow: visible;
+}
+
+@media (min-width: 768px) and (min-height: 660px) {
+  .monitor-shell {
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .monitor-main {
+    overflow: hidden;
+  }
+}
+
+@media (max-height: 560px) {
+  .monitor-standings-strip {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    overflow-x: auto !important;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .monitor-standings-strip::-webkit-scrollbar {
+    display: none;
+  }
+}

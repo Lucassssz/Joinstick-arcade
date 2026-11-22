@@ -36,7 +36,7 @@ export function CupVotingStage({
   const teamModeInfo = TEAM_MODE_OPTIONS.find((m) => m.id === room.teamMode);
 
   return (
-    <div className="fixed inset-0 h-dvh w-full bg-[#121419] text-[#F4F6FA] flex flex-col overflow-hidden select-none">
+    <div className="monitor-shell bg-[#121419] text-[#F4F6FA] flex flex-col relative select-none">
       {/* Subtle Ambient Arcade Glow */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -top-28 -left-24 w-[420px] h-[420px] rounded-full bg-[#FFB800]/10 blur-[120px]" />
@@ -45,7 +45,7 @@ export function CupVotingStage({
       </div>
 
       {/* Top Cup Voting Header */}
-      <header className="relative z-10 border-b border-[#242934] bg-[#151820]/95 backdrop-blur-md px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <header className="relative z-10 border-b border-[#242934] bg-[#151820]/95 backdrop-blur-md px-3 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="h-10 px-3 rounded-xl bg-[#FFB800]/18 border border-[#FFB800]/60 text-[#FFB800] font-display font-extrabold text-sm inline-flex items-center gap-2 shrink-0">
             <Trophy className="w-4 h-4" />
@@ -143,20 +143,20 @@ export function CupVotingStage({
       </div>
 
       {/* Main Voting Arena */}
-      <main className="relative z-10 flex-1 min-h-0 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-4 sm:py-5 flex flex-col justify-between gap-4 overflow-hidden">
+      <main className="monitor-main relative z-10 flex-1 min-h-0 max-w-[1440px] w-full mx-auto px-3 sm:px-6 py-3 sm:py-4 flex flex-col justify-between gap-3">
         {/* Title & Prompt */}
         <div className="text-center shrink-0">
-          <h1 className="font-display text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2.5">
+          <h1 className="font-display text-xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2 sm:gap-2.5">
             {isLocked ? (
               <>
-                <Sparkles className="w-7 h-7 text-[#FFB800]" />
+                <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-[#FFB800] shrink-0" />
                 <span>
                   {t('Next Cup Game Locked In!', '下一局锦标赛游戏已揭晓！')}
                 </span>
               </>
             ) : (
               <>
-                <Vote className="w-7 h-7 text-[#00C2FF]" />
+                <Vote className="w-6 h-6 sm:w-7 sm:h-7 text-[#00C2FF] shrink-0" />
                 <span>
                   {t('Vote on Your Phone for the Next Game!', '请在手机上投票选出下一款游戏！')}
                 </span>
@@ -177,7 +177,7 @@ export function CupVotingStage({
         </div>
 
         {/* 3 Candidate Cards — EVERY card auto-plays its 5-second gameplay video loop */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5 items-stretch">
+        <div className="flex-1 min-h-0 p-1.5 sm:p-2.5 grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-5 items-stretch md:overflow-y-auto arcade-scrollbar">
           {vote.candidates.map((gameId, idx) => {
             const rawMeta = getGameMeta(gameId);
             const meta = getLocalizedGameMeta(rawMeta, lang);
@@ -201,7 +201,7 @@ export function CupVotingStage({
                 animate={{
                   opacity: isLoser ? 0.36 : 1,
                   y: 0,
-                  scale: isWinner ? 1.03 : isLoser ? 0.96 : 1,
+                  scale: isWinner ? 1.015 : isLoser ? 0.97 : 1,
                 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 26 }}
                 onClick={() => {
@@ -209,16 +209,16 @@ export function CupVotingStage({
                     onCastOrLockGame(gameId);
                   }
                 }}
-                className={`relative rounded-3xl overflow-hidden bg-[#181C25] border-2 flex flex-col justify-between transition-all shadow-2xl ${
+                className={`relative rounded-2xl sm:rounded-3xl overflow-hidden bg-[#181C25] border-2 flex flex-col justify-between transition-all shadow-2xl ${
                   isWinner
-                    ? 'border-[#FFB800] ring-4 ring-[#FFB800]/50 shadow-[0_0_40px_rgba(255,184,0,0.38)] z-10'
+                    ? 'border-[#FFB800] ring-3 ring-[#FFB800]/50 shadow-[0_0_32px_rgba(255,184,0,0.35)] z-10'
                     : isRemoteFocused
                     ? 'border-[#00C2FF] ring-2 ring-[#00C2FF]/60'
                     : 'border-[#2A3142]'
                 } ${!isLocked && !isScreenRemoteLocked ? 'cursor-pointer hover:border-[#4B5670]' : ''}`}
               >
                 {/* Live 5-Second Gameplay Video Preview (Always active for every candidate!) */}
-                <div className="relative aspect-[16/10] w-full overflow-hidden bg-[#0E1117] shrink-0">
+                <div className="relative h-[clamp(130px,19dvh,200px)] w-full overflow-hidden bg-[#0E1117] shrink-0">
                   <GameHoverPreview
                     gameId={gameId}
                     gameName={meta.name}
