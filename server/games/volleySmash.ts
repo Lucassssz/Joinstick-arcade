@@ -22,6 +22,8 @@ interface VolleySmashState {
   resetTimer: number;
   goalBanner: string | null;
   goalBannerColor: string | null;
+  rallyCount: number;
+  soloHoloTimer: number;
   ball: {
     x: number;
     y: number;
@@ -46,7 +48,7 @@ const COURT_RIGHT = ARENA_WIDTH - 110;
 const COURT_TOP = 130;
 const COURT_BOTTOM = ARENA_HEIGHT - 95;
 const NET_X = ARENA_WIDTH / 2;
-const GRAVITY_Z = 340;
+const GRAVITY_Z = 290;
 
 function predictBallLanding(ball: VolleySmashState['ball']): { x: number; y: number } {
   const a = -0.5 * GRAVITY_Z;
@@ -55,7 +57,7 @@ function predictBallLanding(ball: VolleySmashState['ball']): { x: number; y: num
   const disc = b * b - 4 * a * c;
   if (disc < 0) return { x: ball.x, y: ball.y };
   const t = (-b - Math.sqrt(disc)) / (2 * a);
-  const flightT = Math.max(0, Math.min(3.5, t));
+  const flightT = Math.max(0, Math.min(4.0, t));
   const tx = Math.max(COURT_LEFT + 35, Math.min(COURT_RIGHT - 35, ball.x + ball.vx * flightT));
   const ty = Math.max(COURT_TOP + 35, Math.min(COURT_BOTTOM - 35, ball.y + ball.vy * flightT));
   return { x: tx, y: ty };
@@ -63,20 +65,24 @@ function predictBallLanding(ball: VolleySmashState['ball']): { x: number; y: num
 
 function resetServe(state: VolleySmashState, servingTeam: 'red' | 'blue'): void {
   state.servingTeam = servingTeam;
-  const startX = servingTeam === 'red' ? NET_X - 210 : NET_X + 210;
-  const dir = servingTeam === 'red' ? 1 : -1;
+  state.rallyCount = 0;
+  // In 1P solo mode (no blue players), always serve gently toward the human on Red side
+  const hasBlue = state.players.some((p) => p.team === 'blue');
+  const fromBlue = !hasBlue || servingTeam === 'blue';
+  const startX = fromBlue ? NET_X + 200 : NET_X - 200;
+  const dir = fromBlue ? -1 : 1;
   state.ball = {
     x: startX,
     y: (COURT_TOP + COURT_BOTTOM) / 2,
-    z: 140,
-    vx: dir * 145,
-    vy: (Math.random() - 0.5) * 70,
+    z: 145,
+    vx: dir * 155,
+    vy: (Math.random() - 0.5) * 65,
     vz: 165,
-    targetX: NET_X + dir * 180,
+    targetX: NET_X + dir * 185,
     targetY: (COURT_TOP + COURT_BOTTOM) / 2,
     hot: false,
-    lastTouchColor: servingTeam === 'red' ? '#FF4D2E' : '#00C2FF',
-    lastTouchTeam: servingTeam,
+    lastTouchColor: fromBlue ? '#00C2FF' : '#FF4D2E',
+    lastTouchTeam: fromBlue ? 'blue' : 'red',
   };
   const land = predictBallLanding(state.ball);
   state.ball.targetX = land.x;
@@ -90,8 +96,11 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
     const targetPoints = settingValue || 5;
     const pStates: VolleyPlayerState[] = players.map((p, idx) => {
       const team: 'red' | 'blue' = idx % 2 === 0 ? 'red' : 'blue';
-      const sideX = team === 'red' ? NET_X - 220 - (idx % 3) * 45 : NET_X + 220 + (idx % 3) * 45;
-      const sideY = COURT_TOP + 95 + ((idx * 130) % (COURT_BOTTOM - COURT_TOP - 160));
+      const teamIdx = Math.floor(idx / 2);
+      const sideX = team === 'red' ? NET_X - 210 - (teamIdx % 2) * 65 : NET_X + 210 + (teamIdx % 2) * 65;
+      const sideY =
+        (COURT_TOP + COURT_BOTTOM) / 2 +
+        (teamIdx === 0 ? 0 : teamIdx % 2 === 1 ? -90 : 90);
       return {
         id: p.id,
         slotIndex: p.slotIndex,
@@ -99,7 +108,7 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
         colorHex: p.color.hex,
         team,
         x: sideX,
-        y: sideY,
+        y: Math.max(COURT_TOP + 45, Math.min(COURT_BOTTOM - 45, sideY)),
         vx: 0,
         vy: 0,
         z: 0,
@@ -122,13 +131,15 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
       resetTimer: 0,
       goalBanner: null,
       goalBannerColor: null,
+      rallyCount: 0,
+      soloHoloTimer: 0,
       ball: {
         x: NET_X - 180,
         y: (COURT_TOP + COURT_BOTTOM) / 2,
-        z: 140,
-        vx: 140,
+        z: 145,
+        vx: 150,
         vy: 0,
-        vz: 160,
+        vz: 165,
         targetX: NET_X + 180,
         targetY: (COURT_TOP + COURT_BOTTOM) / 2,
         hot: false,
@@ -148,16 +159,17 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
     const sounds: SoundEvent[] = [];
     const haptics: HapticTrigger[] = [];
     const inputMap = new Map(players.map((p) => [p.id, p]));
+    const hasBluePlayers = state.players.some((p) => p.team === 'blue');
 
     for (let i = state.shockwaves.length - 1; i >= 0; i--) {
       const sw = state.shockwaves[i];
-      sw.radius += dt * 260;
+      sw.radius += dt * 270;
       sw.alpha -= dt * 1.9;
       if (sw.alpha <= 0) state.shockwaves.splice(i, 1);
     }
     for (let i = state.popups.length - 1; i >= 0; i--) {
       state.popups[i].y -= dt * 36;
-      state.popups[i].alpha -= dt * 1.1;
+      state.popups[i].alpha -= dt * 1.05;
       if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
@@ -177,8 +189,8 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
     // Player movement & actions
     for (const p of state.players) {
       const inp = inputMap.get(p.id);
-      p.cooldownA = Math.max(0, p.cooldownA - dt * 1.4);
-      p.cooldownB = Math.max(0, p.cooldownB - dt * 0.9);
+      p.cooldownA = Math.max(0, p.cooldownA - dt * 1.65);
+      p.cooldownB = Math.max(0, p.cooldownB - dt * 1.05);
       p.spikeTimer = Math.max(0, p.spikeTimer - dt);
       p.setTimer = Math.max(0, p.setTimer - dt);
 
@@ -187,13 +199,12 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
       const justA = Boolean(inp && inp.input.a && !inp.prevA);
       const justB = Boolean(inp && inp.input.b && !inp.prevB);
 
-      const moveSpeed = 305;
+      const moveSpeed = 335;
       p.vx = dx * moveSpeed;
       p.vy = dy * moveSpeed;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
 
-      // Jump gravity
       if (p.z > 0 || p.vz > 0) {
         p.z += p.vz * dt;
         p.vz -= 640 * dt;
@@ -203,34 +214,37 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
         }
       }
 
-      // Clamp to team half of court
       const minX = p.team === 'red' ? COURT_LEFT + 28 : NET_X + 34;
       const maxX = p.team === 'red' ? NET_X - 34 : COURT_RIGHT - 28;
       p.x = Math.max(minX, Math.min(maxX, p.x));
       p.y = Math.max(COURT_TOP + 26, Math.min(COURT_BOTTOM - 26, p.y));
 
       const distBall = Math.hypot(state.ball.x - p.x, state.ball.y - p.y);
+      const onMySide = p.team === 'red' ? state.ball.x <= NET_X + 26 : state.ball.x >= NET_X - 26;
 
       // Action A: Bump / High Set
       if (justA && p.cooldownA <= 0) {
         p.cooldownA = 1;
-        p.setTimer = 0.28;
-        if (state.resetTimer <= 0 && distBall < 86 && state.ball.z < 120) {
+        p.setTimer = 0.3;
+        if (state.resetTimer <= 0 && onMySide && distBall < 102 && state.ball.z < 135) {
           const targetDir = p.team === 'red' ? 1 : -1;
-          const aimX =
-            NET_X + targetDir * (140 + Math.random() * 190) + dx * 75;
+          const aimX = Math.max(
+            COURT_LEFT + 55,
+            Math.min(COURT_RIGHT - 55, NET_X + targetDir * (160 + Math.random() * 175) + dx * 85)
+          );
           const aimY = Math.max(
-            COURT_TOP + 55,
-            Math.min(COURT_BOTTOM - 55, p.y + dy * 175)
+            COURT_TOP + 52,
+            Math.min(COURT_BOTTOM - 52, p.y + dy * 185)
           );
           const flightTime = 1.25;
           state.ball.vx = (aimX - state.ball.x) / flightTime;
           state.ball.vy = (aimY - state.ball.y) / flightTime;
-          state.ball.vz = 250;
-          state.ball.z = Math.max(38, state.ball.z);
+          state.ball.vz = 230;
+          state.ball.z = Math.max(46, state.ball.z);
           state.ball.hot = false;
           state.ball.lastTouchColor = p.colorHex;
           state.ball.lastTouchTeam = p.team;
+          state.rallyCount += 1;
           const land = predictBallLanding(state.ball);
           state.ball.targetX = land.x;
           state.ball.targetY = land.y;
@@ -240,7 +254,7 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
             x: p.x,
             y: p.y,
             radius: 16,
-            maxRadius: 72,
+            maxRadius: 76,
             colorHex: '#00C2FF',
             alpha: 0.9,
           });
@@ -252,26 +266,29 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
       // Action B: Jump Spike
       if (justB && p.cooldownB <= 0) {
         p.cooldownB = 1;
-        p.spikeTimer = 0.35;
+        p.spikeTimer = 0.36;
         if (p.z === 0) {
-          p.vz = 240;
+          p.vz = 250;
         }
-        if (state.resetTimer <= 0 && distBall < 96 && state.ball.z < 165) {
+        if (state.resetTimer <= 0 && onMySide && distBall < 112 && state.ball.z < 185) {
           const targetDir = p.team === 'red' ? 1 : -1;
-          const aimX =
-            NET_X + targetDir * (170 + Math.random() * 210) + dx * 95;
-          const aimY = Math.max(
-            COURT_TOP + 50,
-            Math.min(COURT_BOTTOM - 50, p.y + dy * 195)
+          const aimX = Math.max(
+            COURT_LEFT + 55,
+            Math.min(COURT_RIGHT - 55, NET_X + targetDir * (190 + Math.random() * 195) + dx * 105)
           );
-          const flightTime = 0.82;
+          const aimY = Math.max(
+            COURT_TOP + 48,
+            Math.min(COURT_BOTTOM - 48, p.y + dy * 210)
+          );
+          const flightTime = 0.84;
           state.ball.vx = (aimX - state.ball.x) / flightTime;
           state.ball.vy = (aimY - state.ball.y) / flightTime;
-          state.ball.vz = 155;
-          state.ball.z = Math.max(52, state.ball.z);
+          state.ball.vz = 152;
+          state.ball.z = Math.max(62, state.ball.z);
           state.ball.hot = true;
           state.ball.lastTouchColor = p.colorHex;
           state.ball.lastTouchTeam = p.team;
+          state.rallyCount += 1;
           const land = predictBallLanding(state.ball);
           state.ball.targetX = land.x;
           state.ball.targetY = land.y;
@@ -281,13 +298,13 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
             x: state.ball.x,
             y: state.ball.y,
             radius: 22,
-            maxRadius: 96,
+            maxRadius: 102,
             colorHex: '#FF4D2E',
             alpha: 1,
           });
           state.popups.push({
             x: p.x,
-            y: p.y - 36,
+            y: p.y - 38,
             text: 'TURBO SPIKE!',
             colorHex: '#FFB800',
             alpha: 1,
@@ -297,27 +314,29 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
         }
       }
 
-      // Auto head-bump if player is directly under falling low ball
+      // Forgiving Auto-Bump when directly under a descending ball
       if (
         state.resetTimer <= 0 &&
-        distBall < 42 &&
-        state.ball.z < 36 &&
+        onMySide &&
+        distBall < 48 &&
+        state.ball.z < 44 &&
         state.ball.vz < 0
       ) {
         const targetDir = p.team === 'red' ? 1 : -1;
-        const aimX = NET_X + targetDir * (150 + Math.random() * 170);
+        const aimX = NET_X + targetDir * (165 + Math.random() * 165);
         const aimY = Math.max(
-          COURT_TOP + 60,
-          Math.min(COURT_BOTTOM - 60, p.y + (Math.random() - 0.5) * 140)
+          COURT_TOP + 58,
+          Math.min(COURT_BOTTOM - 58, p.y + (Math.random() - 0.5) * 140)
         );
         const flightTime = 1.28;
         state.ball.vx = (aimX - state.ball.x) / flightTime;
         state.ball.vy = (aimY - state.ball.y) / flightTime;
-        state.ball.vz = 245;
-        state.ball.z = 38;
+        state.ball.vz = 225;
+        state.ball.z = 46;
         state.ball.hot = false;
         state.ball.lastTouchColor = p.colorHex;
         state.ball.lastTouchTeam = p.team;
+        state.rallyCount += 1;
         const land = predictBallLanding(state.ball);
         state.ball.targetX = land.x;
         state.ball.targetY = land.y;
@@ -329,12 +348,22 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
 
     // Ball physics
     if (state.resetTimer <= 0) {
+      const prevX = state.ball.x;
       state.ball.x += state.ball.vx * dt;
       state.ball.y += state.ball.vy * dt;
       state.ball.z += state.ball.vz * dt;
       state.ball.vz -= GRAVITY_Z * dt;
 
-      // Side court wall bounce so ball stays in play area
+      // Net top clip rebound if ball crosses net too low (z < 36)
+      if ((prevX < NET_X && state.ball.x >= NET_X) || (prevX > NET_X && state.ball.x <= NET_X)) {
+        if (state.ball.z < 34) {
+          state.ball.vz = Math.max(125, state.ball.vz + 95);
+          state.ball.vx *= 0.85;
+          sounds.push({ type: 'bump' });
+        }
+      }
+
+      // Court boundary rebounds
       if (state.ball.y < COURT_TOP + 24) {
         state.ball.y = COURT_TOP + 24;
         state.ball.vy = Math.abs(state.ball.vy) * 0.85;
@@ -344,10 +373,43 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
       }
       if (state.ball.x < COURT_LEFT + 24) {
         state.ball.x = COURT_LEFT + 24;
-        state.ball.vx = Math.abs(state.ball.vx) * 0.75;
+        state.ball.vx = Math.abs(state.ball.vx) * 0.78;
       } else if (state.ball.x > COURT_RIGHT - 24) {
         state.ball.x = COURT_RIGHT - 24;
-        state.ball.vx = -Math.abs(state.ball.vx) * 0.75;
+        state.ball.vx = -Math.abs(state.ball.vx) * 0.78;
+      }
+
+      // Solo 1P Mode: Automated Holo-Keeper returns normal shots on Blue side (spiked shots can beat it!)
+      if (!hasBluePlayers && state.ball.x > NET_X + 40 && state.ball.z < 42 && state.ball.vz < 0) {
+        const beatKeeper = state.ball.hot && Math.random() < 0.72;
+        if (!beatKeeper) {
+          const aimX = COURT_LEFT + 75 + Math.random() * (NET_X - COURT_LEFT - 140);
+          const aimY = COURT_TOP + 65 + Math.random() * (COURT_BOTTOM - COURT_TOP - 130);
+          const flightTime = 1.25;
+          state.ball.vx = (aimX - state.ball.x) / flightTime;
+          state.ball.vy = (aimY - state.ball.y) / flightTime;
+          state.ball.vz = 225;
+          state.ball.z = 44;
+          state.ball.hot = false;
+          state.ball.lastTouchColor = '#00C2FF';
+          state.ball.lastTouchTeam = 'blue';
+          state.shockwaves.push({
+            x: state.ball.x,
+            y: state.ball.y,
+            radius: 16,
+            maxRadius: 72,
+            colorHex: '#00C2FF',
+            alpha: 0.9,
+          });
+          state.popups.push({
+            x: state.ball.x,
+            y: state.ball.y - 26,
+            text: 'HOLO RETURN!',
+            colorHex: '#00C2FF',
+            alpha: 0.95,
+          });
+          sounds.push({ type: 'bump' });
+        }
       }
 
       const land = predictBallLanding(state.ball);
@@ -369,7 +431,7 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
           state.goalBannerColor = '#00C2FF';
         }
         state.servingTeam = scoringTeam;
-        state.resetTimer = 1.65;
+        state.resetTimer = 1.55;
 
         for (const p of state.players) {
           if (p.team === scoringTeam) {
@@ -381,7 +443,7 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
           x: state.ball.x,
           y: state.ball.y,
           radius: 18,
-          maxRadius: 110,
+          maxRadius: 115,
           colorHex: scoringTeam === 'red' ? '#FF4D2E' : '#00C2FF',
           alpha: 1,
         });

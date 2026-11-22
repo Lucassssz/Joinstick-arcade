@@ -273,6 +273,8 @@ export const starPartyBoardModule: ServerGameModule<StarPartyState> = {
             state.phase = 'event';
             state.phaseTimer = 1.35;
           }
+        } else {
+          active.visualTile = (active.tileIndex + state.hopProgress) % TOTAL_TILES;
         }
       } else if (state.phase === 'event') {
         state.phaseTimer -= dt;

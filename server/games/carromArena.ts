@@ -175,12 +175,27 @@ export const carromArenaModule: ServerGameModule<CarromArenaState> = {
         state.turnTimeLeft = Math.max(0, state.turnTimeLeft - dt);
 
         if (inp) {
-          // Left/Right adjusts aim angle, Up/Down slides striker along baseline
-          active.aimAngle += inp.input.dx * dt * 1.95;
-          active.strikerOffset = Math.max(
-            -1,
-            Math.min(1, active.strikerOffset + inp.input.dy * dt * 1.4)
-          );
+          const mag = Math.hypot(inp.input.dx, inp.input.dy);
+          if (mag > 0.2) {
+            if (inp.input.dy < -0.18) {
+              // Direct intuitive joystick aiming across the upper board hemisphere
+              const targetAngle = Math.atan2(inp.input.dy, inp.input.dx);
+              let diff = targetAngle - active.aimAngle;
+              while (diff > Math.PI) diff -= Math.PI * 2;
+              while (diff < -Math.PI) diff += Math.PI * 2;
+              active.aimAngle += diff * Math.min(1, dt * 11);
+            } else {
+              // Horizontal stick slides striker cleanly along baseline & gently adjusts aim
+              active.strikerOffset = Math.max(
+                -1,
+                Math.min(1, active.strikerOffset + inp.input.dx * dt * 1.45)
+              );
+              active.aimAngle = Math.max(
+                -Math.PI + 0.25,
+                Math.min(-0.25, active.aimAngle + inp.input.dx * dt * 0.65)
+              );
+            }
+          }
           positionStrikerForPlayer(state, active);
         }
 

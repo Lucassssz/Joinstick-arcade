@@ -384,6 +384,42 @@ export const GAME_FRENZY_PERKS: Record<GameId, FrenzyGamePerk> = {
     perk2En: 'DRAGON LAIR FINALE',
     perk2Zh: '巨龙巢穴决战',
   },
+  'boom-kittens': {
+    perk1En: '2× SURVIVAL BONUS',
+    perk1Zh: '拆弹幸存双倍分',
+    perk2En: 'RED ALERT BOMB DECK',
+    perk2Zh: '高危爆弹时刻',
+  },
+  'property-deal': {
+    perk1En: '2× SET & RENT BONUS',
+    perk1Zh: '地产与收租双倍分',
+    perk2En: 'FINAL HEIST SHOWDOWN',
+    perk2Zh: '终极地产大劫案',
+  },
+  'flip-seven': {
+    perk1En: '2× FLIP 7 JACKPOT',
+    perk1Zh: '七连不爆双倍大奖',
+    perk2En: 'HIGH-STAKES PUSH',
+    perk2Zh: '极限搏命摸牌',
+  },
+  'royal-bluff': {
+    perk1En: '2× BLUFF & COUP PTS',
+    perk1Zh: '政变与抓谎双倍分',
+    perk2En: 'FINAL COURT SHOWDOWN',
+    perk2Zh: '宫廷终局对决',
+  },
+  'dark-flip-clash': {
+    perk1En: '2× DARK SIDE BONUS',
+    perk1Zh: '暗面决胜双倍分',
+    perk2En: 'MEGA FLIP +5 HEAT',
+    perk2Zh: '终极翻转狂潮',
+  },
+  'sushi-draft': {
+    perk1En: '2× COMBO FEAST PTS',
+    perk1Zh: '寿司连击双倍分',
+    perk2En: 'FINAL CONVEYOR RUSH',
+    perk2Zh: '终轮回转盛宴',
+  },
 };
 
 export const TOURNAMENT_TOTAL_GAMES = 5;

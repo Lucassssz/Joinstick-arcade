@@ -50,6 +50,12 @@ import { navalSalvoModule } from './navalSalvo.ts';
 import { neonCheckersModule } from './neonCheckers.ts';
 import { carromArenaModule } from './carromArena.ts';
 import { dungeonCrawlBoardModule } from './dungeonCrawlBoard.ts';
+import { boomKittensModule } from './boomKittens.ts';
+import { propertyDealModule } from './propertyDeal.ts';
+import { flipSevenModule } from './flipSeven.ts';
+import { royalBluffModule } from './royalBluff.ts';
+import { darkFlipClashModule } from './darkFlipClash.ts';
+import { sushiDraftModule } from './sushiDraft.ts';
 
 export interface ServerPlayerInputState {
   id: string;
@@ -146,4 +152,10 @@ export const SERVER_GAMES: Record<GameId, ServerGameModule<any>> = {
   'neon-checkers': neonCheckersModule,
   'carrom-arena': carromArenaModule,
   'dungeon-crawl-board': dungeonCrawlBoardModule,
+  'boom-kittens': boomKittensModule,
+  'property-deal': propertyDealModule,
+  'flip-seven': flipSevenModule,
+  'royal-bluff': royalBluffModule,
+  'dark-flip-clash': darkFlipClashModule,
+  'sushi-draft': sushiDraftModule,
 };

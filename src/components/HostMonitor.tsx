@@ -1,15 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import {
   ArrowLeft,
   ArrowRight,
-  BarChart3,
   Bot,
   Check,
-  ChevronDown,
-  ChevronUp,
-  Clock,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Crown,
   Dices,
@@ -36,11 +34,14 @@ import {
   Zap,
 } from 'lucide-react';
 import {
+  CARD_GAME_IDS,
   filterGamesByPlayerMode,
   getGameGenre,
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
+import { GameHoverPreview } from './GameHoverPreview';
+import { GameThumbnail } from './GameThumbnail';
 import {
   GAME_FRENZY_PERKS,
   getMutatorSpec,
@@ -69,6 +70,7 @@ import {
 } from '../lib/i18n';
 import { createRenderFxState, renderGameSnapshot } from '../games/renderers';
 import { preloadGameRenderer } from '../games/rendererRegistry';
+import { getStylizedGameThumbnail } from '../games/thumbnailGenerator';
 import { ChaosWheelModal } from './ChaosWheelModal';
 import { TestControllerDrawer } from './TestControllerDrawer';
 
@@ -105,12 +107,6 @@ function difficultyColor(d?: BotDifficulty): string {
   return '#00C2FF';
 }
 
-function formatResponseTime(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms <= 0) return '—';
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
-}
-
 export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMonitorProps) {
   const { lang, t } = useLanguage();
   const langRef = useRef(lang);
@@ -130,7 +126,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [isClosingRoom, setIsClosingRoom] = useState(false);
   const [chaosWheelOpen, setChaosWheelOpen] = useState(false);
-  const [matchStatsExpanded, setMatchStatsExpanded] = useState(true);
+  const [rankShifts, setRankShifts] = useState<Record<string, number>>({});
+  const [cardFlipDir, setCardFlipDir] = useState<1 | -1>(1);
+  const [lobbyCardHovered, setLobbyCardHovered] = useState(false);
   const [liveTurnInfo, setLiveTurnInfo] = useState<{
     activePlayerId: string | null;
     turnElapsedSec: number;
@@ -141,6 +139,13 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     turnElapsedSec: 0,
     phase: null,
     lastClaimPlayerId: null,
+  });
+
+  const prevRankMapRef = useRef<Record<string, number>>({});
+  const rankShiftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevLobbySelectionRef = useRef<{ filter: string; idx: number }>({
+    filter: 'all',
+    idx: -1,
   });
 
   const wsRef = useRef<ManagedWebSocket | null>(null);
@@ -154,8 +159,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wheelAutoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const focusedGameBtnRef = useRef<HTMLButtonElement | null>(null);
-  const gamesGridRef = useRef<HTMLDivElement | null>(null);
   const actionsGridRef = useRef<HTMLDivElement | null>(null);
   const lastSentLayoutRef = useRef<{ gameCols: number; actionCols: number }>({
     gameCols: 0,
@@ -224,17 +227,24 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             if (msg.snapshot) {
               latestSnapshotRef.current = msg.snapshot;
               const snap = msg.snapshot;
-              if (snap.gameId === 'color-clash' || snap.gameId === 'liars-deck') {
+              if (CARD_GAME_IDS.has(snap.gameId)) {
+                const sAny = snap as unknown as {
+                  activePlayerId?: string;
+                  turnTotal?: number;
+                  turnTimeLeft?: number;
+                  phase?: string;
+                  lastClaimPlayerId?: string | null;
+                };
                 const elapsed = Math.max(
                   0,
-                  Number(((snap.turnTotal || 15) - (snap.turnTimeLeft || 0)).toFixed(1))
+                  Number(((sAny.turnTotal || 15) - (sAny.turnTimeLeft || 0)).toFixed(1))
                 );
-                const phase = snap.gameId === 'liars-deck' ? snap.phase : 'turn';
-                const lastClaim =
-                  snap.gameId === 'liars-deck' ? snap.lastClaimPlayerId : null;
+                const phase = sAny.phase ?? 'turn';
+                const lastClaim = sAny.lastClaimPlayerId ?? null;
+                const actId = sAny.activePlayerId ?? null;
                 setLiveTurnInfo((prev) => {
                   if (
-                    prev.activePlayerId === snap.activePlayerId &&
+                    prev.activePlayerId === actId &&
                     Math.abs(prev.turnElapsedSec - elapsed) < 0.2 &&
                     prev.phase === phase &&
                     prev.lastClaimPlayerId === lastClaim
@@ -242,7 +252,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     return prev;
                   }
                   return {
-                    activePlayerId: snap.activePlayerId,
+                    activePlayerId: actId,
                     turnElapsedSec: elapsed,
                     phase,
                     lastClaimPlayerId: lastClaim,
@@ -539,14 +549,79 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     }
   }, [room?.hostPlayerId, room?.status, room?.players, lang]);
 
-  // Smoothly keep the TV-focused game card visible inside the Game Room shelf
+  // Sync 3D card flip direction & proactively warm adjacent cards' renderers + thumbnails in LOBBY
   useEffect(() => {
-    if (room?.status === 'LOBBY' && room.remoteFocus.zone === 'games') {
-      focusedGameBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (room?.status !== 'LOBBY') {
+      setLobbyCardHovered(false);
+      return;
     }
-  }, [room?.status, room?.remoteFocus.zone, room?.remoteFocus.index, room?.lobbyFilter]);
+    const list = filterGamesByPlayerMode(room.lobbyFilter);
+    if (list.length === 0) return;
 
-  // Report live responsive CSS Grid column counts so Host Remote Up/Down matches visual rows on every screen size
+    const currentIdx = Math.max(
+      0,
+      list.findIndex((g) => g.id === room.selectedGameId)
+    );
+    const prev = prevLobbySelectionRef.current;
+    if (prev.filter === room.lobbyFilter && prev.idx >= 0 && prev.idx !== currentIdx) {
+      if (prev.idx === list.length - 1 && currentIdx === 0) {
+        setCardFlipDir(1);
+      } else if (prev.idx === 0 && currentIdx === list.length - 1) {
+        setCardFlipDir(-1);
+      } else {
+        setCardFlipDir(currentIdx > prev.idx ? 1 : -1);
+      }
+    }
+    prevLobbySelectionRef.current = { filter: room.lobbyFilter, idx: currentIdx };
+
+    // Warm neighboring cards so flipping Previous/Next feels instant
+    const nextGame = list[(currentIdx + 1) % list.length];
+    const prevGame = list[(currentIdx - 1 + list.length) % list.length];
+    for (const neighbor of [nextGame, prevGame]) {
+      if (!neighbor) continue;
+      preloadGameRenderer(neighbor.id);
+      void getStylizedGameThumbnail(neighbor.id, neighbor.accentHex, getGameGenre(neighbor.id));
+    }
+  }, [room?.status, room?.lobbyFilter, room?.selectedGameId]);
+
+  // Keyboard Left / Right arrow flipping in LOBBY when mouse control is active
+  useEffect(() => {
+    if (room?.status !== 'LOBBY' || chaosWheelOpen || closeConfirmOpen) return;
+    const hasConnectedHumanHost = Boolean(
+      room.players.find((p) => p.id === room.hostPlayerId && !p.isBot && p.connected)
+    );
+    if (hasConnectedHumanHost) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const list = filterGamesByPlayerMode(room.lobbyFilter);
+      if (list.length <= 1) return;
+      e.preventDefault();
+      const curIdx = Math.max(
+        0,
+        list.findIndex((g) => g.id === room.selectedGameId)
+      );
+      const dir: 1 | -1 = e.key === 'ArrowRight' ? 1 : -1;
+      const nextIdx = (curIdx + dir + list.length) % list.length;
+      setCardFlipDir(dir);
+      arcadeAudio.unlock();
+      preloadGameRenderer(list[nextIdx].id);
+      wsRef.current?.send({ type: 'game:select', gameId: list[nextIdx].id });
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    room?.status,
+    room?.lobbyFilter,
+    room?.selectedGameId,
+    room?.hostPlayerId,
+    room?.players,
+    chaosWheelOpen,
+    closeConfirmOpen,
+  ]);
+
+  // Report live responsive CSS Grid column counts for the bottom action dock
   useEffect(() => {
     if (!wsConnected || room?.status !== 'LOBBY') {
       lastSentLayoutRef.current = { gameCols: 0, actionCols: 0 };
@@ -563,9 +638,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
     const syncLayout = () => {
       const w = window.innerWidth;
-      const fallbackGames = w >= 1280 ? 4 : w >= 1024 ? 3 : 2;
       const fallbackActions = w >= 1280 ? 7 : w >= 640 ? 4 : 2;
-      const gameCols = measureCols(gamesGridRef.current, fallbackGames);
+      const gameCols = 1;
       const actionCols = measureCols(actionsGridRef.current, fallbackActions);
       if (
         lastSentLayoutRef.current.gameCols !== gameCols ||
@@ -583,7 +657,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(syncLayout);
-      if (gamesGridRef.current) observer.observe(gamesGridRef.current);
       if (actionsGridRef.current) observer.observe(actionsGridRef.current);
     }
 
@@ -695,6 +768,84 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     wsRef.current?.send({ type: 'game:select', gameId, settingValue });
   };
 
+  // Real-time player placement sorted dynamically by live game points
+  const rankedLivePlayers = useMemo(() => {
+    if (!room) return [];
+    const sorted = [...room.players].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.alive !== b.alive) return a.alive ? -1 : 1;
+      return a.slotIndex - b.slotIndex;
+    });
+    return sorted.map((player, index) => {
+      const prev = index > 0 ? sorted[index - 1] : null;
+      const isTiedWithPrev =
+        Boolean(prev) && player.score > 0 && prev!.score === player.score;
+      return {
+        player,
+        position: index + 1,
+        isTiedWithPrev,
+      };
+    });
+  }, [room?.players]);
+
+  // Reset placement delta history whenever a new match/game begins
+  useEffect(() => {
+    if (
+      !room ||
+      room.status === 'SETUP' ||
+      room.status === 'LOBBY' ||
+      room.status === 'BRIEFING' ||
+      room.status === 'COUNTDOWN'
+    ) {
+      prevRankMapRef.current = {};
+      setRankShifts({});
+      if (rankShiftTimerRef.current) {
+        clearTimeout(rankShiftTimerRef.current);
+        rankShiftTimerRef.current = null;
+      }
+    }
+  }, [room?.status, room?.selectedGameId]);
+
+  // Detect real-time placement changes (▲ climbed / ▼ dropped) during active play
+  useEffect(() => {
+    if (!room || (room.status !== 'PLAYING' && room.status !== 'PAUSED' && room.status !== 'RESULTS')) {
+      return;
+    }
+    const prevMap = prevRankMapRef.current;
+    const nextMap: Record<string, number> = {};
+    const changed: Record<string, number> = {};
+    let hasChange = false;
+
+    for (const entry of rankedLivePlayers) {
+      const pid = entry.player.id;
+      nextMap[pid] = entry.position;
+      const prevPos = prevMap[pid];
+      if (prevPos !== undefined && prevPos !== entry.position) {
+        changed[pid] = prevPos - entry.position; // > 0 climbed up, < 0 dropped down
+        hasChange = true;
+      }
+    }
+    prevRankMapRef.current = nextMap;
+
+    if (hasChange) {
+      setRankShifts((prev) => ({ ...prev, ...changed }));
+      if (rankShiftTimerRef.current) clearTimeout(rankShiftTimerRef.current);
+      rankShiftTimerRef.current = setTimeout(() => {
+        setRankShifts({});
+        rankShiftTimerRef.current = null;
+      }, 2200);
+    }
+  }, [rankedLivePlayers, room?.status]);
+
+  useEffect(() => {
+    return () => {
+      if (rankShiftTimerRef.current) {
+        clearTimeout(rankShiftTimerRef.current);
+        rankShiftTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleLeaveHost = () => {
     sessionStorage.removeItem(HOST_SESSION_KEY);
     onExit();
@@ -739,7 +890,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const selectedGame = getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang);
   const joinUrl = getJoinUrl(room.code, lang);
   const displayJoinHost =
-    typeof window !== 'undefined' ? `${window.location.host}` : 'joinstick.arcade';
+    typeof window !== 'undefined' ? `${window.location.host}` : 'cloocade.party';
   const humans = room.players.filter((p) => !p.isBot);
   const connectedHumans = humans.filter((p) => p.connected);
   const bots = room.players.filter((p) => p.isBot);
@@ -776,230 +927,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       </button>
     ) : null;
 
-  const isCardGameSelected =
-    room.selectedGameId === 'color-clash' || room.selectedGameId === 'liars-deck';
-  const totalSessionMatches = room.players.reduce(
-    (max, p) => Math.max(max, p.matchStats?.matchesPlayed ?? 0),
-    0
-  );
-  const totalSessionActions = room.players.reduce(
-    (sum, p) => sum + (p.matchStats?.totalActions ?? 0),
-    0
-  );
-  const totalCardActions = room.players.reduce(
-    (sum, p) => sum + (p.matchStats?.cardActions ?? 0),
-    0
-  );
-  const playersWithCardResp = room.players.filter(
-    (p) =>
-      p.matchStats?.avgCardResponseMs !== null &&
-      p.matchStats?.avgCardResponseMs !== undefined &&
-      (p.matchStats?.cardResponses ?? 0) > 0
-  );
-  const roomAvgCardResponseMs =
-    playersWithCardResp.length > 0
-      ? Math.round(
-          playersWithCardResp.reduce((sum, p) => sum + (p.matchStats?.avgCardResponseMs ?? 0), 0) /
-            playersWithCardResp.length
-        )
-      : null;
-
-  const sortedStatsPlayers = [...room.players].sort((a, b) => {
-    const winsDiff = (b.matchStats?.wins ?? 0) - (a.matchStats?.wins ?? 0);
-    if (winsDiff !== 0) return winsDiff;
-    const actionsA = isCardGameSelected
-      ? a.matchStats?.cardActions ?? 0
-      : a.matchStats?.totalActions ?? 0;
-    const actionsB = isCardGameSelected
-      ? b.matchStats?.cardActions ?? 0
-      : b.matchStats?.totalActions ?? 0;
-    if (actionsB !== actionsA) return actionsB - actionsA;
-    if (b.score !== a.score) return b.score - a.score;
-    return a.slotIndex - b.slotIndex;
-  });
-
-  // Persistent Match Statistics Overlay (tracks Wins, Total Actions, and Avg Response Time during Card Games)
-  const persistentMatchStatsOverlay =
-    room.players.length > 0 ? (
-      <div
-        className={`fixed z-30 transition-all ${
-          room.status === 'LOBBY'
-            ? 'bottom-18 right-3 sm:right-4'
-            : 'bottom-3 right-3 sm:bottom-4 sm:right-4'
-        } ${matchStatsExpanded ? 'w-[320px] sm:w-[376px]' : 'w-auto'}`}
-      >
-        <div className="rounded-2xl bg-[#11141C]/94 backdrop-blur-md border border-[#2B3344] shadow-[0_14px_34px_rgba(0,0,0,0.62)] overflow-hidden">
-          {/* Header / Toggle Bar */}
-          <button
-            type="button"
-            onClick={() => setMatchStatsExpanded((v) => !v)}
-            className="w-full px-3.5 py-2.5 bg-[#161A24] hover:bg-[#1C212E] border-b border-[#252C3B] flex items-center justify-between gap-2.5 text-left transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-[#00C2FF]/15 border border-[#00C2FF]/40 text-[#00C2FF] flex items-center justify-center shrink-0">
-                <BarChart3 className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="font-display text-xs sm:text-[13px] font-extrabold text-white truncate flex items-center gap-1.5">
-                  <span>{t('Match Statistics', '对局数据统计')}</span>
-                  {isCardGameSelected && (
-                    <span className="text-[10px] font-mono font-bold text-[#10D98B]">
-                      · {t('CARD LIVE', '卡牌实时')}
-                    </span>
-                  )}
-                </div>
-                <div className="text-[10px] text-[#9CA3AF] font-mono tabular-nums truncate">
-                  {t('Matches', '场次')} {totalSessionMatches} ·{' '}
-                  {isCardGameSelected ? t('Card Acts', '卡牌操作') : t('Actions', '总操作')}{' '}
-                  {isCardGameSelected ? totalCardActions : totalSessionActions} ·{' '}
-                  {t('Avg Resp', '平均响应')} {formatResponseTime(roomAvgCardResponseMs)}
-                </div>
-              </div>
-            </div>
-
-            <span className="h-6 w-6 rounded-md bg-[#242A36] text-[#D1D5DB] flex items-center justify-center shrink-0">
-              {matchStatsExpanded ? (
-                <ChevronDown className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronUp className="w-3.5 h-3.5" />
-              )}
-            </span>
-          </button>
-
-          {/* Expanded Telemetry Table */}
-          {matchStatsExpanded && (
-            <div className="p-2.5 sm:p-3 space-y-2">
-              {/* Column Headers */}
-              <div className="grid grid-cols-12 items-center px-2 text-[10px] font-bold text-[#9CA3AF]">
-                <div className="col-span-5">{t('Player', '玩家')}</div>
-                <div className="col-span-2 text-right">{t('Wins', '胜场')}</div>
-                <div className="col-span-2 text-right">{t('Actions', '操作')}</div>
-                <div className="col-span-3 text-right">{t('Avg Resp', '平均响应')}</div>
-              </div>
-
-              {/* Player Performance Rows */}
-              <div className="space-y-1 max-h-[196px] overflow-y-auto arcade-scrollbar pr-0.5">
-                {sortedStatsPlayers.map((p) => {
-                  const st = p.matchStats ?? {
-                    wins: 0,
-                    cardWins: 0,
-                    matchesPlayed: 0,
-                    totalActions: 0,
-                    cardActions: 0,
-                    cardResponses: 0,
-                    totalCardResponseMs: 0,
-                    avgCardResponseMs: null,
-                    lastCardResponseMs: null,
-                    fastestCardResponseMs: null,
-                  };
-                  const isOnCardClock =
-                    room.status === 'PLAYING' &&
-                    isCardGameSelected &&
-                    ((room.selectedGameId === 'color-clash' &&
-                      liveTurnInfo.activePlayerId === p.id) ||
-                      (room.selectedGameId === 'liars-deck' &&
-                        ((liveTurnInfo.phase === 'selecting' &&
-                          liveTurnInfo.activePlayerId === p.id) ||
-                          (liveTurnInfo.phase === 'challenge' &&
-                            liveTurnInfo.lastClaimPlayerId !== p.id))));
-
-                  const actionCount = isCardGameSelected ? st.cardActions : st.totalActions;
-                  const respColor =
-                    st.avgCardResponseMs === null
-                      ? 'text-[#6B7280]'
-                      : st.avgCardResponseMs <= 2200
-                      ? 'text-[#10D98B]'
-                      : st.avgCardResponseMs <= 4800
-                      ? 'text-[#00C2FF]'
-                      : 'text-[#FFB800]';
-
-                  return (
-                    <div
-                      key={p.id}
-                      className={`grid grid-cols-12 items-center px-2 py-1.5 rounded-xl border text-xs transition-colors ${
-                        isOnCardClock
-                          ? 'bg-[#102421] border-[#10D98B]/60'
-                          : 'bg-[#161A23] border-[#232A38]'
-                      }`}
-                    >
-                      {/* Player Name + Active Turn Clock */}
-                      <div className="col-span-5 flex items-center gap-1.5 min-w-0 pr-1">
-                        <span
-                          className="w-5 h-5 rounded font-mono text-[10px] font-black flex items-center justify-center shrink-0"
-                          style={{
-                            backgroundColor: p.color.hex,
-                            color: p.color.textOnColor,
-                          }}
-                        >
-                          P{p.slotIndex + 1}
-                        </span>
-                        {p.isBot && <Bot className="w-3 h-3 text-[#00C2FF] shrink-0" />}
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-white text-[11px] truncate">
-                            {p.name}
-                          </div>
-                          {isOnCardClock && (
-                            <div className="text-[9px] font-mono font-bold text-[#10D98B] inline-flex items-center gap-0.5 tabular-nums">
-                              <Clock className="w-2.5 h-2.5" />
-                              <span>
-                                {t('Turn', '思考')} {liveTurnInfo.turnElapsedSec.toFixed(1)}s
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Wins */}
-                      <div className="col-span-2 text-right font-mono tabular-nums">
-                        <span className="font-extrabold text-[#FFB800] text-xs">
-                          {st.wins}
-                        </span>
-                        {st.cardWins > 0 && (
-                          <div className="text-[9px] text-[#9CA3AF]">
-                            {t(`Card ${st.cardWins}`, `卡牌 ${st.cardWins}`)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Total Actions */}
-                      <div className="col-span-2 text-right font-mono tabular-nums">
-                        <span className="font-bold text-white text-xs">{actionCount}</span>
-                        {!isCardGameSelected && st.cardActions > 0 && (
-                          <div className="text-[9px] text-[#00C2FF]">
-                            {t(`Card ${st.cardActions}`, `牌 ${st.cardActions}`)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Avg Response Time during Card Games */}
-                      <div className="col-span-3 text-right font-mono tabular-nums">
-                        <div className={`font-extrabold text-xs ${respColor}`}>
-                          {formatResponseTime(st.avgCardResponseMs)}
-                        </div>
-                        {st.lastCardResponseMs !== null ? (
-                          <div className="text-[9px] text-[#9CA3AF]">
-                            {t('Last', '最近')} {formatResponseTime(st.lastCardResponseMs)}
-                          </div>
-                        ) : (
-                          <div className="text-[9px] text-[#6B7280]">
-                            {t('Card Avg', '卡牌均时')}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    ) : null;
-
-  // Shared floating Kahoot-style live reaction overlay + Host Transfer / Lock Toast + Persistent Match Statistics
+  // Shared floating Kahoot-style live reaction overlay + Host Transfer / Lock Toast
   const floatingEmoteOverlay = (
     <>
-      {persistentMatchStatsOverlay}
       <div className="pointer-events-none fixed inset-0 overflow-hidden z-40">
         <AnimatePresence>
           {floatingEmotes.map((item) => (
@@ -1122,7 +1052,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 {t('Home', '首页')}
               </button>
               <span className="font-display text-sm sm:text-lg font-extrabold text-white truncate">
-                {t('JoinStick Party Stage', 'JoinStick 派对舞台')}
+                {t('Cloocade Party Stage', 'Cloocade Party 派对舞台')}
               </span>
               <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF] shrink-0">
                 <span
@@ -1550,7 +1480,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         <header className="h-14 border-b border-[#242934] bg-[#151820] px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4 shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
             <span className="font-display text-base sm:text-lg font-extrabold text-white truncate">
-              {t('JoinStick Game Room', 'JoinStick 游戏厅')}
+              {t('Cloocade Party Game Room', 'Cloocade Party 游戏厅')}
             </span>
             <span className="text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
               PIN <strong className="text-white">{room.code}</strong> · {room.players.length}/
@@ -1595,24 +1525,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             )}
           </div>
 
-          {/* Passive Display Utilities Only (Audio Unlock, Language, Match Stats, Fullscreen, Audio, Test Pad) */}
+          {/* Passive Display Utilities Only (Audio Unlock, Language, Fullscreen, Audio, Test Pad) */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {audioUnlockButton}
             <LanguageToggle compact className="h-9" />
-
-            <button
-              type="button"
-              onClick={() => setMatchStatsExpanded((v) => !v)}
-              title={t('Toggle Match Statistics Overlay', '展开/收起对局数据统计')}
-              className={`h-9 px-2.5 xl:px-3 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                matchStatsExpanded
-                  ? 'bg-[#00C2FF]/20 border border-[#00C2FF]/55 text-[#00C2FF]'
-                  : 'bg-[#242A36] hover:bg-[#2E3646] text-white'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">{t('Stats', '数据统计')}</span>
-            </button>
 
             <button
               type="button"
@@ -1726,81 +1642,266 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               </div>
             </div>
 
-            {/* Row 1..N: Responsive Cartridge Grid (2 cols on tablet portrait, 3 on tablet landscape, 4 on wide desktop) */}
-            <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar pr-2 py-1">
-              <div
-                ref={gamesGridRef}
-                className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-3.5"
-              >
-                {visibleGames.map((game, idx) => {
-                  const isSelected = room.selectedGameId === game.id;
-                  const isRemoteFocused = focus.zone === 'games' && focus.index === idx;
-                  return (
+            {/* Single-Card 3D Flip Game Selector (1 game card at a time; Left/Right flips to prev/next) */}
+            {(() => {
+              const totalVisible = visibleGames.length;
+              const currentIdx = Math.max(
+                0,
+                visibleGames.findIndex((g) => g.id === room.selectedGameId)
+              );
+              const activeCardGame = visibleGames[currentIdx] ?? selectedGame;
+              const prevCardGame =
+                totalVisible > 1
+                  ? visibleGames[(currentIdx - 1 + totalVisible) % totalVisible]
+                  : null;
+              const nextCardGame =
+                totalVisible > 1 ? visibleGames[(currentIdx + 1) % totalVisible] : null;
+              const isCardFocused = focus.zone === 'games';
+              const activeGenre = getGameGenre(activeCardGame.id);
+
+              const stepGameCard = (dir: 1 | -1) => {
+                if (totalVisible <= 1) return;
+                const nextIdx = (currentIdx + dir + totalVisible) % totalVisible;
+                const target = visibleGames[nextIdx];
+                if (!target) return;
+                setCardFlipDir(dir);
+                handleSelectGame(target.id);
+              };
+
+              return (
+                <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 sm:gap-4 px-1 sm:px-2 overflow-hidden">
+                  <div className="w-full max-w-[820px] flex items-center justify-center gap-2.5 sm:gap-5">
+                    {/* Left / Previous Flip Button */}
                     <button
-                      key={game.id}
-                      ref={isRemoteFocused ? focusedGameBtnRef : undefined}
                       type="button"
-                      onClick={() =>
-                        guardHostOnlyClick(() => handleSelectGame(game.id))
+                      onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
+                      disabled={totalVisible <= 1}
+                      aria-label={t('Previous game', '上一个游戏')}
+                      title={
+                        prevCardGame
+                          ? t(`Previous: ${prevCardGame.name}`, `上一个：${prevCardGame.name}`)
+                          : t('Previous game', '上一个游戏')
                       }
-                      className={`relative text-left rounded-xl overflow-hidden border-2 transition-all flex flex-col ${
-                        isRemoteFocused
-                          ? `bg-[#242A36] ${tvFocusRing}`
-                          : isSelected
-                          ? 'bg-[#202633] border-white/75'
-                          : 'bg-[#1A1E26] border-[#282E3B]'
-                      } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer hover:border-[#3A4356]'}`}
+                      className={`tactile-btn group/nav w-11 h-16 sm:w-14 sm:h-24 rounded-2xl bg-[#1A1E26] border-2 border-[#2D3546] text-white flex flex-col items-center justify-center gap-1 shadow-lg transition-all shrink-0 disabled:opacity-35 ${
+                        isScreenRemoteLocked
+                          ? 'cursor-default'
+                          : 'hover:bg-[#232937] hover:border-[#00C2FF]/70 active:scale-95 cursor-pointer'
+                      }`}
                     >
-                      <div className="relative aspect-video w-full bg-[#101217]">
-                        {!failedImages[game.id] ? (
-                          <img
-                            src={game.coverImage}
-                            alt={game.name}
-                            loading="lazy"
-                            decoding="async"
-                            referrerPolicy="no-referrer"
-                            onError={() =>
-                              setFailedImages((prev) => ({ ...prev, [game.id]: true }))
-                            }
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-[#181C24]">
-                            <Gamepad2 className="w-6 h-6" style={{ color: game.accentHex }} />
-                          </div>
-                        )}
-                        <span
-                          className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded font-mono text-[9px] font-extrabold uppercase tracking-wider shadow ${
-                            getGameGenre(game.id) === 'board'
-                              ? 'bg-[#A855F7]/90 text-white'
-                              : getGameGenre(game.id) === 'card'
-                              ? 'bg-[#10D98B]/90 text-[#071710]'
-                              : 'bg-[#101217]/85 text-[#00C2FF] border border-[#00C2FF]/35'
-                          }`}
-                        >
-                          {getLocalizedFilterLabel(getGameGenre(game.id), lang, true)}
-                        </span>
-                        {isRemoteFocused && (
-                          <span className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-md bg-[#FFB800] text-[#14120B] font-mono text-[10px] font-black shadow">
-                            OK
-                          </span>
-                        )}
-                      </div>
-                      <div className="p-2.5 sm:p-3 flex-1 flex flex-col justify-between">
-                        <div>
-                          <div className="text-[10px] font-medium text-[#9CA3AF] truncate">
-                            {game.category} · {game.playerModeLabel}
-                          </div>
-                          <div className="font-display font-bold text-sm text-white mt-0.5 truncate">
-                            {game.name}
-                          </div>
-                        </div>
-                      </div>
+                      <ChevronLeft className="w-6 h-6 sm:w-7 sm:h-7 text-[#00C2FF] transition-transform group-hover/nav:-translate-x-0.5" />
+                      <span className="text-[10px] font-mono font-bold text-[#9CA3AF] hidden sm:inline">
+                        {t('PREV', '上一款')}
+                      </span>
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+
+                    {/* 3D Flip Deck Showcase Stage */}
+                    <div
+                      className="relative flex-1 max-w-[600px] min-w-0 py-2"
+                      style={{ perspective: '1400px' }}
+                    >
+                      {/* Subtle Back-Deck Peek Cards (Left & Right) */}
+                      {prevCardGame && (
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          aria-hidden="true"
+                          onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
+                          className={`hidden sm:block absolute inset-y-6 -left-3 w-12 rounded-2xl bg-[#161A22] border border-[#2A3140] -rotate-3 opacity-70 transition-opacity ${
+                            isScreenRemoteLocked
+                              ? 'pointer-events-none'
+                              : 'hover:opacity-95 cursor-pointer'
+                          }`}
+                        />
+                      )}
+                      {nextCardGame && (
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          aria-hidden="true"
+                          onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
+                          className={`hidden sm:block absolute inset-y-6 -right-3 w-12 rounded-2xl bg-[#161A22] border border-[#2A3140] rotate-3 opacity-70 transition-opacity ${
+                            isScreenRemoteLocked
+                              ? 'pointer-events-none'
+                              : 'hover:opacity-95 cursor-pointer'
+                          }`}
+                        />
+                      )}
+
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={`${room.lobbyFilter}-${activeCardGame.id}`}
+                          initial={{
+                            rotateY: cardFlipDir > 0 ? 86 : -86,
+                            opacity: 0,
+                            scale: 0.92,
+                          }}
+                          animate={{
+                            rotateY: 0,
+                            opacity: 1,
+                            scale: 1,
+                          }}
+                          exit={{
+                            rotateY: cardFlipDir > 0 ? -86 : 86,
+                            opacity: 0,
+                            scale: 0.92,
+                          }}
+                          transition={{
+                            duration: 0.24,
+                            ease: [0.22, 1, 0.36, 1],
+                          }}
+                          style={{
+                            transformStyle: 'preserve-3d',
+                            backfaceVisibility: 'hidden',
+                          }}
+                          onMouseEnter={() => setLobbyCardHovered(true)}
+                          onMouseLeave={() => setLobbyCardHovered(false)}
+                          onClick={() =>
+                            guardHostOnlyClick(() => {
+                              if (canStartMatch) {
+                                handleStartMatch();
+                              } else {
+                                handleSelectGame(activeCardGame.id);
+                              }
+                            })
+                          }
+                          className={`relative z-10 w-full rounded-2xl sm:rounded-3xl overflow-hidden border-2 bg-[#1A1E26] shadow-[0_22px_54px_rgba(0,0,0,0.62)] transition-colors ${
+                            isCardFocused
+                              ? tvFocusRing
+                              : 'border-[#333C4F] hover:border-[#00C2FF]/65'
+                          } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
+                        >
+                          {/* Large Hero Artwork Thumbnail + 5-Second Live Gameplay Hover Video */}
+                          <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
+                            <GameHoverPreview
+                              gameId={activeCardGame.id}
+                              gameName={activeCardGame.name}
+                              accentHex={activeCardGame.accentHex}
+                              fallbackSrc={activeCardGame.coverImage}
+                              alt={activeCardGame.name}
+                              active={lobbyCardHovered}
+                              eager
+                              timecodePosition="bottom-right"
+                              className="w-full h-full object-cover"
+                            />
+
+                            {/* Genre Label Top-Left */}
+                            <span
+                              className={`pointer-events-none absolute top-3 left-3 z-10 px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold uppercase tracking-wider shadow-md ${
+                                activeGenre === 'board'
+                                  ? 'bg-[#A855F7]/92 text-white'
+                                  : activeGenre === 'card'
+                                  ? 'bg-[#10D98B]/92 text-[#071710]'
+                                  : 'bg-[#101217]/88 text-[#00C2FF] border border-[#00C2FF]/45'
+                              }`}
+                            >
+                              {getLocalizedFilterLabel(activeGenre, lang, true)}
+                            </span>
+
+                            {/* Deck Position Counter & TV OK Badge Top-Right */}
+                            <div className="pointer-events-none absolute top-3 right-3 z-10 flex items-center gap-1.5">
+                              <span className="px-2.5 py-1 rounded-lg bg-[#0D1017]/85 backdrop-blur-xs border border-white/15 font-mono text-[11px] font-bold text-white tabular-nums shadow">
+                                {String(currentIdx + 1).padStart(2, '0')} /{' '}
+                                {String(Math.max(1, totalVisible)).padStart(2, '0')}
+                              </span>
+                              {isCardFocused && (
+                                <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-mono text-[11px] font-black shadow">
+                                  OK
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#1A1E26] to-transparent" />
+                          </div>
+
+                          {/* Card Body Details */}
+                          <div className="px-4 sm:px-6 pb-4 sm:pb-5 pt-2">
+                            <div className="flex items-center justify-between gap-2 text-xs text-[#9CA3AF]">
+                              <span className="truncate font-semibold">
+                                {activeCardGame.category} · {activeCardGame.playerModeLabel}
+                              </span>
+                              <span
+                                className="font-mono text-[11px] font-bold shrink-0"
+                                style={{ color: activeCardGame.accentHex }}
+                              >
+                                {activeSettingOpt?.label ?? room.gameSettingValue}
+                              </span>
+                            </div>
+
+                            <h2 className="mt-1 font-display text-2xl sm:text-3xl font-extrabold text-white truncate">
+                              {activeCardGame.name}
+                            </h2>
+
+                            <p className="mt-1.5 text-xs sm:text-sm text-[#B8C0CE] line-clamp-2 leading-relaxed">
+                              {activeCardGame.description}
+                            </p>
+                          </div>
+                        </motion.div>
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Right / Next Flip Button */}
+                    <button
+                      type="button"
+                      onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
+                      disabled={totalVisible <= 1}
+                      aria-label={t('Next game', '下一个游戏')}
+                      title={
+                        nextCardGame
+                          ? t(`Next: ${nextCardGame.name}`, `下一个：${nextCardGame.name}`)
+                          : t('Next game', '下一个游戏')
+                      }
+                      className={`tactile-btn group/nav w-11 h-16 sm:w-14 sm:h-24 rounded-2xl bg-[#1A1E26] border-2 border-[#2D3546] text-white flex flex-col items-center justify-center gap-1 shadow-lg transition-all shrink-0 disabled:opacity-35 ${
+                        isScreenRemoteLocked
+                          ? 'cursor-default'
+                          : 'hover:bg-[#232937] hover:border-[#00C2FF]/70 active:scale-95 cursor-pointer'
+                      }`}
+                    >
+                      <ChevronRight className="w-6 h-6 sm:w-7 sm:h-7 text-[#00C2FF] transition-transform group-hover/nav:translate-x-0.5" />
+                      <span className="text-[10px] font-mono font-bold text-[#9CA3AF] hidden sm:inline">
+                        {t('NEXT', '下一款')}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Compact Adjacent Preview + Deck Progress Bar */}
+                  {totalVisible > 1 && (
+                    <div className="w-full max-w-[600px] flex items-center justify-between gap-3 px-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => guardHostOnlyClick(() => stepGameCard(-1))}
+                        className={`text-[#9CA3AF] inline-flex items-center gap-1 truncate max-w-[36%] transition-colors ${
+                          isScreenRemoteLocked ? 'cursor-default' : 'hover:text-white cursor-pointer'
+                        }`}
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{prevCardGame?.name}</span>
+                      </button>
+
+                      <div className="flex-1 max-w-[160px] h-1.5 rounded-full bg-[#242A36] overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-200"
+                          style={{
+                            width: `${((currentIdx + 1) / totalVisible) * 100}%`,
+                            backgroundColor: activeCardGame.accentHex,
+                          }}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => guardHostOnlyClick(() => stepGameCard(1))}
+                        className={`text-[#9CA3AF] inline-flex items-center justify-end gap-1 truncate max-w-[36%] transition-colors ${
+                          isScreenRemoteLocked ? 'cursor-default' : 'hover:text-white cursor-pointer'
+                        }`}
+                      >
+                        <span className="truncate">{nextCardGame?.name}</span>
+                        <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </section>
 
           {/* RIGHT PANEL (5 cols tablet portrait / 4 cols landscape): Spotlight + Live Ready Check */}
@@ -2248,21 +2349,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
           <button
             type="button"
-            onClick={() => setMatchStatsExpanded((v) => !v)}
-            title={t('Toggle Match Statistics', '展开/收起对局统计')}
-            aria-label={t('Toggle Match Statistics', '展开/收起对局统计')}
-            className={`h-8 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              matchStatsExpanded
-                ? 'bg-[#00C2FF]/20 border border-[#00C2FF]/55 text-[#00C2FF]'
-                : 'bg-[#242A36] hover:bg-[#2E3646] text-white'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">{t('Stats', '统计')}</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setTestDrawerOpen((v) => !v)}
             title={t('Test Pad', '测试手柄')}
             aria-label={t('Test Pad', '测试手柄')}
@@ -2338,71 +2424,122 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         </div>
       </header>
 
-      {/* Redesigned Always-Visible Live Game Stats Bar (Visible across ALL screen sizes for every game!) */}
+      {/* Real-Time Placement Leaderboard Top Bar (Smoothly reorders live according to game points) */}
       {(() => {
-        const maxLiveScore = room.players.reduce((m, p) => Math.max(m, p.score), 0);
+        const maxLiveScore = rankedLivePlayers.reduce(
+          (m, entry) => Math.max(m, entry.player.score),
+          0
+        );
         return (
           <div className="border-b border-[#242934] bg-[#10131A]/95 px-2.5 sm:px-5 py-1.5 shrink-0">
-            <div className="max-w-[1440px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap items-center justify-center gap-1.5 sm:gap-2">
-              {room.players.map((p) => {
-                const isLeader = maxLiveScore > 0 && p.score === maxLiveScore;
-                const isTurnActive =
-                  room.status === 'PLAYING' && liveTurnInfo.activePlayerId === p.id;
-                return (
-                  <div
-                    key={p.id}
-                    className={`px-2.5 py-1 rounded-lg border flex items-center justify-between lg:justify-start gap-2 text-xs whitespace-nowrap transition-all ${
-                      !p.alive
-                        ? 'bg-[#14171F]/60 border-[#222733] opacity-50'
-                        : isTurnActive
-                        ? 'bg-[#102622] border-[#10D98B] shadow-[0_0_12px_rgba(16,217,139,0.22)]'
-                        : isLeader
-                        ? 'bg-[#221D11] border-[#FFB800]/65'
-                        : 'bg-[#171B24] border-[#262D3D]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span
-                        className="w-5 h-5 rounded font-mono text-[10px] font-black flex items-center justify-center shrink-0"
-                        style={{
-                          backgroundColor: p.color.hex,
-                          color: p.color.textOnColor,
-                        }}
-                      >
-                        P{p.slotIndex + 1}
-                      </span>
-                      {p.isBot && <Bot className="w-3 h-3 text-[#00C2FF] shrink-0" />}
-                      {isLeader && <Crown className="w-3 h-3 text-[#FFB800] shrink-0" />}
-                      <span className="font-bold text-white truncate max-w-[82px] sm:max-w-[112px]">
-                        {p.name}
-                      </span>
-                      {!p.isBot && !p.connected && (
-                        <span className="text-[10px] font-bold text-[#FFB800]">
-                          ({t('Offline', '离线')})
-                        </span>
-                      )}
-                    </div>
+            <LayoutGroup id="live-top-bar-standings">
+              <div className="max-w-[1440px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+                {rankedLivePlayers.map(({ player: p, position }) => {
+                  const isLeader = maxLiveScore > 0 && p.score === maxLiveScore;
+                  const isTurnActive =
+                    room.status === 'PLAYING' && liveTurnInfo.activePlayerId === p.id;
+                  const shift = rankShifts[p.id] ?? 0;
+                  const rankBadgeClass =
+                    position === 1 && maxLiveScore > 0
+                      ? 'bg-[#FFB800] text-[#14120B]'
+                      : position === 2 && maxLiveScore > 0
+                      ? 'bg-[#CBD5E1] text-[#0F172A]'
+                      : position === 3 && maxLiveScore > 0
+                      ? 'bg-[#D97742] text-[#1A0F08]'
+                      : 'bg-[#222836] text-[#9CA3AF]';
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span aria-hidden="true" className="text-[#4B5563] hidden lg:inline">
-                        ·
-                      </span>
-                      <span
-                        className={`font-mono text-[11px] sm:text-xs font-extrabold tabular-nums ${
-                          isTurnActive
-                            ? 'text-[#10D98B]'
-                            : isLeader
-                            ? 'text-[#FFB800]'
-                            : 'text-[#00C2FF]'
-                        }`}
-                      >
-                        {translateGameText(p.statText, lang)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  const statLabel = translateGameText(p.statText, lang);
+                  const statAlreadyShowsScore =
+                    p.score > 0 && statLabel.includes(String(p.score));
+
+                  return (
+                    <motion.div
+                      key={p.id}
+                      layout="position"
+                      transition={{ type: 'spring', stiffness: 460, damping: 34 }}
+                      className={`px-2 sm:px-2.5 py-1 rounded-lg border flex items-center justify-between lg:justify-start gap-1.5 sm:gap-2 text-xs whitespace-nowrap transition-colors ${
+                        !p.alive
+                          ? 'bg-[#14171F]/60 border-[#222733] opacity-50'
+                          : shift > 0
+                          ? 'bg-[#102820] border-[#10D98B] shadow-[0_0_14px_rgba(16,217,139,0.28)]'
+                          : isTurnActive
+                          ? 'bg-[#102622] border-[#10D98B] shadow-[0_0_12px_rgba(16,217,139,0.22)]'
+                          : isLeader
+                          ? 'bg-[#221D11] border-[#FFB800]/75 shadow-[0_0_12px_rgba(255,184,0,0.18)]'
+                          : 'bg-[#171B24] border-[#262D3D]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {/* Real-Time Placement Rank (#1, #2, #3...) */}
+                        <span
+                          className={`min-w-[22px] h-5 px-1 rounded font-mono text-[10px] font-black inline-flex items-center justify-center gap-0.5 tabular-nums shrink-0 ${rankBadgeClass}`}
+                        >
+                          {position === 1 && maxLiveScore > 0 && (
+                            <Crown className="w-2.5 h-2.5 shrink-0" />
+                          )}
+                          <span>#{position}</span>
+                        </span>
+
+                        {/* Live Placement Shift Flash (▲ climbed / ▼ dropped) */}
+                        {shift !== 0 && (
+                          <motion.span
+                            key={`${p.id}-shift-${position}`}
+                            initial={{ opacity: 0, y: shift > 0 ? 5 : -5, scale: 0.75 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            className={`font-mono text-[10px] font-black leading-none shrink-0 ${
+                              shift > 0 ? 'text-[#10D98B]' : 'text-[#FF6B52]'
+                            }`}
+                          >
+                            {shift > 0 ? `▲${shift}` : `▼${Math.abs(shift)}`}
+                          </motion.span>
+                        )}
+
+                        <span
+                          className="w-5 h-5 rounded font-mono text-[10px] font-black flex items-center justify-center shrink-0"
+                          style={{
+                            backgroundColor: p.color.hex,
+                            color: p.color.textOnColor,
+                          }}
+                        >
+                          P{p.slotIndex + 1}
+                        </span>
+                        {p.isBot && <Bot className="w-3 h-3 text-[#00C2FF] shrink-0" />}
+                        <span className="font-bold text-white truncate max-w-[74px] sm:max-w-[104px]">
+                          {p.name}
+                        </span>
+                        {!p.isBot && !p.connected && (
+                          <span className="text-[10px] font-bold text-[#FFB800]">
+                            ({t('Offline', '离线')})
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span aria-hidden="true" className="text-[#4B5563] hidden lg:inline">
+                          ·
+                        </span>
+                        <span
+                          className={`font-mono text-[11px] sm:text-xs font-extrabold tabular-nums ${
+                            isTurnActive
+                              ? 'text-[#10D98B]'
+                              : isLeader
+                              ? 'text-[#FFB800]'
+                              : 'text-[#00C2FF]'
+                          }`}
+                        >
+                          {statLabel}
+                        </span>
+                        {p.score > 0 && !statAlreadyShowsScore && (
+                          <span className="font-mono text-[10px] font-bold text-[#9CA3AF] tabular-nums">
+                            ({p.score} {t('pts', '分')})
+                          </span>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </LayoutGroup>
           </div>
         );
       })()}
@@ -2655,21 +2792,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 {/* Header strip with game artwork thumbnail */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 sm:p-5 border-b border-[#262C38] bg-[#151820] shrink-0">
                   <div className="w-full sm:w-36 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
-                    {!failedImages[selectedGame.id] ? (
-                      <img
-                        src={selectedGame.coverImage}
-                        alt={selectedGame.name}
-                        referrerPolicy="no-referrer"
-                        onError={() =>
-                          setFailedImages((prev) => ({ ...prev, [selectedGame.id]: true }))
-                        }
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Gamepad2 className="w-7 h-7" style={{ color: selectedGame.accentHex }} />
-                      </div>
-                    )}
+                    <GameThumbnail
+                      gameId={selectedGame.id}
+                      gameName={selectedGame.name}
+                      accentHex={selectedGame.accentHex}
+                      fallbackSrc={selectedGame.coverImage}
+                      alt={selectedGame.name}
+                      className="w-full h-full object-cover"
+                      eager
+                    />
                   </div>
 
                   <div className="min-w-0 flex-1">

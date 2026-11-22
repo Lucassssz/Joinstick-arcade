@@ -30,7 +30,6 @@ import {
   SlidersHorizontal,
   Target,
   Trophy,
-  Vibrate,
   Waves,
   WifiOff,
   Wind,
@@ -46,6 +45,7 @@ import {
   saveControllerPrefs,
 } from './ControllerSettingsOverlay';
 import {
+  CARD_GAME_IDS,
   filterGamesByPlayerMode,
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
@@ -64,13 +64,6 @@ import {
 } from '../shared/types';
 import { ManagedWebSocket } from '../lib/ws';
 import {
-  controllerHaptics,
-  HapticEventType,
-  HapticIntensity,
-  HapticMode,
-  HapticResult,
-} from '../lib/haptics';
-import {
   getLocalizedDifficulty,
   getLocalizedFilterLabel,
   getLocalizedGameMeta,
@@ -79,26 +72,6 @@ import {
   translateServerMessage,
   useLanguage,
 } from '../lib/i18n';
-
-/**
- * Centralized controller vibration utility backed by `window.navigator.vibrate`.
- * Falls back cleanly to iOS Taptic switch / tactile audio thump via `controllerHaptics`
- * when `window.navigator.vibrate` is unavailable (e.g., iOS WebKit).
- */
-export function vibrate(
-  pattern: number | number[],
-  options?: {
-    fromUserGesture?: boolean;
-    intensity?: HapticIntensity;
-    force?: boolean;
-    skipIosSwitch?: boolean;
-  }
-): HapticResult {
-  return controllerHaptics.trigger(pattern, {
-    ...options,
-    force: options?.force ?? true,
-  });
-}
 
 export interface PhoneControllerProps {
   initialRoomCode?: string;
@@ -151,26 +124,6 @@ function ActionIcon({ icon, className }: { icon: ActionButtonSpec['icon']; class
   }
 }
 
-/**
- * Native HTML `<input type="checkbox" switch>` placed inside a `<label>` button.
- * On iOS 18+ Safari/WebKit, tapping a `<label>` that toggles a native-appearance switch
- * directly triggers the hardware Taptic Engine with a 100% browser-trusted gesture.
- */
-function IosHapticSwitch({ enabled }: { enabled: boolean }) {
-  if (!enabled) return null;
-  return (
-    <input
-      ref={(el) => {
-        if (el) el.setAttribute('switch', '');
-      }}
-      type="checkbox"
-      tabIndex={-1}
-      aria-hidden="true"
-      className="absolute inset-0 w-full h-full opacity-0 pointer-events-none m-0"
-    />
-  );
-}
-
 export function PhoneController({
   initialRoomCode = '',
   defaultName,
@@ -192,11 +145,6 @@ export function PhoneController({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [closedReason, setClosedReason] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [hapticMode, setHapticMode] = useState<HapticMode>(() => controllerHaptics.getMode());
-  const [impactPulse, setImpactPulse] = useState<'none' | 'subtle' | 'light' | 'heavy'>('none');
-  const [tactileCue, setTactileCue] = useState<{ label: string; event: HapticEventType } | null>(
-    null
-  );
   const [passHostOpen, setPassHostOpen] = useState(false);
   const [closeRoomConfirmOpen, setCloseRoomConfirmOpen] = useState(false);
   const [hostToast, setHostToast] = useState<string | null>(null);
@@ -209,18 +157,13 @@ export function PhoneController({
     x: 0,
     y: 0,
   });
-  const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tactileCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDisconnectedRef = useRef<boolean>(false);
   const prevIsHostRef = useRef<boolean>(false);
-  const prevCardDangerRef = useRef<boolean>(false);
   const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastReconnectTapRef = useRef<number>(0);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
   const userExitedPhoneFsRef = useRef<boolean>(false);
-  const stickAtRimRef = useRef<boolean>(false);
-  const lastRimHapticAtRef = useRef<number>(0);
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
     pointerId: number;
@@ -294,76 +237,8 @@ export function PhoneController({
     saveControllerPrefs(clamped);
   };
 
-  const handleSetHapticMode = (nextMode: HapticMode) => {
-    controllerHaptics.setMode(nextMode);
-    setHapticMode(nextMode);
-    const labelText =
-      nextMode === 'forceful'
-        ? t('Haptic Intensity: Forceful', '震动强度：强力 (Forceful)')
-        : nextMode === 'default'
-        ? t('Haptic Intensity: Default', '震动强度：标准 (Default)')
-        : t('Haptic Intensity: Off', '震动强度：已关闭 (Off)');
-    setTactileCue({
-      label: labelText,
-      event: nextMode === 'forceful' ? 'turn-start' : 'host-alert',
-    });
-    if (tactileCueTimerRef.current) clearTimeout(tactileCueTimerRef.current);
-    tactileCueTimerRef.current = setTimeout(() => setTactileCue(null), 1650);
-
-    if (!embedded && nextMode !== 'off') {
-      controllerHaptics.unlock(true);
-      vibrate(nextMode === 'forceful' ? [120, 42, 180] : [42, 28, 60], {
-        fromUserGesture: true,
-        intensity: nextMode === 'forceful' ? 'heavy' : 'medium',
-        force: true,
-      });
-    }
-  };
-
-  const handleCycleHapticMode = () => {
-    const next: HapticMode =
-      hapticMode === 'default' ? 'forceful' : hapticMode === 'forceful' ? 'off' : 'default';
-    handleSetHapticMode(next);
-  };
-
-  const renderHapticModeButton = (compact = false) => {
-    if (embedded) return null;
-    const modeLabel =
-      hapticMode === 'forceful'
-        ? t('Forceful', '强力')
-        : hapticMode === 'default'
-        ? t('Default', '标准')
-        : t('Off', '关');
-    const colorClass =
-      hapticMode === 'forceful'
-        ? 'bg-[#10D98B]/20 border-[#10D98B]/70 text-[#10D98B]'
-        : hapticMode === 'default'
-        ? 'bg-[#00C2FF]/15 border-[#00C2FF]/60 text-[#00C2FF]'
-        : 'bg-[#1E232D] border-[#2F3747] text-[#6B7280]';
-    return (
-      <label
-        role="button"
-        tabIndex={0}
-        onClick={handleCycleHapticMode}
-        aria-label={`${t('Haptic Intensity', '震动强度')}: ${modeLabel}`}
-        title={`${t('Haptic Intensity (Tap to switch Default / Forceful / Off)', '震动强度（点击切换 标准 / 强力 / 关闭）')}: ${modeLabel}`}
-        className={`relative ${
-          compact ? 'min-h-[34px] px-2' : 'h-8 sm:h-9 px-2.5'
-        } rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer select-none transition-colors ${colorClass}`}
-      >
-        <IosHapticSwitch enabled={hapticMode !== 'off'} />
-        <Vibrate className="w-3.5 h-3.5 shrink-0" />
-        <span className="font-mono text-[10px] font-extrabold">{modeLabel}</span>
-      </label>
-    );
-  };
-
   const handleResetControllerPrefs = () => {
     updateControllerPrefs(DEFAULT_CONTROLLER_PREFS);
-    if (!embedded) {
-      controllerHaptics.unlock();
-      vibrate(35, { fromUserGesture: true, intensity: 'light', force: true });
-    }
   };
 
   // Listen to resize, orientationchange, and fullscreen changes
@@ -601,52 +476,18 @@ export function PhoneController({
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [embedded, joinedPlayerId]);
 
-  // Alert player immediately with a warning haptic if connection drops mid-session
+  // Reset controls cleanly if connection drops mid-session
   useEffect(() => {
     const selfPlayer = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
     const isLost = Boolean(joinedPlayerId && room && (!wsConnected || (selfPlayer && !selfPlayer.connected)));
     if (isLost && !wasDisconnectedRef.current) {
       wasDisconnectedRef.current = true;
       resetControlsState();
-      if (!embedded) {
-        vibrate([110, 55, 110], { fromUserGesture: false, intensity: 'heavy', force: true });
-      }
     } else if (!isLost && wasDisconnectedRef.current) {
       wasDisconnectedRef.current = false;
-      if (!embedded) {
-        vibrate(45, { fromUserGesture: false, intensity: 'light' });
-      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsConnected, joinedPlayerId, room, embedded]);
-
-  // Subscribe to global haptic service to synchronize visual tactile edge pulse & host event cues
-  useEffect(() => {
-    if (embedded) return;
-    const CUE_EVENTS = new Set<HapticEventType>([
-      'turn-start',
-      'action-required',
-      'timer-warning',
-      'host-alert',
-      'round-transition',
-      'chaos-wheel',
-      'frenzy-alert',
-    ]);
-    return controllerHaptics.subscribe((notif) => {
-      setImpactPulse(notif.visualPulse);
-      if (impactTimerRef.current) clearTimeout(impactTimerRef.current);
-      const duration =
-        notif.visualPulse === 'heavy' ? 180 : notif.visualPulse === 'light' ? 120 : 90;
-      impactTimerRef.current = setTimeout(() => setImpactPulse('none'), duration);
-
-      const cueText = notif.customLabel || (lang === 'zh' ? notif.labelZh : notif.labelEn);
-      if (cueText && CUE_EVENTS.has(notif.event)) {
-        setTactileCue({ label: cueText, event: notif.event });
-        if (tactileCueTimerRef.current) clearTimeout(tactileCueTimerRef.current);
-        tactileCueTimerRef.current = setTimeout(() => setTactileCue(null), 1550);
-      }
-    });
-  }, [embedded, lang]);
+  }, [wsConnected, joinedPlayerId, room]);
 
   // Notify the player if they inherit Host Remote Control mid-session
   useEffect(() => {
@@ -655,11 +496,6 @@ export function PhoneController({
     prevIsHostRef.current = isHostNow;
 
     if (!wasHost && isHostNow && room && room.status !== 'SETUP') {
-      if (!embedded) {
-        controllerHaptics.triggerEvent('host-alert', [28, 24, 38], {
-          fromUserGesture: false,
-        });
-      }
       setHostToast(
         lang === 'zh'
           ? '你已成为新房主！现在由你使用遥控器控制大屏。'
@@ -668,7 +504,7 @@ export function PhoneController({
       if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
       hostToastTimerRef.current = setTimeout(() => setHostToast(null), 4200);
     }
-  }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang, embedded]);
+  }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang]);
 
   // Keep container/session warm during long controller play sessions
   useEffect(() => {
@@ -746,9 +582,6 @@ export function PhoneController({
               if (!userExitedPhoneFsRef.current) {
                 enterFullscreenAndLandscape();
               }
-              controllerHaptics.triggerEvent('player-ready', [85, 35, 115], {
-                fromUserGesture: false,
-              });
             }
             if (manualReconnectTimerRef.current) {
               clearTimeout(manualReconnectTimerRef.current);
@@ -769,17 +602,6 @@ export function PhoneController({
             setCardState(msg.cardState);
             break;
           case 'player:haptic':
-            if (!embedded) {
-              controllerHaptics.triggerEvent(
-                msg.event || msg.reason || 'impact-medium',
-                msg.pattern,
-                {
-                  fromUserGesture: false,
-                  intensity: msg.intensity,
-                  label: msg.label,
-                }
-              );
-            }
             break;
           case 'room:closed':
             storedPlayerIdRef.current = undefined;
@@ -924,10 +746,6 @@ export function PhoneController({
       return;
     }
     setErrorMsg(null);
-    if (!embedded) {
-      controllerHaptics.unlock();
-      vibrate(45, { fromUserGesture: true, intensity: 'light' });
-    }
     enterFullscreenAndLandscape();
     wsRef.current?.send({
       type: 'room:join',
@@ -967,9 +785,7 @@ export function PhoneController({
 
   const me = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
   const gameMeta = room ? getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang) : null;
-  const isCardGame = Boolean(
-    room && (room.selectedGameId === 'color-clash' || room.selectedGameId === 'liars-deck')
-  );
+  const isCardGame = Boolean(room && CARD_GAME_IDS.has(room.selectedGameId));
   const isCardRedWarning = Boolean(
     isCardGame &&
       room?.status === 'PLAYING' &&
@@ -978,21 +794,7 @@ export function PhoneController({
       cardState.turnTimeLeft <= 5.0
   );
 
-  useEffect(() => {
-    if (isCardRedWarning && !prevCardDangerRef.current && !embedded) {
-      controllerHaptics.triggerEvent('timer-warning', [38, 28, 38], {
-        fromUserGesture: false,
-        label: lang === 'zh' ? '⏱ 回合即将超时！' : '⏱ 5s Left on Turn!',
-      });
-    }
-    prevCardDangerRef.current = isCardRedWarning;
-  }, [isCardRedWarning, embedded, lang]);
-
   const sendCardAction = (action: CardClientAction) => {
-    if (!embedded) {
-      controllerHaptics.unlock();
-      vibrate(32, { fromUserGesture: true, intensity: 'light' });
-    }
     wsRef.current?.send({ type: 'card:action', action });
   };
 
@@ -1019,20 +821,6 @@ export function PhoneController({
     const deadzone = embedded ? 0.08 : activePrefs.deadzone;
     const adjMag = normMag < deadzone ? 0 : (normMag - deadzone) / (1 - deadzone);
 
-    // Physical rim-detent haptic feedback when slamming the joystick against the outer gate
-    if (!embedded) {
-      if (normMag >= 0.94 && !stickAtRimRef.current) {
-        stickAtRimRef.current = true;
-        const now = Date.now();
-        if (now - lastRimHapticAtRef.current > 140) {
-          lastRimHapticAtRef.current = now;
-          vibrate(65, { fromUserGesture: true, intensity: 'light' });
-        }
-      } else if (normMag < 0.78) {
-        stickAtRimRef.current = false;
-      }
-    }
-
     inputRef.current.dx = Math.cos(angle) * adjMag;
     inputRef.current.dy = Math.sin(angle) * adjMag;
     setKnobOffset({ x: ox, y: oy });
@@ -1042,13 +830,8 @@ export function PhoneController({
   const onStickPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (repositionMode || settingsOpen) return;
     if (stickPointerId.current !== null && stickPointerId.current !== e.pointerId) return;
-    // Do NOT call e.preventDefault() here — `.gamepad-surface` uses CSS `touch-action: none`,
-    // and keeping pointerdown non-cancelled allows Android Chrome & iOS Safari to grant sticky
-    // User Activation for hardware vibration and audio unlock!
     if (!embedded) {
       ensureWakeLock();
-      controllerHaptics.unlock();
-      vibrate(42, { fromUserGesture: true, intensity: 'light' });
     }
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1153,8 +936,6 @@ export function PhoneController({
   // --- Multi-touch Action Button Handlers ---
   const onActionDown = (which: 'a' | 'b', e: React.PointerEvent<HTMLElement>) => {
     if (repositionMode || settingsOpen) return;
-    // Do NOT call e.preventDefault() — lets `<label><input switch /></label>` natively trigger
-    // iOS 18 Taptic Engine AND lets Android Chrome grant trusted user activation for navigator.vibrate().
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
@@ -1169,8 +950,6 @@ export function PhoneController({
     }
     if (!embedded) {
       ensureWakeLock();
-      controllerHaptics.unlock();
-      vibrate(65, { fromUserGesture: true, intensity: 'medium' });
     }
     sendCurrentInput(true);
   };
@@ -1207,8 +986,6 @@ export function PhoneController({
 
     if (!embedded) {
       ensureWakeLock();
-      controllerHaptics.unlock();
-      vibrate(45, { fromUserGesture: true, intensity: 'light', force: true });
       fetch('/api/health', { cache: 'no-store' }).catch(() => {});
     }
 
@@ -1249,40 +1026,10 @@ export function PhoneController({
 
     const statusOverlays = (
       <>
-        {!embedded && impactPulse !== 'none' && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-[63] rounded-none transition-opacity duration-75"
-            style={{
-              boxShadow:
-                impactPulse === 'heavy'
-                  ? `inset 0 0 0 4px #FF4D2E, inset 0 0 44px rgba(255, 77, 46, 0.75)`
-                  : impactPulse === 'light'
-                  ? `inset 0 0 0 3px ${selfPlayer?.color.hex ?? '#00C2FF'}, inset 0 0 28px ${selfPlayer?.color.hex ?? '#00C2FF'}88`
-                  : `inset 0 0 0 2px ${selfPlayer?.color.hex ?? '#00C2FF'}99, inset 0 0 18px ${selfPlayer?.color.hex ?? '#00C2FF'}55`,
-            }}
-          />
-        )}
-
         {hostToast && !isConnectionLost && (
           <div className="pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-[65] px-4 py-2 rounded-xl bg-[#FFB800] text-[#14120B] font-display font-extrabold text-xs sm:text-sm shadow-xl inline-flex items-center gap-1.5 whitespace-nowrap">
             <Crown className="w-4 h-4 shrink-0" />
             <span>{hostToast}</span>
-          </div>
-        )}
-
-        {!hostToast && !isConnectionLost && tactileCue && (
-          <div
-            className={`pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-[64] px-3.5 py-1.5 rounded-xl font-display font-extrabold text-[11px] sm:text-xs shadow-lg inline-flex items-center gap-1.5 whitespace-nowrap border backdrop-blur-md transition-opacity ${
-              tactileCue.event === 'turn-start' || tactileCue.event === 'action-required'
-                ? 'bg-[#10D98B]/95 border-[#A7F3D0] text-[#071A12]'
-                : tactileCue.event === 'timer-warning' || tactileCue.event === 'frenzy-alert'
-                ? 'bg-[#FF4D2E]/95 border-[#FFB4A6] text-white'
-                : 'bg-[#1A1E26]/95 border-[#00C2FF]/60 text-[#F4F6FA]'
-            }`}
-          >
-            <Vibrate className="w-3.5 h-3.5 shrink-0 animate-pulse" />
-            <span>{translateGameText(tactileCue.label, lang)}</span>
           </div>
         )}
 
@@ -1364,8 +1111,6 @@ export function PhoneController({
               : undefined
           }
           onClose={() => setSettingsOpen(false)}
-          hapticMode={hapticMode}
-          onHapticModeChange={handleSetHapticMode}
           accentHex={selfPlayer?.color.hex ?? '#00C2FF'}
           actionALabel={gameMeta?.controllerSchema.actionA.label ?? 'A'}
           actionBLabel={gameMeta?.controllerSchema.actionB.label ?? 'B'}
@@ -1460,7 +1205,7 @@ export function PhoneController({
                 {t('Back', '返回')}
               </button>
             ) : (
-              <span className="font-display font-bold text-lg">JoinStick Arcade</span>
+              <span className="font-display font-bold text-lg">Cloocade Party</span>
             )}
             <div className="flex items-center gap-2.5">
               <LanguageToggle compact />
@@ -1612,33 +1357,17 @@ export function PhoneController({
   const sendRemote = (action: RemoteDirection) => {
     if (!isRoomHost) return;
     setErrorMsg(null);
-    if (!embedded) {
-      controllerHaptics.unlock();
-      vibrate(action === 'ok' ? 55 : 24, {
-        fromUserGesture: true,
-        intensity: action === 'ok' ? 'medium' : 'light',
-        force: true,
-      });
-    }
     wsRef.current?.send({ type: 'remote:action', action });
   };
 
   const handlePassHost = (targetPlayerId: string) => {
     if (!isRoomHost) return;
-    if (!embedded) {
-      controllerHaptics.unlock();
-      vibrate([35, 25, 65], { fromUserGesture: true, intensity: 'medium', force: true });
-    }
     wsRef.current?.send({ type: 'room:set-host-player', playerId: targetPlayerId });
     setPassHostOpen(false);
   };
 
   const handleConfirmCloseRoom = () => {
     if (!isRoomHost) return;
-    if (!embedded) {
-      controllerHaptics.unlock();
-      vibrate([65, 35, 95], { fromUserGesture: true, intensity: 'heavy', force: true });
-    }
     setCloseRoomConfirmOpen(false);
     wsRef.current?.send({ type: 'room:close' });
   };
@@ -1822,7 +1551,6 @@ export function PhoneController({
 
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact className="h-9" />}
-            {renderHapticModeButton(false)}
             {!embedded && (
               <button
                 type="button"
@@ -1907,10 +1635,6 @@ export function PhoneController({
                 <button
                   type="button"
                   onClick={() => {
-                    if (!embedded) {
-                      controllerHaptics.unlock();
-                      vibrate(55, { fromUserGesture: true, intensity: 'medium', force: true });
-                    }
                     enterFullscreenAndLandscape();
                     wsRef.current?.send({ type: 'room:enter-game-room' });
                   }}
@@ -1948,10 +1672,6 @@ export function PhoneController({
                 key={emoji}
                 type="button"
                 onClick={() => {
-                  if (!embedded) {
-                    controllerHaptics.unlock();
-                    vibrate(25, { fromUserGesture: true, intensity: 'light', force: true });
-                  }
                   wsRef.current?.send({ type: 'player:emote', emoji });
                 }}
                 className="tactile-btn h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-base flex items-center justify-center cursor-pointer"
@@ -2009,7 +1729,6 @@ export function PhoneController({
 
             <div className="flex items-center gap-1.5 shrink-0">
               {!embedded && <LanguageToggle compact />}
-              {renderHapticModeButton(true)}
               {!embedded && (
                 <button
                   type="button"
@@ -2172,19 +1891,9 @@ export function PhoneController({
               </div>
 
               {/* Host's own Ready Toggle */}
-              <label
-                role="button"
-                tabIndex={0}
+              <button
+                type="button"
                 onClick={() => {
-                  if (!embedded) {
-                    controllerHaptics.unlock();
-                    vibrate(60, {
-                      fromUserGesture: true,
-                      intensity: 'medium',
-                      force: true,
-                      skipIosSwitch: true,
-                    });
-                  }
                   enterFullscreenAndLandscape();
                   setErrorMsg(null);
                   wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
@@ -2204,7 +1913,6 @@ export function PhoneController({
                       }
                 }
               >
-                <IosHapticSwitch enabled={!embedded && hapticMode !== 'off'} />
                 {me.ready && <Check className="w-5 h-5" />}
                 <span>
                   {me.ready
@@ -2213,7 +1921,7 @@ export function PhoneController({
                       : t('You Are Ready!', '你已准备就绪！')
                     : t('Tap to Ready Up', '点击准备')}
                 </span>
-              </label>
+              </button>
 
               {errorMsg && (
                 <p className="text-[11px] text-center text-[#FF9B8A] font-medium leading-snug">
@@ -2242,10 +1950,6 @@ export function PhoneController({
                   key={emoji}
                   type="button"
                   onClick={() => {
-                    if (!embedded) {
-                      controllerHaptics.unlock();
-                      vibrate(25, { fromUserGesture: true, intensity: 'light', force: true });
-                    }
                     wsRef.current?.send({ type: 'player:emote', emoji });
                   }}
                   className="tactile-btn h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-sm flex items-center justify-center cursor-pointer"
@@ -2285,7 +1989,6 @@ export function PhoneController({
 
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact className="h-9" />}
-            {renderHapticModeButton(false)}
             {!embedded && (
               <button
                 type="button"
@@ -2377,19 +2080,9 @@ export function PhoneController({
           </div>
 
           <div className="flex flex-col gap-2.5 justify-center">
-            <label
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={() => {
-                if (!embedded) {
-                  controllerHaptics.unlock();
-                  vibrate(65, {
-                    fromUserGesture: true,
-                    intensity: 'medium',
-                    force: true,
-                    skipIosSwitch: true,
-                  });
-                }
                 enterFullscreenAndLandscape();
                 setErrorMsg(null);
                 wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
@@ -2409,7 +2102,6 @@ export function PhoneController({
                     }
               }
             >
-              <IosHapticSwitch enabled={!embedded && hapticMode !== 'off'} />
               {me.ready && <Check className="w-5 h-5" />}
               <span>
                 {me.ready
@@ -2418,7 +2110,7 @@ export function PhoneController({
                     : t('Ready! Waiting for Others', '已准备！等待其他玩家')
                   : t('Tap to Ready Up', '点击准备')}
               </span>
-            </label>
+            </button>
 
             {errorMsg && (
               <p className="text-[11px] text-center text-[#FF9B8A] leading-snug">
@@ -2435,10 +2127,6 @@ export function PhoneController({
                 key={emoji}
                 type="button"
                 onClick={() => {
-                  if (!embedded) {
-                    controllerHaptics.unlock();
-                    vibrate(25, { fromUserGesture: true, intensity: 'light', force: true });
-                  }
                   wsRef.current?.send({ type: 'player:emote', emoji });
                 }}
                 className="tactile-btn h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-base flex items-center justify-center cursor-pointer"
@@ -2705,7 +2393,6 @@ export function PhoneController({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact />}
-            {renderHapticModeButton(true)}
             {!embedded && (
               <button
                 type="button"
@@ -2772,19 +2459,9 @@ export function PhoneController({
           </div>
 
           <div className="flex flex-col gap-2.5 justify-center">
-            <label
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={() => {
-                if (!embedded) {
-                  controllerHaptics.unlock();
-                  vibrate(65, {
-                    fromUserGesture: true,
-                    intensity: 'medium',
-                    force: true,
-                    skipIosSwitch: true,
-                  });
-                }
                 enterFullscreenAndLandscape();
                 wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
               }}
@@ -2803,12 +2480,11 @@ export function PhoneController({
                     }
               }
             >
-              <IosHapticSwitch enabled={!embedded && hapticMode !== 'off'} />
               {me.ready && <Check className="w-6 h-6" />}
               <span>
                 {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
               </span>
-            </label>
+            </button>
 
             <p className="text-[11px] text-center text-[#A5AEBD] leading-snug">
               {me.ready
@@ -2885,9 +2561,8 @@ export function PhoneController({
 
     return (
       <div key={which} className={`flex flex-col items-center ${extraClass}`}>
-        <label
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onPointerDown={(e) => onActionDown(which, e)}
           onPointerUp={(e) => onActionUp(which, e)}
           onPointerCancel={(e) => onActionUp(which, e)}
@@ -2910,7 +2585,6 @@ export function PhoneController({
               : 1,
           }}
         >
-          <IosHapticSwitch enabled={!embedded && !repositionMode && hapticMode !== 'off'} />
           <ActionIcon
             icon={spec.icon}
             className={`${isA ? 'w-5 h-5 sm:w-6 sm:h-6' : 'w-4 h-4 sm:w-5 sm:h-5'} mb-0.5 pointer-events-none`}
@@ -2921,7 +2595,7 @@ export function PhoneController({
               {Math.round((1 - cd) * 100)}%
             </span>
           )}
-        </label>
+        </button>
         <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
           {spec.sublabel}
         </span>
@@ -2935,20 +2609,8 @@ export function PhoneController({
         isCardRedWarning ? 'p-1.5' : ''
       }`}
       style={{
-        transform:
-          impactPulse === 'heavy'
-            ? 'translate3d(4px, -2px, 0) scale(0.992)'
-            : impactPulse === 'light'
-            ? 'translate3d(1.5px, 0, 0)'
-            : 'translate3d(0, 0, 0)',
         boxShadow: isCardRedWarning
           ? 'inset 0 0 0 4px #FF3B30, inset 0 0 38px rgba(255, 59, 48, 0.72), 0 0 22px rgba(255, 59, 48, 0.55)'
-          : impactPulse === 'heavy'
-          ? 'inset 0 0 0 3px rgba(255, 77, 46, 0.75)'
-          : impactPulse === 'light'
-          ? `inset 0 0 0 2px ${me.color.hex}`
-          : impactPulse === 'subtle'
-          ? `inset 0 0 0 1.5px ${me.color.hex}99`
           : 'none',
         borderRadius: '14px',
       }}
@@ -3056,7 +2718,6 @@ export function PhoneController({
                 {t('Reconnecting...', '正在重连...')}
               </span>
             )}
-            {renderHapticModeButton(true)}
             {!embedded && !isCardGame && (
               <button
                 type="button"

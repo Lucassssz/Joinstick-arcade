@@ -4,7 +4,7 @@ import {
   type LavaHopperSnapshot,
   type VolleySmashSnapshot,
 } from '../shared/types';
-import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
+import { drawHudChip, drawNameplate, drawPopupTexts, tCanvas } from './canvasHelpers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -16,34 +16,6 @@ import {
 } from './render25d';
 import { getMotionTime, getSpringBannerAnim } from './arcadeMotion';
 
-function drawHudChip(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  text: string,
-  accentHex = '#FFB800',
-  align: 'left' | 'center' | 'right' = 'center'
-): void {
-  const label = tCanvas(text);
-  ctx.save();
-  ctx.font = '800 13px "JetBrains Mono", monospace';
-  const w = Math.max(92, ctx.measureText(label).width + 22);
-  const h = 28;
-  const rx = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
-  ctx.fillStyle = 'rgba(13, 15, 20, 0.88)';
-  ctx.beginPath();
-  ctx.roundRect(rx, y, w, h, 8);
-  ctx.fill();
-  ctx.strokeStyle = accentHex;
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-  ctx.fillStyle = '#F8FAFC';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, rx + w / 2, y + h / 2 + 0.5);
-  ctx.restore();
-}
-
 // ============================================================
 // 33. VOLLEY SMASH (2.5D Arcade Beach Volleyball)
 // ============================================================
@@ -51,7 +23,7 @@ export function renderVolleySmash(
   ctx: CanvasRenderingContext2D,
   snap: VolleySmashSnapshot
 ): void {
-  drawStudioBackdrop(ctx, '#06141F', 'rgba(0, 194, 255, 0.14)', 'rgba(255, 184, 0, 0.05)', 44);
+  drawStudioBackdrop(ctx, '#06141F', 'rgba(0, 194, 255, 0.16)', 'rgba(255, 184, 0, 0.06)', 44);
 
   const left = 110;
   const right = ARENA_WIDTH - 110;
@@ -60,30 +32,52 @@ export function renderVolleySmash(
   const courtW = right - left;
   const courtH = bottom - top;
   const netX = ARENA_WIDTH / 2;
+  const t = getMotionTime();
+  const hasBluePlayers = snap.players.some((p) => p.team === 'blue');
 
-  // Extruded sand court slab
-  drawArenaSlab(ctx, left, top, courtW, courtH, 22, 16, '#D9A75A', '#7C5826', '#F6D38B');
+  // Extruded beach sand court slab
+  drawArenaSlab(ctx, left, top, courtW, courtH, 22, 18, '#DDA95B', '#7C5826', '#F9DA97');
 
-  // Red & Blue team court tint halves
+  // Subtle sand grain bands & team half zones
   ctx.save();
   ctx.fillStyle = 'rgba(255, 77, 46, 0.15)';
   ctx.beginPath();
-  ctx.roundRect(left + 10, top + 10, courtW / 2 - 14, courtH - 20, 14);
+  ctx.roundRect(left + 12, top + 12, courtW / 2 - 16, courtH - 24, 14);
   ctx.fill();
 
   ctx.fillStyle = 'rgba(0, 194, 255, 0.15)';
   ctx.beginPath();
-  ctx.roundRect(netX + 4, top + 10, courtW / 2 - 14, courtH - 20, 14);
+  ctx.roundRect(netX + 4, top + 12, courtW / 2 - 16, courtH - 24, 14);
   ctx.fill();
 
-  // Court boundary lines
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+  // Court crisp white boundary & attack lines
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)';
   ctx.lineWidth = 3;
   ctx.strokeRect(left + 18, top + 18, courtW - 36, courtH - 36);
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 8]);
+  ctx.beginPath();
+  ctx.moveTo(netX - 135, top + 18);
+  ctx.lineTo(netX - 135, bottom - 18);
+  ctx.moveTo(netX + 135, top + 18);
+  ctx.lineTo(netX + 135, bottom - 18);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Solo mode Holo-Keeper badge on Blue side
+  if (!hasBluePlayers) {
+    ctx.fillStyle = 'rgba(0, 194, 255, 0.22)';
+    ctx.font = '900 18px "Plus Jakarta Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tCanvas('HOLO-KEEPER ZONE (SPIKE TO SCORE!)'), netX + courtW * 0.25, (top + bottom) / 2);
+  }
   ctx.restore();
 
-  // Pulsing Landing Target Ring on sand
-  const pulse = 0.5 + 0.5 * Math.sin(getMotionTime() * 8);
+  // Pulsing Landing Target Crosshair on sand
+  const pulse = 0.5 + 0.5 * Math.sin(t * 9);
   ctx.save();
   const targetColor = snap.ball.hot ? '#FF4D2E' : '#00C2FF';
   ctx.strokeStyle = targetColor;
@@ -99,8 +93,14 @@ export function renderVolleySmash(
     Math.PI * 2
   );
   ctx.stroke();
-  ctx.fillStyle = snap.ball.hot ? 'rgba(255, 77, 46, 0.22)' : 'rgba(0, 194, 255, 0.18)';
+  ctx.fillStyle = snap.ball.hot ? 'rgba(255, 77, 46, 0.24)' : 'rgba(0, 194, 255, 0.2)';
   ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(snap.ball.targetX - 12, snap.ball.targetY);
+  ctx.lineTo(snap.ball.targetX + 12, snap.ball.targetY);
+  ctx.moveTo(snap.ball.targetX, snap.ball.targetY - 8);
+  ctx.lineTo(snap.ball.targetX, snap.ball.targetY + 8);
+  ctx.stroke();
   ctx.restore();
 
   // Shockwaves
@@ -108,18 +108,20 @@ export function renderVolleySmash(
     ctx.save();
     ctx.globalAlpha = Math.max(0, sw.alpha);
     ctx.strokeStyle = sw.colorHex;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
 
-  // Center holographic net & posts
-  drawExtrudedCylinder3D(ctx, netX, top + 12, 10, 26, '#94A3B8', '#334155');
-  drawExtrudedCylinder3D(ctx, netX, bottom - 12, 10, 26, '#94A3B8', '#334155');
+  // Center holographic volleyball net & metallic posts
+  drawExtrudedCylinder3D(ctx, netX, top + 12, 11, 30, '#CBD5E1', '#334155');
+  drawExtrudedCylinder3D(ctx, netX, bottom - 12, 11, 30, '#CBD5E1', '#334155');
   ctx.save();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.fillStyle = 'rgba(0, 194, 255, 0.14)';
+  ctx.fillRect(netX - 5, top + 12, 10, courtH - 24);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
   ctx.lineWidth = 5;
   ctx.beginPath();
   ctx.moveTo(netX, top + 10);
@@ -127,7 +129,7 @@ export function renderVolleySmash(
   ctx.stroke();
   ctx.strokeStyle = '#00C2FF';
   ctx.lineWidth = 2;
-  ctx.setLineDash([6, 6]);
+  ctx.setLineDash([7, 7]);
   ctx.beginPath();
   ctx.moveTo(netX, top + 10);
   ctx.lineTo(netX, bottom - 10);
@@ -142,7 +144,7 @@ export function renderVolleySmash(
       ctx,
       p.x,
       p.y,
-      21,
+      22,
       p.team === 'red' ? 0 : Math.PI,
       p.colorHex,
       {
@@ -154,7 +156,7 @@ export function renderVolleySmash(
     drawNameplate(
       ctx,
       p.x,
-      drawY - 34,
+      drawY - 36,
       p.slotIndex,
       p.name,
       p.colorHex,
@@ -162,30 +164,50 @@ export function renderVolleySmash(
     );
   }
 
-  // Volleyball shadow & 3D ball in flight
+  // Altitude guide line + ground shadow + 3D Volleyball in flight
+  const ballLift = snap.ball.z * 0.62;
+  drawShadowOval(
+    ctx,
+    snap.ball.x,
+    snap.ball.y + 4,
+    Math.max(8, 17 - snap.ball.z * 0.03),
+    Math.max(5, 10 - snap.ball.z * 0.02),
+    0.35
+  );
+  if (ballLift > 10) {
+    ctx.save();
+    ctx.strokeStyle = snap.ball.hot ? 'rgba(255, 77, 46, 0.45)' : 'rgba(255, 255, 255, 0.28)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(snap.ball.x, snap.ball.y);
+    ctx.lineTo(snap.ball.x, snap.ball.y - ballLift);
+    ctx.stroke();
+    ctx.restore();
+  }
   drawSphere3D(
     ctx,
     snap.ball.x,
     snap.ball.y,
-    17,
+    18,
     snap.ball.hot ? '#FF4D2E' : '#F8FAFC',
     snap.ball.hot ? '#FFB800' : '#00C2FF',
-    snap.ball.z * 0.62
+    ballLift
   );
 
   // Top Scoreboard Chips
   drawHudChip(
     ctx,
-    ARENA_WIDTH / 2 - 125,
+    ARENA_WIDTH / 2 - 135,
     18,
     `RED TEAM: ${snap.scoreRed}/${snap.targetPoints}`,
     '#FF4D2E'
   );
   drawHudChip(
     ctx,
-    ARENA_WIDTH / 2 + 125,
+    ARENA_WIDTH / 2 + 135,
     18,
-    `BLUE TEAM: ${snap.scoreBlue}/${snap.targetPoints}`,
+    `${hasBluePlayers ? 'BLUE TEAM' : 'HOLO-CPU'}: ${snap.scoreBlue}/${snap.targetPoints}`,
     '#00C2FF'
   );
 
@@ -222,23 +244,23 @@ export function renderLavaHopper(
   ctx: CanvasRenderingContext2D,
   snap: LavaHopperSnapshot
 ): void {
-  drawStudioBackdrop(ctx, '#180705', 'rgba(255, 77, 46, 0.22)', 'rgba(255, 184, 0, 0.08)', 48);
+  drawStudioBackdrop(ctx, '#1A0705', 'rgba(255, 77, 46, 0.24)', 'rgba(255, 184, 0, 0.08)', 48);
 
   const t = getMotionTime();
 
-  // Bubbling magma veins across the caldera floor
+  // Bubbling glowing magma caldera backdrop
   ctx.save();
-  for (let i = 0; i < 7; i++) {
-    const rx = 180 + ((i * 155) % (ARENA_WIDTH - 320));
-    const ry = 140 + ((i * 115) % (ARENA_HEIGHT - 240));
-    const rad = 28 + Math.sin(t * 2.5 + i) * 10;
-    const grad = ctx.createRadialGradient(rx, ry, 4, rx, ry, rad * 2.2);
-    grad.addColorStop(0, 'rgba(255, 184, 0, 0.24)');
-    grad.addColorStop(0.5, 'rgba(255, 77, 46, 0.14)');
+  for (let i = 0; i < 9; i++) {
+    const rx = 140 + ((i * 135) % (ARENA_WIDTH - 240));
+    const ry = 120 + ((i * 97) % (ARENA_HEIGHT - 200));
+    const rad = 30 + Math.sin(t * 2.6 + i * 1.1) * 12;
+    const grad = ctx.createRadialGradient(rx, ry, 4, rx, ry, rad * 2.4);
+    grad.addColorStop(0, 'rgba(255, 200, 30, 0.28)');
+    grad.addColorStop(0.5, 'rgba(255, 77, 46, 0.16)');
     grad.addColorStop(1, 'rgba(255, 77, 46, 0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(rx, ry, rad * 2.2, 0, Math.PI * 2);
+    ctx.arc(rx, ry, rad * 2.4, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -247,43 +269,45 @@ export function renderLavaHopper(
   for (const pl of snap.pillars) {
     if (pl.state === 'sunk') {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255, 77, 46, 0.45)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 6]);
+      const pulseR = pl.r * (0.65 + 0.1 * Math.sin(t * 5 + pl.id));
+      ctx.strokeStyle = 'rgba(255, 100, 46, 0.5)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([7, 7]);
       ctx.beginPath();
-      ctx.arc(pl.x, pl.y, pl.r * 0.85, 0, Math.PI * 2);
+      ctx.arc(pl.x, pl.y, pulseR, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 77, 46, 0.14)';
+      ctx.fill();
       ctx.restore();
       continue;
     }
 
     const isWarn = pl.state === 'warning';
-    const shakeX = isWarn ? Math.sin(t * 36 + pl.id) * 2.5 : 0;
-    const topHex = isWarn ? '#FF7A1A' : '#475569';
-    const sideHex = isWarn ? '#9A3412' : '#1E293B';
+    const shakeX = isWarn ? Math.sin(t * 38 + pl.id) * 3 : 0;
+    const topHex = isWarn ? '#FF7A1A' : '#4B5563';
+    const sideHex = isWarn ? '#9A3412' : '#1F2937';
+    const height = isWarn ? 11 + Math.max(0, pl.timer * 3) : 22;
 
-    drawExtrudedCylinder3D(
-      ctx,
-      pl.x + shakeX,
-      pl.y,
-      pl.r,
-      isWarn ? 12 : 20,
-      topHex,
-      sideHex
-    );
+    drawExtrudedCylinder3D(ctx, pl.x + shakeX, pl.y, pl.r, height, topHex, sideHex);
 
+    // Top basalt stone ring highlight or glowing warning crack ring
+    ctx.save();
+    ctx.strokeStyle = isWarn ? '#FEF08A' : 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = isWarn ? 3 : 2;
+    ctx.beginPath();
+    ctx.arc(pl.x + shakeX, pl.y - height, pl.r - 9, 0, Math.PI * 2);
+    ctx.stroke();
     if (isWarn) {
-      ctx.save();
-      ctx.strokeStyle = '#FFB800';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(pl.x + shakeX, pl.y - 12, pl.r - 8, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
+      ctx.fillStyle = '#FEF08A';
+      ctx.font = '900 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('!', pl.x + shakeX, pl.y - height);
     }
+    ctx.restore();
 
     if (pl.hasGem) {
-      drawSpinningGem3D(ctx, pl.x + shakeX, pl.y - 22, 13, '#FFB800', t * 3 + pl.id);
+      drawSpinningGem3D(ctx, pl.x + shakeX, pl.y - height - 10, 14, '#FFB800', t * 3.2 + pl.id);
     }
   }
 
@@ -292,20 +316,20 @@ export function renderLavaHopper(
     ctx.save();
     ctx.globalAlpha = Math.max(0, sw.alpha);
     ctx.strokeStyle = sw.colorHex;
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
 
-  // Magma Fireballs
+  // Magma Fireballs with bright glow
   for (const fb of snap.fireballs) {
-    drawShadowOval(ctx, fb.x, fb.y + 10, fb.r, fb.r * 0.55, 0.35);
+    drawShadowOval(ctx, fb.x, fb.y + 12, fb.r, fb.r * 0.55, 0.38);
     drawSphere3D(ctx, fb.x, fb.y, fb.r, '#FFB800', '#FF4D2E');
   }
 
-  // Players
+  // Players sorted by Y
   const sortedPlayers = [...snap.players].sort((a, b) => a.y - b.y);
   for (const p of sortedPlayers) {
     if (!p.alive) continue;
@@ -313,12 +337,12 @@ export function renderLavaHopper(
     drawCharacterPod3D(ctx, p.x, p.y, 20, p.angle, p.colorHex, {
       playerId: p.id,
       zHeight: p.z * 0.65,
-      flash: p.leapTimer > 0 || p.stompTimer > 0 ? 0.5 : 0,
+      flash: p.leapTimer > 0 || p.stompTimer > 0 ? 0.55 : 0,
     });
-    drawNameplate(ctx, p.x, drawY - 34, p.slotIndex, p.name, p.colorHex, `${p.score} pts`);
+    drawNameplate(ctx, p.x, drawY - 36, p.slotIndex, p.name, p.colorHex, `${p.score} pts`);
   }
 
-  drawHudChip(ctx, ARENA_WIDTH / 2 - 110, 18, `WAVE ${snap.wave}`, '#FF4D2E');
-  drawHudChip(ctx, ARENA_WIDTH / 2 + 110, 18, `TIME: ${Math.ceil(snap.timeLeft)}s`, '#FFB800');
+  drawHudChip(ctx, ARENA_WIDTH / 2 - 120, 18, `WAVE ${snap.wave}`, '#FF4D2E');
+  drawHudChip(ctx, ARENA_WIDTH / 2 + 120, 18, `TIME: ${Math.ceil(snap.timeLeft)}s`, '#FFB800');
   drawPopupTexts(ctx, snap.popups);
 }

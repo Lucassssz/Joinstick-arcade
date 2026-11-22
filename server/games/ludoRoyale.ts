@@ -25,6 +25,7 @@ interface LudoRoyaleState {
   hopProgress: number;
   movingTokenIndex: number;
   starIndices: number[];
+  moveCooldowns: Record<string, number>;
   banner: string | null;
   eventText: string | null;
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
@@ -53,14 +54,17 @@ function advanceTurn(state: LudoRoyaleState): void {
   state.banner = null;
   const active = state.players[state.turnIndex];
   if (active) {
-    state.eventText = `${active.name}'s Turn — Press A to Roll or B to Switch/Boost!`;
+    // Auto-focus a movable token
+    const firstActive = active.tokens.findIndex((t) => t >= 0 && t < GOAL_STEP);
+    if (firstActive !== -1) active.selectedToken = firstActive;
+    state.eventText = `${active.name}'s Turn — Stick/B Picks Token · Press A to Roll!`;
   }
 }
 
 function chooseBestToken(player: LudoPlayerState, roll: number): number {
   const preferred = player.selectedToken;
   const canMove = (step: number) => {
-    if (step === -1) return roll >= 5 || player.tokens.every((t) => t === -1);
+    if (step === -1) return roll >= 5 || player.tokens.every((t) => t === -1 || t >= GOAL_STEP);
     return step < GOAL_STEP;
   };
   if (canMove(player.tokens[preferred])) return preferred;
@@ -75,23 +79,27 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
 
   createState(players: ServerPlayerInputState[], settingValue: number): LudoRoyaleState {
     const totalRounds = settingValue || 12;
-    const ludoPlayers: LudoPlayerState[] = players.map((p, idx) => ({
-      id: p.id,
-      slotIndex: p.slotIndex,
-      name: p.name,
-      colorHex: p.color.hex,
-      isBot: p.isBot,
-      startTrackIndex: (idx * 7) % TRACK_LEN,
-      selectedToken: 0,
-      tokens: [0, -1, -1],
-      visualSteps: [0, -1, -1],
-      finishedCount: 0,
-      captures: 0,
-      boostReady: true,
-      score: 0,
-      cooldownA: 0,
-      cooldownB: 0,
-    }));
+    const moveCooldowns: Record<string, number> = {};
+    const ludoPlayers: LudoPlayerState[] = players.map((p, idx) => {
+      moveCooldowns[p.id] = 0;
+      return {
+        id: p.id,
+        slotIndex: p.slotIndex,
+        name: p.name,
+        colorHex: p.color.hex,
+        isBot: p.isBot,
+        startTrackIndex: (idx * 7) % TRACK_LEN,
+        selectedToken: 0,
+        tokens: [0, -1, -1],
+        visualSteps: [0, -1, -1],
+        finishedCount: 0,
+        captures: 0,
+        boostReady: true,
+        score: 0,
+        cooldownA: 0,
+        cooldownB: 0,
+      };
+    });
 
     return {
       round: 1,
@@ -106,8 +114,9 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
       hopProgress: 0,
       movingTokenIndex: 0,
       starIndices: [...STAR_INDICES],
+      moveCooldowns,
       banner: null,
-      eventText: ludoPlayers[0] ? `${ludoPlayers[0].name}'s Turn — Press A to Roll!` : null,
+      eventText: ludoPlayers[0] ? `${ludoPlayers[0].name}'s Turn — Stick/B Picks Token · Press A to Roll!` : null,
       popups: [],
       players: ludoPlayers,
       finished: false,
@@ -131,19 +140,33 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
       const inp = players.find((p) => p.id === active.id);
       const justA = Boolean(inp && inp.input.a && !inp.prevA);
       const justB = Boolean(inp && inp.input.b && !inp.prevB);
+      state.moveCooldowns[active.id] = Math.max(0, (state.moveCooldowns[active.id] || 0) - dt);
 
       if (state.phase === 'wait-roll') {
         state.turnTimeLeft = Math.max(0, state.turnTimeLeft - dt);
 
-        if (justB) {
-          active.selectedToken = (active.selectedToken + 1) % 3;
-          state.eventText = `${active.name} selected Token #${active.selectedToken + 1}`;
+        // Joystick Left/Right OR Button B switches selected token
+        const stickDir =
+          inp && state.moveCooldowns[active.id] <= 0 && Math.abs(inp.input.dx) > 0.45
+            ? Math.sign(inp.input.dx)
+            : 0;
+        if (justB || stickDir !== 0) {
+          const delta = stickDir !== 0 ? stickDir : 1;
+          active.selectedToken = (active.selectedToken + delta + 3) % 3;
+          state.moveCooldowns[active.id] = 0.22;
+          const tokStatus =
+            active.tokens[active.selectedToken] === -1
+              ? 'In Base'
+              : active.tokens[active.selectedToken] >= GOAL_STEP
+              ? 'Home'
+              : `Step ${active.tokens[active.selectedToken] + 1}`;
+          state.eventText = `${active.name} selected Token #${active.selectedToken + 1} (${tokStatus})`;
           sounds.push({ type: 'nav', playerId: active.id });
         }
 
         if (justA || state.turnTimeLeft <= 0) {
           state.phase = 'rolling';
-          state.phaseTimer = 0.85;
+          state.phaseTimer = 0.75;
           state.diceRolling = true;
           state.diceValue = 1 + Math.floor(Math.random() * 6);
           sounds.push({ type: 'confirm', playerId: active.id });
@@ -157,7 +180,7 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
         if (state.phaseTimer <= 0) {
           state.diceRolling = false;
           let roll = 1 + Math.floor(Math.random() * 6);
-          if (active.tokens.every((t) => t === -1) && Math.random() < 0.65) {
+          if (active.tokens.every((t) => t === -1 || t >= GOAL_STEP) && Math.random() < 0.72) {
             roll = 6;
           }
           state.diceValue = roll;
@@ -166,7 +189,7 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
           if (tokIdx === -1) {
             state.eventText = `${active.name} rolled ${roll} — Need 5 or 6 to deploy from Base!`;
             state.phase = 'event';
-            state.phaseTimer = 1.25;
+            state.phaseTimer = 1.15;
           } else {
             active.selectedToken = tokIdx;
             state.movingTokenIndex = tokIdx;
@@ -178,12 +201,12 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
               state.eventText = `${active.name} rolled ${roll} & deployed Token #${tokIdx + 1} onto the track!`;
               sounds.push({ type: 'boost', playerId: active.id });
               state.phase = 'event';
-              state.phaseTimer = 1.3;
+              state.phaseTimer = 1.15;
             } else {
               const boostAdd = active.boostReady && roll >= 5 ? 2 : 0;
               if (boostAdd > 0) active.boostReady = false;
               const totalSteps = Math.min(GOAL_STEP - active.tokens[tokIdx], roll + boostAdd);
-              state.stepsRemaining = totalSteps;
+              state.stepsRemaining = Math.max(1, totalSteps);
               state.hopProgress = 0;
               state.phase = 'moving';
               state.eventText =
@@ -195,7 +218,7 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
         }
       } else if (state.phase === 'moving') {
         const tokIdx = state.movingTokenIndex;
-        state.hopProgress += dt * 4.5;
+        state.hopProgress += dt * 4.8;
         if (state.hopProgress >= 1) {
           state.hopProgress = 0;
           active.tokens[tokIdx] = Math.min(GOAL_STEP, active.tokens[tokIdx] + 1);
@@ -209,8 +232,8 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
             if (curStep >= GOAL_STEP) {
               active.finishedCount = active.tokens.filter((t) => t >= GOAL_STEP).length;
               active.score += 120;
-              state.banner = `TOKEN #${tokIdx + 1} HOME!`;
-              state.eventText = `${active.name} escorted Token #${tokIdx + 1} to the Royal Crown! (+120)`;
+              state.banner = `TOKEN #${tokIdx + 1} HOME! (+120)`;
+              state.eventText = `${active.name} escorted Token #${tokIdx + 1} to the Royal Crown!`;
               sounds.push({ type: 'lap', playerId: active.id });
               haptics.push({ playerId: active.id, pattern: [30, 20, 50], reason: 'ludo-home' });
 
@@ -234,11 +257,10 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
               if (isStar) {
                 active.boostReady = true;
                 active.score += 25;
-                state.banner = 'SAFE STAR TILE!';
-                state.eventText = `${active.name} landed on a Safe Star Tile (+25 pts & Boost Charged)!`;
+                state.banner = 'SAFE STAR TILE! (+25)';
+                state.eventText = `${active.name} landed on a Safe Star Tile — Boost Charged!`;
                 sounds.push({ type: 'pickup', playerId: active.id });
               } else {
-                // Capture check
                 for (const other of state.players) {
                   if (other.id === active.id) continue;
                   for (let ot = 0; ot < other.tokens.length; ot++) {
@@ -250,8 +272,8 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
                         other.visualSteps[ot] = -1;
                         active.captures++;
                         active.score += 75;
-                        state.banner = `CAPTURED ${other.name}!`;
-                        state.eventText = `${active.name} captured ${other.name}'s Token #${ot + 1} back to Base! (+75)`;
+                        state.banner = `CAPTURED ${other.name}! (+75)`;
+                        state.eventText = `${active.name} sent ${other.name}'s Token #${ot + 1} back to Base!`;
                         sounds.push({ type: 'ko', playerId: active.id });
                         haptics.push({ playerId: active.id, pattern: [40, 25, 45], reason: 'ludo-capture' });
                       }
@@ -261,7 +283,7 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
               }
             }
             state.phase = 'event';
-            state.phaseTimer = 1.35;
+            state.phaseTimer = 1.25;
           }
         } else {
           active.visualSteps[tokIdx] = active.tokens[tokIdx] + state.hopProgress;
@@ -291,8 +313,8 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
         score: p.score,
         alive: true,
         statText: isTurn
-          ? `YOUR TURN · ${p.finishedCount}/3 Home · ${p.score} pts`
-          : `${p.finishedCount}/3 Home · ${p.captures} KOs`,
+          ? `YOUR TURN · Tok #${p.selectedToken + 1} · ${p.finishedCount}/3 Home`
+          : `${p.finishedCount}/3 Home · ${p.captures} KOs · ${p.score} pts`,
         cooldownA: p.cooldownA,
         cooldownB: p.cooldownB,
       };

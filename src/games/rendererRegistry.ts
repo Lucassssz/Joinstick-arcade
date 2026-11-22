@@ -26,7 +26,40 @@ const MODULAR_LOADERS: Partial<Record<GameId, () => Promise<ModularRendererFn>>>
   'neon-checkers': async () => (await import('./newBoardRenderersB')).renderNeonCheckers,
   'carrom-arena': async () => (await import('./newBoardRenderersB')).renderCarromArena,
   'dungeon-crawl-board': async () => (await import('./newBoardRenderersB')).renderDungeonCrawlBoard,
+  'boom-kittens': async () => (await import('./newCardRenderers')).renderBoomKittens,
+  'property-deal': async () => (await import('./newCardRenderers')).renderPropertyDeal,
+  'flip-seven': async () => (await import('./newCardRenderers')).renderFlipSeven,
+  'royal-bluff': async () => (await import('./newCardRenderers')).renderRoyalBluff,
+  'dark-flip-clash': async () => (await import('./newCardRenderers')).renderDarkFlipClash,
+  'sushi-draft': async () => (await import('./newCardRenderers')).renderSushiDraft,
 };
+
+/**
+ * Awaits loading of a modular renderer pack if the game is registered in MODULAR_LOADERS.
+ * Used by both Gameplay Preloading and the Real In-Game Screenshot Thumbnail Engine.
+ */
+export async function ensureGameRendererLoaded(gameId: GameId): Promise<void> {
+  if (rendererCache.has(gameId)) return;
+  const loader = MODULAR_LOADERS[gameId];
+  if (!loader) return;
+  const existing = pendingLoads.get(gameId);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const task = loader()
+    .then((fn) => {
+      rendererCache.set(gameId, fn);
+    })
+    .catch((err) => {
+      console.error(`[ModularRegistry] Failed to load renderer for ${gameId}:`, err);
+    })
+    .finally(() => {
+      pendingLoads.delete(gameId);
+    });
+  pendingLoads.set(gameId, task);
+  await task;
+}
 
 /**
  * Preloads a game's renderer chunk and cover artwork in the background
@@ -45,22 +78,7 @@ export function preloadGameRenderer(gameId: GameId): void {
   }
 
   // 2. Dynamically load modular renderer chunk if registered
-  if (rendererCache.has(gameId) || pendingLoads.has(gameId)) return;
-  const loader = MODULAR_LOADERS[gameId];
-  if (!loader) return;
-
-  const task = loader()
-    .then((fn) => {
-      rendererCache.set(gameId, fn);
-    })
-    .catch((err) => {
-      console.error(`[ModularRegistry] Failed to load renderer for ${gameId}:`, err);
-    })
-    .finally(() => {
-      pendingLoads.delete(gameId);
-    });
-
-  pendingLoads.set(gameId, task);
+  void ensureGameRendererLoaded(gameId);
 }
 
 /**

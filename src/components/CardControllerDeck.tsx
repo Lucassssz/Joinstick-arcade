@@ -122,7 +122,9 @@ export function CardControllerDeck({
   const isDanger =
     cardState.isActionRequired && cardState.turnTimeLeft > 0 && cardState.turnTimeLeft <= 5.0;
   const timeSecs = Math.max(0, Math.ceil(cardState.turnTimeLeft));
-  const isColorClash = cardState.gameId === 'color-clash';
+  const isColorClash =
+    cardState.gameId === 'color-clash' || cardState.gameId === 'dark-flip-clash';
+  const isLiarsDeck = cardState.gameId === 'liars-deck';
   const activeColorSpec = cardState.activeColor ? CLASH_STYLE[cardState.activeColor] : null;
   const highlightedCard = cardState.hand[cardState.cursorIndex];
   const selectedLiarCount = cardState.hand.filter((c) => c.selected).length;
@@ -130,7 +132,7 @@ export function CardControllerDeck({
 
   return (
     <div className="flex-1 flex flex-col justify-between gap-2 min-h-0">
-      {/* Status Banner + Target / Active Color + 15s Shot-Clock */}
+      {/* Status Banner + Target / Active Color / Party Info + Shot-Clock */}
       <div
         className={`flex items-center justify-between gap-2 px-3 rounded-xl border shrink-0 transition-colors duration-150 ${
           embedded ? 'py-1.5' : 'py-2'
@@ -155,6 +157,13 @@ export function CardControllerDeck({
           ) : cardState.targetRank ? (
             <span className="px-2 py-0.5 rounded-md bg-[#FFB800] text-[#14120B] font-mono text-[11px] font-black shrink-0">
               {t('CLAIM:', '目标:')} {cardState.targetRank}
+            </span>
+          ) : cardState.badgeText ? (
+            <span
+              className="px-2 py-0.5 rounded-md font-mono text-[10px] font-black shrink-0 text-[#0B1219]"
+              style={{ backgroundColor: cardState.badgeColorHex ?? '#FFB800' }}
+            >
+              {cardState.badgeText}
             </span>
           ) : null}
 
@@ -282,8 +291,10 @@ export function CardControllerDeck({
                           {val}
                         </span>
                         <span
-                          className={`font-display font-black leading-none drop-shadow ${
-                            val.length >= 4
+                          className={`font-display font-black leading-none drop-shadow text-center ${
+                            val.length >= 6
+                              ? 'text-[11px] sm:text-xs'
+                              : val.length >= 4
                               ? 'text-xs sm:text-sm'
                               : val.length >= 2
                               ? 'text-lg sm:text-xl'
@@ -294,6 +305,70 @@ export function CardControllerDeck({
                         </span>
                         <span className="self-end font-mono text-[10px] font-black leading-none drop-shadow">
                           {val}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Stylized Party Card (Boom Kittens, Property Deal, Flip Seven, Royal Bluff, Sushi Draft)
+                if (card.kind === 'party') {
+                  const accent = card.accentHex ?? '#FFB800';
+                  const dark = card.secondaryHex ?? '#0F172A';
+                  const isHighlighted = idx === cardState.cursorIndex;
+                  const canTapPlay = cardState.isMyTurn && card.playable;
+                  const partyTransform = isThrowing
+                    ? 'translate3d(0, -34px, 0) scale(0.86) rotate(4deg)'
+                    : canTapPlay
+                    ? 'translate3d(0, -7px, 0) scale(1.04) rotate(0deg)'
+                    : isHighlighted
+                    ? `translate3d(0, ${fanDrop - 3}px, 0) rotate(${fanRot * 0.4}deg)`
+                    : `translate3d(0, ${fanDrop}px, 0) rotate(${fanRot}deg)`;
+
+                  return (
+                    <div
+                      key={card.id}
+                      className={`shrink-0 ${freshOrder !== undefined ? 'card-deal-anim' : ''}`}
+                      style={
+                        freshOrder !== undefined
+                          ? { animationDelay: `${Math.min(280, freshOrder * 45)}ms` }
+                          : undefined
+                      }
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canTapPlay) {
+                            triggerPlayWithThrowAnim(card.id);
+                          } else {
+                            onAction({ type: 'select-index', index: idx });
+                          }
+                        }}
+                        className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 text-center select-none cursor-pointer ${
+                          embedded ? 'w-16 h-22' : 'w-[76px] h-[104px] sm:w-[86px] sm:h-[116px]'
+                        } ${
+                          canTapPlay
+                            ? 'ring-2 ring-white shadow-[0_8px_18px_rgba(255,255,255,0.22)] hover:brightness-110 active:scale-95'
+                            : isHighlighted
+                            ? 'ring-2 ring-white/55 opacity-95'
+                            : 'opacity-85'
+                        }`}
+                        style={{
+                          transform: partyTransform,
+                          opacity: isThrowing ? 0.15 : undefined,
+                          background: `linear-gradient(155deg, ${accent} 0%, ${dark} 100%)`,
+                          color: '#FFFFFF',
+                          boxShadow: `0 4px 0 rgba(0,0,0,0.5)`,
+                        }}
+                      >
+                        <span className="self-start px-1.5 py-0.5 rounded bg-black/45 font-mono text-[9px] font-black leading-none">
+                          {card.badge ?? 'CARD'}
+                        </span>
+                        <span className="font-display font-black text-[11px] sm:text-xs leading-tight drop-shadow px-0.5">
+                          {card.title ?? ''}
+                        </span>
+                        <span className="font-sans text-[9px] font-bold text-white/85 leading-tight line-clamp-2">
+                          {card.subtitle ?? ''}
                         </span>
                       </button>
                     </div>
@@ -372,8 +447,64 @@ export function CardControllerDeck({
           </div>
 
           {/* Right Tactile Action Buttons Column */}
-          <div className={`flex flex-col justify-center gap-2 shrink-0 ${embedded ? 'w-28' : 'w-32 sm:w-40'}`}>
-            {isColorClash ? (
+          <div className={`flex flex-col justify-center gap-1.5 shrink-0 ${embedded ? 'w-32' : 'w-36 sm:w-44'}`}>
+            {cardState.extraActions && cardState.extraActions.length > 0 ? (
+              <div className="flex-1 grid grid-cols-1 gap-1.5 min-h-0">
+                {cardState.extraActions.map((btn, i) => (
+                  <button
+                    key={`${btn.label}_${i}`}
+                    type="button"
+                    disabled={btn.disabled}
+                    onClick={() => onAction(btn.action)}
+                    className="tactile-btn rounded-xl px-2 py-1.5 font-display font-black text-[11px] sm:text-xs text-white flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                    style={{
+                      backgroundColor: btn.colorHex,
+                      color: btn.textColor ?? '#FFFFFF',
+                      boxShadow: '0 3px 0 rgba(0,0,0,0.45)',
+                    }}
+                  >
+                    <span className="truncate">{lang === 'zh' ? btn.labelZh : btn.label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : cardState.primaryBtn || cardState.secondaryBtn ? (
+              <>
+                {cardState.primaryBtn && (
+                  <button
+                    type="button"
+                    disabled={cardState.primaryBtn.disabled}
+                    onClick={() => onAction(cardState.primaryBtn!.action)}
+                    className="tactile-btn flex-1 rounded-xl px-2 font-display font-black text-xs sm:text-sm flex items-center justify-center text-center leading-tight cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                    style={{
+                      backgroundColor: cardState.primaryBtn.colorHex,
+                      color: cardState.primaryBtn.textColor ?? '#FFFFFF',
+                      boxShadow: '0 4px 0 rgba(0,0,0,0.45)',
+                    }}
+                  >
+                    <span>
+                      {lang === 'zh' ? cardState.primaryBtn.labelZh : cardState.primaryBtn.label}
+                    </span>
+                  </button>
+                )}
+                {cardState.secondaryBtn && (
+                  <button
+                    type="button"
+                    disabled={cardState.secondaryBtn.disabled}
+                    onClick={() => onAction(cardState.secondaryBtn!.action)}
+                    className="tactile-btn flex-1 rounded-xl px-2 font-display font-black text-xs sm:text-sm flex items-center justify-center text-center leading-tight cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                    style={{
+                      backgroundColor: cardState.secondaryBtn.colorHex,
+                      color: cardState.secondaryBtn.textColor ?? '#0A1913',
+                      boxShadow: '0 4px 0 rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    <span>
+                      {lang === 'zh' ? cardState.secondaryBtn.labelZh : cardState.secondaryBtn.label}
+                    </span>
+                  </button>
+                )}
+              </>
+            ) : isColorClash ? (
               <>
                 <button
                   type="button"
@@ -407,7 +538,7 @@ export function CardControllerDeck({
                   </span>
                 </button>
               </>
-            ) : cardState.phase === 'challenge' && cardState.canCallBluff ? (
+            ) : isLiarsDeck && cardState.phase === 'challenge' && cardState.canCallBluff ? (
               <>
                 <button
                   type="button"

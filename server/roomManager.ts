@@ -26,6 +26,7 @@ import {
   type TournamentState,
 } from '../src/shared/types.ts';
 import {
+  CARD_GAME_IDS,
   filterGamesByPlayerMode,
   GAME_CATALOG,
   getGameMeta,
@@ -1099,15 +1100,22 @@ export class RoomManager {
             msg.action.type === 'pick-color' ||
             msg.action.type === 'submit-selected' ||
             msg.action.type === 'call-bluff' ||
-            msg.action.type === 'trust-claim';
+            msg.action.type === 'trust-claim' ||
+            msg.action.type === 'custom';
           if (isDecisionAction) {
             let elapsedMs: number | null =
               player.cardPromptStartedAt !== null ? now - player.cardPromptStartedAt : null;
             if (elapsedMs === null && room.lastSnapshot) {
-              const snap = room.lastSnapshot;
+              const snap = room.lastSnapshot as unknown as {
+                gameId: GameId;
+                turnTotal?: number;
+                turnTimeLeft?: number;
+              };
               if (
-                (snap.gameId === 'color-clash' || snap.gameId === 'liars-deck') &&
-                snap.turnTotal > 0
+                CARD_GAME_IDS.has(snap.gameId) &&
+                typeof snap.turnTotal === 'number' &&
+                snap.turnTotal > 0 &&
+                typeof snap.turnTimeLeft === 'number'
               ) {
                 elapsedMs = Math.max(120, Math.round((snap.turnTotal - snap.turnTimeLeft) * 1000));
               }
@@ -1244,6 +1252,11 @@ export class RoomManager {
         tr: cs.targetRank,
         cb: cs.canCallBluff,
         ct: cs.canTrust,
+        bt: cs.badgeText,
+        pb: cs.primaryBtn ? `${cs.primaryBtn.label}:${cs.primaryBtn.disabled ? 1 : 0}` : '',
+        sb: cs.secondaryBtn ? `${cs.secondaryBtn.label}:${cs.secondaryBtn.disabled ? 1 : 0}` : '',
+        ea: cs.extraActions ? cs.extraActions.map((e) => `${e.label}:${e.disabled ? 1 : 0}`).join('|') : '',
+        sh: cs.statusHint,
       });
       if (force || room.lastCardStateHashes.get(p.id) !== hash) {
         room.lastCardStateHashes.set(p.id, hash);
@@ -1666,35 +1679,24 @@ export class RoomManager {
       }
       const curIdx = Math.max(0, Math.min(filteredGames.length - 1, focus.index));
       if (action === 'left') {
-        if (curIdx > 0) {
-          selectGameAt(curIdx - 1);
-          this.playHostSound(room, 'nav');
-        }
+        const prevIdx = (curIdx - 1 + filteredGames.length) % filteredGames.length;
+        selectGameAt(prevIdx);
+        this.playHostSound(room, 'nav');
       } else if (action === 'right') {
-        if (curIdx < filteredGames.length - 1) {
-          selectGameAt(curIdx + 1);
-          this.playHostSound(room, 'nav');
-        }
+        const nextIdx = (curIdx + 1) % filteredGames.length;
+        selectGameAt(nextIdx);
+        this.playHostSound(room, 'nav');
       } else if (action === 'up') {
-        if (curIdx >= COLS) {
-          selectGameAt(curIdx - COLS);
-        } else {
-          focus.zone = 'filter';
-          focus.index = Math.min(PLAYER_FILTER_OPTIONS.length - 1, curIdx);
-        }
+        const activeFilterIdx = Math.max(
+          0,
+          PLAYER_FILTER_OPTIONS.findIndex((opt) => opt.id === room.lobbyFilter)
+        );
+        focus.zone = 'filter';
+        focus.index = activeFilterIdx;
         this.playHostSound(room, 'nav');
       } else if (action === 'down') {
-        const currentRow = Math.floor(curIdx / COLS);
-        const lastRow = Math.floor((filteredGames.length - 1) / COLS);
-        if (curIdx + COLS < filteredGames.length) {
-          selectGameAt(curIdx + COLS);
-        } else if (currentRow < lastRow) {
-          selectGameAt(filteredGames.length - 1);
-        } else {
-          const col = curIdx % COLS;
-          focus.zone = 'actions';
-          focus.index = Math.min(ACTION_COUNT - 1, Math.min(ACTION_COLS - 1, col));
-        }
+        focus.zone = 'actions';
+        focus.index = 0;
         this.playHostSound(room, 'nav');
       } else if (action === 'ok') {
         // Ensure focused game is selected, then try to launch it (or move focus to Start bar with prompt)
@@ -1950,6 +1952,21 @@ export class RoomManager {
         return snap.turnCount >= Math.max(4, Math.floor(snap.maxTurns * (earlyFrenzy ? 0.5 : 0.7)));
       case 'four-in-a-row':
         return snap.players.some((p) => p.connects >= Math.max(1, snap.targetConnects - 1));
+      case 'boom-kittens':
+        return snap.deckCount <= (earlyFrenzy ? 22 : 14) || snap.round >= (earlyFrenzy ? 6 : 10);
+      case 'property-deal':
+        return (
+          snap.players.some((p) => p.setsCompleted >= Math.max(1, snap.targetSets - 1)) ||
+          snap.round >= (earlyFrenzy ? 4 : 7)
+        );
+      case 'flip-seven':
+        return snap.round >= (earlyFrenzy ? 3 : 4) || snap.players.some((p) => p.totalScore >= snap.targetScore * 0.68);
+      case 'royal-bluff':
+        return snap.round >= (earlyFrenzy ? 5 : 8) || snap.players.filter((p) => p.alive).length <= 2;
+      case 'dark-flip-clash':
+        return snap.players.some((p) => p.cardCount <= 2) || snap.turnCount >= (earlyFrenzy ? 7 : 13);
+      case 'sushi-draft':
+        return snap.round >= Math.max(2, snap.totalRounds - (earlyFrenzy ? 1 : 0));
       default:
         return false;
     }
@@ -2142,13 +2159,15 @@ export class RoomManager {
           for (const p of room.players.values()) {
             p.cardPromptStartedAt = null;
           }
-          if (
-            room.lastSnapshot &&
-            (room.lastSnapshot.gameId === 'color-clash' || room.lastSnapshot.gameId === 'liars-deck')
-          ) {
-            const activeP = room.players.get(room.lastSnapshot.activePlayerId);
-            if (activeP) {
-              activeP.cardPromptStartedAt = startedAt;
+          if (room.lastSnapshot && CARD_GAME_IDS.has(room.lastSnapshot.gameId)) {
+            const activeId = (room.lastSnapshot as unknown as { activePlayerId?: string }).activePlayerId;
+            if (activeId) {
+              const activeP = room.players.get(activeId);
+              if (activeP) {
+                activeP.cardPromptStartedAt = startedAt;
+              }
+            } else {
+              for (const p of room.players.values()) p.cardPromptStartedAt = startedAt;
             }
           }
           this.broadcastRoom(room);
@@ -2238,18 +2257,17 @@ export class RoomManager {
         room.selectedGameId === 'carrom-arena' ||
         room.selectedGameId === 'dungeon-crawl-board' ||
         room.selectedGameId === 'lucky-auction' ||
-        room.selectedGameId === 'color-clash' ||
-        room.selectedGameId === 'liars-deck';
+        CARD_GAME_IDS.has(room.selectedGameId);
       const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);
       const scoreMult = mutator.scoreMult * (room.frenzy.active ? 2 : 1);
 
       const prevSnapshot = room.lastSnapshot;
       const result = engine.step(room.gameState, currentInputs, simDt);
-      const isCardMatch =
-        room.selectedGameId === 'color-clash' || room.selectedGameId === 'liars-deck';
+      const isCardMatch = CARD_GAME_IDS.has(room.selectedGameId);
 
       // Persist edge-trigger states & live HUD telemetry (with Frenzy + Mutator score multiplier)
+      let liveScoreOrAliveChanged = false;
       for (const p of room.players.values()) {
         const justA = p.input.a && !p.prevA;
         const justB = p.input.b && !p.prevB;
@@ -2268,6 +2286,8 @@ export class RoomManager {
         p.prevB = p.input.b;
         const hud = result.hudUpdates[p.id];
         if (hud) {
+          const prevScore = p.score;
+          const prevAlive = p.alive;
           const rawScore = hud.score;
           if (rawScore > p.rawGameScore && scoreMult > 1) {
             const gain = rawScore - p.rawGameScore;
@@ -2282,6 +2302,9 @@ export class RoomManager {
               : hud.statText;
           p.cooldownA = hud.cooldownA;
           p.cooldownB = hud.cooldownB;
+          if (p.score !== prevScore || p.alive !== prevAlive) {
+            liveScoreOrAliveChanged = true;
+          }
         }
       }
 
@@ -2359,9 +2382,9 @@ export class RoomManager {
       // and dispatch subtle smartphone vibrations to players who didn't already get an engine hit this tick
       this.detectHostSnapshotHaptics(room, result.snapshot, playersWithEngineHaptic);
 
-      // Sync lightweight HUD updates (scores, cooldowns, alive state) at ~6Hz to phones & host
+      // Sync lightweight HUD updates (scores, cooldowns, alive state) at ~6Hz, or ~15Hz immediately when scores change
       hudBroadcastCounter += 1;
-      if (hudBroadcastCounter >= 5) {
+      if (hudBroadcastCounter >= 5 || (liveScoreOrAliveChanged && hudBroadcastCounter >= 2)) {
         hudBroadcastCounter = 0;
         this.broadcastRoom(room);
       }
@@ -2401,10 +2424,7 @@ export class RoomManager {
             const winPlayer = room.players.get(r.playerId);
             if (winPlayer) {
               winPlayer.matchStats.wins += 1;
-              if (
-                room.selectedGameId === 'color-clash' ||
-                room.selectedGameId === 'liars-deck'
-              ) {
+              if (CARD_GAME_IDS.has(room.selectedGameId)) {
                 winPlayer.matchStats.cardWins += 1;
               }
             }
@@ -2513,6 +2533,30 @@ export class RoomManager {
       ) {
         for (const p of room.players.values()) {
           p.cardPromptStartedAt = p.id === nextSnap.activePlayerId ? now : null;
+        }
+      }
+      return;
+    }
+
+    // Generic turn-change response-time tracker for the 6 modular party card games
+    if (CARD_GAME_IDS.has(nextSnap.gameId) && prevSnap.gameId === nextSnap.gameId) {
+      const prevActive = (prevSnap as unknown as { activePlayerId?: string }).activePlayerId;
+      const nextActive = (nextSnap as unknown as { activePlayerId?: string }).activePlayerId;
+      if (prevActive && nextActive && prevActive !== nextActive) {
+        const actor = room.players.get(prevActive);
+        if (actor) {
+          if (actor.isBot) {
+            actor.matchStats.totalActions += 1;
+            actor.matchStats.cardActions += 1;
+          }
+          if (actor.cardPromptStartedAt !== null && (actor.isBot || now - actor.cardPromptStartedAt > 65)) {
+            recordCardPlayerResponse(actor, now - actor.cardPromptStartedAt);
+          }
+          actor.cardPromptStartedAt = null;
+        }
+        const nextActor = room.players.get(nextActive);
+        if (nextActor) {
+          nextActor.cardPromptStartedAt = now;
         }
       }
     }

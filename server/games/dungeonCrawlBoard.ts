@@ -260,6 +260,8 @@ export const dungeonCrawlBoardModule: ServerGameModule<DungeonCrawlState> = {
               state.phaseTimer = 1.25;
             }
           }
+        } else {
+          active.visualTile = Math.min(TOTAL_TILES - 1, active.tileIndex + state.hopProgress);
         }
       } else if (state.phase === 'combat') {
         state.turnTimeLeft = Math.max(0, state.turnTimeLeft - dt);

@@ -42,7 +42,6 @@ function computeMovesForPlayer(
   const jumps: CheckersMoveOption[] = [];
   const slides: CheckersMoveOption[] = [];
 
-  // Determine forward direction based on slotIndex (even moves down +1, odd moves up -1; kings move all 4 diagonals)
   const forwardDr = slotIndex % 2 === 0 ? 1 : -1;
 
   for (const piece of myPieces) {
@@ -54,7 +53,6 @@ function computeMovesForPlayer(
         if (nc < 0 || nc >= SIZE || nr < 0 || nr >= SIZE) continue;
         const occupant = pieces.find((p) => p.col === nc && p.row === nr);
         if (!occupant) {
-          // Non-king prefers forward slides, or any diagonal if blocked
           if (piece.king || dr === forwardDr) {
             slides.push({
               pieceId: piece.id,
@@ -88,7 +86,6 @@ function computeMovesForPlayer(
     }
   }
 
-  // Fallback any-diagonal slide if forward slides are blocked
   if (jumps.length === 0 && slides.length === 0) {
     for (const piece of myPieces) {
       for (const dr of [-1, 1]) {
@@ -119,7 +116,7 @@ function updatePieceCounts(state: NeonCheckersState): void {
     const mine = state.pieces.filter((pc) => pc.ownerId === p.id);
     p.piecesCount = mine.length;
     p.kingsCount = mine.filter((pc) => pc.king).length;
-    p.score = p.captures * 35 + p.kingsCount * 20 + p.piecesCount * 10;
+    p.score = p.captures * 40 + p.kingsCount * 20 + p.piecesCount * 10;
   }
 }
 
@@ -150,33 +147,66 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
       };
     });
 
-    // Seed pieces across dark squares for 1-4 players
+    // Balanced per-player piece seeding so EVERY player (1-8) always gets equal pieces on dark squares!
     let pieceSeq = 1;
+    const isTwoPlayer = chkPlayers.length <= 2;
+    const perPlayer = isTwoPlayer ? 8 : chkPlayers.length <= 4 ? 4 : 3;
+
+    const allDarkSquares: { col: number; row: number }[] = [];
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if ((r + c) % 2 === 1) allDarkSquares.push({ col: c, row: r });
+      }
+    }
+
     chkPlayers.forEach((p, idx) => {
-      const rows =
-        idx === 0
+      let seeded = 0;
+      const preferredRows = isTwoPlayer
+        ? idx === 0
           ? [0, 1]
-          : idx === 1
-          ? [6, 7]
-          : idx === 2
-          ? [2, 3]
-          : [4, 5];
-      for (const r of rows) {
-        for (let c = 0; c < SIZE; c++) {
-          if ((r + c) % 2 === 1 && pieces.length < chkPlayers.length * 6) {
-            if (!pieces.some((ex) => ex.col === c && ex.row === r)) {
-              pieces.push({
-                id: `chk-${pieceSeq++}`,
-                ownerId: p.id,
-                colorHex: p.colorHex,
-                slotIndex: idx,
-                col: c,
-                row: r,
-                king: false,
-                shielded: false,
-              });
-            }
+          : [6, 7]
+        : idx === 0
+        ? [0, 1]
+        : idx === 1
+        ? [6, 7]
+        : idx === 2
+        ? [2]
+        : idx === 3
+        ? [5]
+        : [3, 4];
+
+      for (const r of preferredRows) {
+        for (let c = 0; c < SIZE && seeded < perPlayer; c++) {
+          if ((r + c) % 2 === 1 && !pieces.some((ex) => ex.col === c && ex.row === r)) {
+            pieces.push({
+              id: `chk-${pieceSeq++}`,
+              ownerId: p.id,
+              colorHex: p.colorHex,
+              slotIndex: idx,
+              col: c,
+              row: r,
+              king: false,
+              shielded: false,
+            });
+            seeded++;
           }
+        }
+      }
+      // Fallback for 5-8 players so nobody ever starts with 0 pieces
+      for (const sq of allDarkSquares) {
+        if (seeded >= perPlayer) break;
+        if (!pieces.some((ex) => ex.col === sq.col && ex.row === sq.row)) {
+          pieces.push({
+            id: `chk-${pieceSeq++}`,
+            ownerId: p.id,
+            colorHex: p.colorHex,
+            slotIndex: idx,
+            col: sq.col,
+            row: sq.row,
+            king: false,
+            shielded: false,
+          });
+          seeded++;
         }
       }
     });
@@ -195,7 +225,7 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
       lastMove: null,
       moveCooldowns,
       banner: null,
-      eventText: first ? `${first.name}'s Turn — Stick Selects Move, Press A to Jump!` : null,
+      eventText: first ? `${first.name}'s Turn — Stick Selects Move · Press A to Jump!` : null,
       players: chkPlayers,
       finished: false,
     };
@@ -216,9 +246,9 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
 
       if (inp && state.moveCooldowns[active.id] <= 0 && state.availableMoves.length > 0) {
         const delta =
-          Math.abs(inp.input.dx) > 0.4
+          Math.abs(inp.input.dx) > 0.38
             ? Math.sign(inp.input.dx)
-            : Math.abs(inp.input.dy) > 0.4
+            : Math.abs(inp.input.dy) > 0.38
             ? Math.sign(inp.input.dy)
             : 0;
         if (delta !== 0) {
@@ -226,7 +256,7 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
             (state.selectedMoveIndex + delta + state.availableMoves.length) %
             state.availableMoves.length;
           active.selectedMoveIndex = state.selectedMoveIndex;
-          state.moveCooldowns[active.id] = 0.18;
+          state.moveCooldowns[active.id] = 0.16;
           sounds.push({ type: 'nav', playerId: active.id });
         }
       }
@@ -235,7 +265,6 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
       const justA = Boolean(inp && inp.input.a && !inp.prevA);
       const justB = Boolean(inp && inp.input.b && !inp.prevB);
 
-      // Action B: Instant King Promotion & Shield on active piece
       if (justB && active.boostCharges > 0) {
         const move = state.availableMoves[state.selectedMoveIndex];
         const piece =
@@ -300,7 +329,6 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
               colorHex: active.colorHex,
             };
 
-            // Crown King on reaching top or bottom edge
             if (!piece.king && (piece.row === 0 || piece.row === SIZE - 1)) {
               piece.king = true;
               state.banner = `${active.name} CROWNED A KING!`;
@@ -311,7 +339,7 @@ export const neonCheckersModule: ServerGameModule<NeonCheckersState> = {
               const capIdx = state.pieces.findIndex((pc) => pc.id === chosen.capturedId);
               if (capIdx !== -1) state.pieces.splice(capIdx, 1);
               active.captures++;
-              state.banner = `JUMP CAPTURE! +35`;
+              state.banner = `JUMP CAPTURE! +40`;
               state.eventText = `⚡ ${active.name} jumped & captured an enemy checker!`;
               sounds.push({ type: 'ko', playerId: active.id });
               haptics.push({ playerId: active.id, pattern: [35, 20, 45], reason: 'checkers-jump' });

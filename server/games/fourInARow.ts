@@ -21,6 +21,7 @@ interface FourInARowState {
   grid: (string | null)[];
   colorGrid: (string | null)[];
   winningCells: { col: number; row: number; colorHex: string }[];
+  celebrateTimer: number;
   fallingToken: { col: number; row: number; currentY: number; colorHex: string } | null;
   moveCooldowns: Record<string, number>;
   banner: string | null;
@@ -69,6 +70,24 @@ function findFourConnect(
   return null;
 }
 
+function applyColumnGravity(grid: (string | null)[], colorGrid: (string | null)[]): void {
+  for (let c = 0; c < COLS; c++) {
+    let writeRow = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      const owner = grid[idxOf(c, r)];
+      if (owner !== null) {
+        if (writeRow !== r) {
+          grid[idxOf(c, writeRow)] = owner;
+          colorGrid[idxOf(c, writeRow)] = colorGrid[idxOf(c, r)];
+          grid[idxOf(c, r)] = null;
+          colorGrid[idxOf(c, r)] = null;
+        }
+        writeRow--;
+      }
+    }
+  }
+}
+
 export const fourInARowModule: ServerGameModule<FourInARowState> = {
   id: 'four-in-a-row',
 
@@ -102,6 +121,7 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
       grid: Array(COLS * ROWS).fill(null),
       colorGrid: Array(COLS * ROWS).fill(null),
       winningCells: [],
+      celebrateTimer: 0,
       fallingToken: null,
       moveCooldowns,
       banner: null,
@@ -118,7 +138,7 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
     if (state.fallingToken) {
       state.fallingToken.currentY = Math.min(
         state.fallingToken.row,
-        state.fallingToken.currentY + dt * 16
+        state.fallingToken.currentY + dt * 18
       );
       if (state.fallingToken.currentY >= state.fallingToken.row) {
         state.fallingToken = null;
@@ -127,15 +147,47 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
 
     if (state.players.length === 0) state.finished = true;
 
-    if (!state.finished) {
+    const checkFlushAndAdvance = () => {
+      const hasTopOpen = Array.from({ length: COLS }, (_, c) => state.grid[idxOf(c, 0)] === null).some(Boolean);
+      if (!hasTopOpen) {
+        for (let r = ROWS - 1; r > 0; r--) {
+          for (let c = 0; c < COLS; c++) {
+            state.grid[idxOf(c, r)] = state.grid[idxOf(c, r - 1)];
+            state.colorGrid[idxOf(c, r)] = state.colorGrid[idxOf(c, r - 1)];
+          }
+        }
+        for (let c = 0; c < COLS; c++) {
+          state.grid[idxOf(c, 0)] = null;
+          state.colorGrid[idxOf(c, 0)] = null;
+        }
+        state.banner = 'RACK SHIFTED DOWN!';
+      }
+      state.turnIndex = (state.turnIndex + 1) % state.players.length;
+      state.turnTimeLeft = TURN_TIMEOUT;
+    };
+
+    // Brief celebration pause showing the blazing 4-in-a-row line before clearing & dropping discs
+    if (state.celebrateTimer > 0 && !state.finished) {
+      state.celebrateTimer -= dt;
+      if (state.celebrateTimer <= 0) {
+        for (const cell of state.winningCells) {
+          state.grid[idxOf(cell.col, cell.row)] = null;
+          state.colorGrid[idxOf(cell.col, cell.row)] = null;
+        }
+        applyColumnGravity(state.grid, state.colorGrid);
+        state.winningCells = [];
+        state.banner = null;
+        checkFlushAndAdvance();
+      }
+    } else if (!state.finished) {
       const active = state.players[state.turnIndex];
       const inp = players.find((p) => p.id === active.id);
       state.moveCooldowns[active.id] = Math.max(0, (state.moveCooldowns[active.id] || 0) - dt);
 
-      if (inp && state.moveCooldowns[active.id] <= 0 && Math.abs(inp.input.dx) > 0.4) {
+      if (inp && state.moveCooldowns[active.id] <= 0 && Math.abs(inp.input.dx) > 0.38) {
         const dir = Math.sign(inp.input.dx);
         active.hoverCol = Math.max(0, Math.min(COLS - 1, active.hoverCol + dir));
-        state.moveCooldowns[active.id] = 0.16;
+        state.moveCooldowns[active.id] = 0.14;
         sounds.push({ type: 'nav', playerId: active.id });
       }
 
@@ -150,24 +202,25 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
         return -1;
       };
 
-      const checkFlushAndAdvance = () => {
-        // Flush bottom row if rack is nearly full so multi-connect matches never deadlock
-        const hasTopOpen = Array.from({ length: COLS }, (_, c) => state.grid[idxOf(c, 0)] === null).some(Boolean);
-        if (!hasTopOpen) {
-          for (let r = ROWS - 1; r > 0; r--) {
-            for (let c = 0; c < COLS; c++) {
-              state.grid[idxOf(c, r)] = state.grid[idxOf(c, r - 1)];
-              state.colorGrid[idxOf(c, r)] = state.colorGrid[idxOf(c, r - 1)];
-            }
+      const resolvePlacement = () => {
+        const line = findFourConnect(state.grid, active.id, active.colorHex);
+        if (line) {
+          state.winningCells = line;
+          active.connects++;
+          active.score += 150;
+          state.banner = `${active.name} CONNECTED 4! (${active.connects}/${state.targetConnects})`;
+          state.eventText = `⚡ ${active.name} scored a 4-IN-A-ROW Connect!`;
+          sounds.push({ type: 'lap', playerId: active.id });
+          haptics.push({ playerId: active.id, pattern: [40, 25, 60], reason: 'c4-line' });
+          if (active.connects >= state.targetConnects) {
+            state.finished = true;
+            sounds.push({ type: 'win', playerId: active.id });
+          } else {
+            state.celebrateTimer = 1.05;
           }
-          for (let c = 0; c < COLS; c++) {
-            state.grid[idxOf(c, 0)] = null;
-            state.colorGrid[idxOf(c, 0)] = null;
-          }
-          state.banner = 'RACK SHIFTED DOWN!';
+        } else {
+          checkFlushAndAdvance();
         }
-        state.turnIndex = (state.turnIndex + 1) % state.players.length;
-        state.turnTimeLeft = TURN_TIMEOUT;
       };
 
       // Action B: Anvil Drop crushes the top token in the column and replaces it
@@ -183,33 +236,14 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
         }
         state.grid[idxOf(col, targetRow)] = active.id;
         state.colorGrid[idxOf(col, targetRow)] = active.colorHex;
-        state.fallingToken = { col, row: targetRow, currentY: 0, colorHex: active.colorHex };
+        state.fallingToken = { col, row: targetRow, currentY: -0.6, colorHex: active.colorHex };
         active.tokensPlaced++;
         active.score += 25;
         state.banner = 'ANVIL CRUSH!';
         state.eventText = `🔨 ${active.name} crushed Column ${col + 1} with an Anvil Token!`;
         sounds.push({ type: 'boost', playerId: active.id });
         haptics.push({ playerId: active.id, pattern: [35, 20, 45], reason: 'anvil-drop' });
-
-        const line = findFourConnect(state.grid, active.id, active.colorHex);
-        if (line) {
-          state.winningCells = line;
-          active.connects++;
-          active.score += 150;
-          state.banner = `${active.name} 4-IN-A-ROW!`;
-          sounds.push({ type: 'lap', playerId: active.id });
-          if (active.connects >= state.targetConnects) {
-            state.finished = true;
-            sounds.push({ type: 'win', playerId: active.id });
-          } else {
-            // Clear those 4 cells so play continues for next connect point
-            for (const cell of line) {
-              state.grid[idxOf(cell.col, cell.row)] = null;
-              state.colorGrid[idxOf(cell.col, cell.row)] = null;
-            }
-          }
-        }
-        if (!state.finished) checkFlushAndAdvance();
+        resolvePlacement();
       } else if (justA || state.turnTimeLeft <= 0) {
         let col = active.hoverCol;
         let dropRow = findDropRow(col);
@@ -227,41 +261,24 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
         if (dropRow !== -1) {
           state.grid[idxOf(col, dropRow)] = active.id;
           state.colorGrid[idxOf(col, dropRow)] = active.colorHex;
-          state.fallingToken = { col, row: dropRow, currentY: 0, colorHex: active.colorHex };
+          state.fallingToken = { col, row: dropRow, currentY: -0.6, colorHex: active.colorHex };
           active.tokensPlaced++;
           active.score += 15;
+          state.banner = null;
           state.eventText = `${active.name} dropped a token in Column ${col + 1}!`;
           sounds.push({ type: 'confirm', playerId: active.id });
           haptics.push({ playerId: active.id, pattern: 22, reason: 'c4-drop' });
-
-          const line = findFourConnect(state.grid, active.id, active.colorHex);
-          if (line) {
-            state.winningCells = line;
-            active.connects++;
-            active.score += 150;
-            state.banner = `${active.name} CONNECTED 4!`;
-            state.eventText = `⚡ ${active.name} scored a 4-IN-A-ROW Connect (${active.connects}/${state.targetConnects})!`;
-            sounds.push({ type: 'lap', playerId: active.id });
-            haptics.push({ playerId: active.id, pattern: [40, 25, 60], reason: 'c4-line' });
-            if (active.connects >= state.targetConnects) {
-              state.finished = true;
-              sounds.push({ type: 'win', playerId: active.id });
-            } else {
-              for (const cell of line) {
-                state.grid[idxOf(cell.col, cell.row)] = null;
-                state.colorGrid[idxOf(cell.col, cell.row)] = null;
-              }
-            }
-          }
+          resolvePlacement();
+        } else {
+          checkFlushAndAdvance();
         }
-        if (!state.finished) checkFlushAndAdvance();
       }
     }
 
     const hudUpdates: Record<string, PlayerHudUpdate> = {};
     const activePlayer = state.players[state.turnIndex];
     for (const p of state.players) {
-      const isTurn = activePlayer && p.id === activePlayer.id && !state.finished;
+      const isTurn = activePlayer && p.id === activePlayer.id && !state.finished && state.celebrateTimer <= 0;
       p.cooldownA = isTurn ? 0 : 1;
       p.cooldownB = isTurn && p.anvilCharges > 0 ? 0 : 1;
       hudUpdates[p.id] = {
@@ -296,7 +313,7 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
       grid: [...state.grid],
       colorGrid: [...state.colorGrid],
       winningCells: state.winningCells,
-      fallingToken: state.fallingToken,
+      fallingToken: state.fallingToken ? { ...state.fallingToken } : null,
       banner: state.banner,
       eventText: state.eventText,
       players: state.players.map((p) => ({ ...p })),

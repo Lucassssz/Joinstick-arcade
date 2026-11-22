@@ -1561,9 +1561,10 @@ export function computeBotInput(
       if (targetPuck) {
         const desiredAngle = Math.atan2(targetPuck.y - snapshot.striker.y, targetPuck.x - snapshot.striker.x);
         const diff = desiredAngle - me.aimAngle;
-        if (Math.abs(diff) > 0.08 && snapshot.turnTimeLeft > 8.0) {
-          dx = Math.sign(diff) * 0.7;
-        } else if (snapshot.turnTimeLeft < 11.2 && mem.actionCooldown <= 0) {
+        if (Math.abs(diff) > 0.08 && snapshot.turnTimeLeft > 8.5) {
+          dx = Math.cos(desiredAngle);
+          dy = Math.min(-0.35, Math.sin(desiredAngle));
+        } else if (snapshot.turnTimeLeft < 11.4 && mem.actionCooldown <= 0) {
           if (me.spinCharges > 0 && Math.random() < 0.35) {
             b = true;
           } else {
@@ -1593,6 +1594,15 @@ export function computeBotInput(
       }
       break;
     }
+
+    case 'boom-kittens':
+    case 'property-deal':
+    case 'flip-seven':
+    case 'royal-bluff':
+    case 'dark-flip-clash':
+    case 'sushi-draft':
+      // Card games run native card-aware AI inside each engine's step()
+      break;
 
     default: {
       // Universal fallback AI for any newly added future game without a custom tactic block:

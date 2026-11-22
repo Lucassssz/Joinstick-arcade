@@ -42,7 +42,23 @@ export type GameId =
   | 'naval-salvo'
   | 'neon-checkers'
   | 'carrom-arena'
-  | 'dungeon-crawl-board';
+  | 'dungeon-crawl-board'
+  | 'boom-kittens'
+  | 'property-deal'
+  | 'flip-seven'
+  | 'royal-bluff'
+  | 'dark-flip-clash'
+  | 'sushi-draft';
+
+export type CardGameId =
+  | 'color-clash'
+  | 'liars-deck'
+  | 'boom-kittens'
+  | 'property-deal'
+  | 'flip-seven'
+  | 'royal-bluff'
+  | 'dark-flip-clash'
+  | 'sushi-draft';
 
 export type RoomStatus = 'SETUP' | 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
 
@@ -1552,7 +1568,13 @@ export type GameSnapshot =
   | NavalSalvoSnapshot
   | NeonCheckersSnapshot
   | CarromArenaSnapshot
-  | DungeonCrawlBoardSnapshot;
+  | DungeonCrawlBoardSnapshot
+  | BoomKittensSnapshot
+  | PropertyDealSnapshot
+  | FlipSevenSnapshot
+  | RoyalBluffSnapshot
+  | DarkFlipClashSnapshot
+  | SushiDraftSnapshot;
 
 // --- 33. Volley Smash (Arcade Beach Volleyball) ---
 export interface VolleyPlayerState {
@@ -2111,19 +2133,242 @@ export interface LiarsDeckSnapshot {
   players: LiarsDeckPlayerView[];
 }
 
+// --- 43. Boom Kittens (Push-Your-Luck Bomb Deck) ---
+export interface BoomKittensPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  alive: boolean;
+  cardCount: number;
+  defuseCount: number;
+  score: number;
+  lastAction: string | null;
+}
+
+export interface BoomKittensSnapshot {
+  gameId: 'boom-kittens';
+  round: number;
+  activePlayerId: string;
+  turnTimeLeft: number;
+  turnTotal: number;
+  deckCount: number;
+  bombsInDeck: number;
+  drawsOwed: number;
+  topDiscard: { label: string; badge: string; accentHex: string } | null;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: BoomKittensPlayerView[];
+}
+
+// --- 44. Property Deal (Monopoly Deal-Style Property Heist Card Game) ---
+export interface PropertySetView {
+  color: 'red' | 'blue' | 'gold' | 'green';
+  count: number;
+  complete: boolean;
+}
+
+export interface PropertyDealPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cardCount: number;
+  bankCash: number;
+  setsCompleted: number;
+  properties: PropertySetView[];
+  score: number;
+  lastAction: string | null;
+}
+
+export interface PropertyDealSnapshot {
+  gameId: 'property-deal';
+  round: number;
+  maxRounds: number;
+  targetSets: number;
+  activePlayerId: string;
+  playsLeft: number;
+  turnTimeLeft: number;
+  turnTotal: number;
+  deckCount: number;
+  lastPlayedCard: { title: string; subtitle: string; badge: string; accentHex: string } | null;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: PropertyDealPlayerView[];
+}
+
+// --- 45. Flip Seven (Press-Your-Luck Unique Number Card Game) ---
+export interface FlipSevenPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  status: 'active' | 'stayed' | 'busted' | 'flip7';
+  numberCards: number[];
+  bonusTotal: number;
+  hasMultiplier: boolean;
+  hasSecondChance: boolean;
+  roundPoints: number;
+  totalScore: number;
+  lastAction: string | null;
+}
+
+export interface FlipSevenSnapshot {
+  gameId: 'flip-seven';
+  round: number;
+  totalRounds: number;
+  targetScore: number;
+  activePlayerId: string;
+  turnTimeLeft: number;
+  turnTotal: number;
+  deckCount: number;
+  lastFlipped: { label: string; subtitle: string; accentHex: string } | null;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: FlipSevenPlayerView[];
+}
+
+// --- 46. Royal Bluff (Hidden-Role Deduction & Bluffing Card Game) ---
+export interface RoyalBluffPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  alive: boolean;
+  coins: number;
+  influenceLeft: number;
+  revealedRoles: string[];
+  score: number;
+  lastAction: string | null;
+}
+
+export interface RoyalBluffSnapshot {
+  gameId: 'royal-bluff';
+  round: number;
+  activePlayerId: string;
+  phase: 'action' | 'challenge' | 'resolve';
+  turnTimeLeft: number;
+  turnTotal: number;
+  pendingClaim: {
+    actorId: string;
+    actorName: string;
+    actionName: string;
+    claimedRole: string;
+    targetName: string | null;
+  } | null;
+  banner: string | null;
+  bannerColor: string | null;
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: RoyalBluffPlayerView[];
+}
+
+// --- 47. Dark Flip Clash (Dual-Sided Light & Dark Color Card Game) ---
+export interface DarkFlipPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cardCount: number;
+  score: number;
+  lastAction: string | null;
+}
+
+export interface DarkFlipClashSnapshot {
+  gameId: 'dark-flip-clash';
+  side: 'light' | 'dark';
+  activeColor: 'red' | 'blue' | 'gold' | 'green';
+  topCard: { color: CardColor; value: string };
+  direction: 1 | -1;
+  activePlayerId: string;
+  awaitingColorPick: boolean;
+  drawPenalty: number;
+  turnTimeLeft: number;
+  turnTotal: number;
+  turnCount: number;
+  deckCount: number;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: DarkFlipPlayerView[];
+}
+
+// --- 48. Sushi Draft (Simultaneous Pick-and-Pass Combo Card Game) ---
+export interface SushiDraftPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  pickedThisStep: boolean;
+  plateCards: { id: string; kind: string; label: string; badge: string; accentHex: string }[];
+  makiCount: number;
+  puddingCount: number;
+  roundScore: number;
+  totalScore: number;
+  lastAction: string | null;
+}
+
+export interface SushiDraftSnapshot {
+  gameId: 'sushi-draft';
+  round: number;
+  totalRounds: number;
+  pickStep: number;
+  totalPickSteps: number;
+  phase: 'picking' | 'reveal' | 'round-end';
+  turnTimeLeft: number;
+  turnTotal: number;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: SushiDraftPlayerView[];
+}
+
 export interface CardPrivateHandItem {
   id: string;
-  kind: 'clash' | 'liar';
+  kind: 'clash' | 'liar' | 'party';
   color?: CardColor;
   value?: string;
   rank?: LiarRank;
   suit?: LiarSuit;
+  title?: string;
+  subtitle?: string;
+  badge?: string;
+  accentHex?: string;
+  secondaryHex?: string;
   playable: boolean;
   selected: boolean;
 }
 
+export interface CardActionButton {
+  label: string;
+  labelZh: string;
+  action: CardClientAction;
+  colorHex: string;
+  textColor?: string;
+  disabled?: boolean;
+}
+
 export interface CardPrivateState {
-  gameId: 'color-clash' | 'liars-deck';
+  gameId: CardGameId;
   playerId: string;
   hand: CardPrivateHandItem[];
   cursorIndex: number;
@@ -2140,6 +2385,11 @@ export interface CardPrivateState {
   canTrust?: boolean;
   lastClaimSummary?: string | null;
   selectedCount?: number;
+  badgeText?: string;
+  badgeColorHex?: string;
+  primaryBtn?: CardActionButton;
+  secondaryBtn?: CardActionButton;
+  extraActions?: CardActionButton[];
   statusHint: string;
   statusHintZh: string;
 }
@@ -2152,7 +2402,8 @@ export type CardClientAction =
   | { type: 'toggle-card'; cardId: string }
   | { type: 'submit-selected' }
   | { type: 'call-bluff' }
-  | { type: 'trust-claim' };
+  | { type: 'trust-claim' }
+  | { type: 'custom'; id: string; payload?: string };
 
 export interface FrenzyState {
   active: boolean;

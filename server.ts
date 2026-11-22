@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './server/roomManager.ts';
+import { getOrGenerateDemoClip, getOrGenerateDemoSnapshot } from './server/demoSnapshot.ts';
+import type { GameId } from './src/shared/types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +21,39 @@ async function startServer() {
 
   app.get('/api/health', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, service: 'joinstick-arcade' });
+    res.json({ ok: true, service: 'cloocade-party' });
+  });
+
+  app.get('/api/demo-snapshot/:gameId', (req, res) => {
+    const gameId = req.params.gameId as GameId;
+    try {
+      const snapshot = getOrGenerateDemoSnapshot(gameId);
+      if (!snapshot) {
+        res.status(404).json({ error: 'Unknown gameId' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.json(snapshot);
+    } catch (err) {
+      console.error(`[demo-snapshot] Failed for ${gameId}:`, err);
+      res.status(500).json({ error: 'Failed to generate demo snapshot' });
+    }
+  });
+
+  app.get('/api/demo-clip/:gameId', (req, res) => {
+    const gameId = req.params.gameId as GameId;
+    try {
+      const clip = getOrGenerateDemoClip(gameId);
+      if (!clip) {
+        res.status(404).json({ error: 'Unknown gameId' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.json(clip);
+    } catch (err) {
+      console.error(`[demo-clip] Failed for ${gameId}:`, err);
+      res.status(500).json({ error: 'Failed to generate demo clip' });
+    }
   });
 
   app.get('/api/rooms/:code', (req, res) => {
@@ -58,7 +92,7 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`JoinStick Arcade server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Cloocade Party server listening on http://0.0.0.0:${PORT}`);
   });
 
   const shutdown = () => {

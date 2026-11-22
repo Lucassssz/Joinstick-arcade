@@ -16,6 +16,8 @@ import {
   useLanguage,
 } from '../lib/i18n';
 import { preloadGameRenderer } from '../games/rendererRegistry';
+import { GameHoverPreview } from './GameHoverPreview';
+import { GameThumbnail } from './GameThumbnail';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
@@ -28,6 +30,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
   const [previewGameId, setPreviewGameId] = useState<GameId | null>(null);
+  const [hoveredGameId, setHoveredGameId] = useState<GameId | null>(null);
   const filteredGames = filterGamesByPlayerMode(playerFilter).map((g) =>
     getLocalizedGameMeta(g, lang)
   );
@@ -62,7 +65,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             href="#top"
             className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0"
           >
-            {t('JoinStick Arcade', 'JoinStick 街机派对')}
+            {t('Cloocade Party', 'Cloocade Party')}
           </a>
 
           <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-[#9CA3AF]">
@@ -252,60 +255,59 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {filteredGames.map((game) => (
-                <article
-                  key={game.id}
-                  onMouseEnter={() => preloadGameRenderer(game.id)}
-                  className="group rounded-2xl bg-[#1A1E26] border border-[#282E3B] overflow-hidden flex flex-col justify-between transition-colors hover:border-[#00C2FF]/55"
-                >
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setPreviewGameId(game.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setPreviewGameId(game.id);
-                      }
+              {filteredGames.map((game) => {
+                const isCardHovered = hoveredGameId === game.id;
+                return (
+                  <article
+                    key={game.id}
+                    onMouseEnter={() => {
+                      preloadGameRenderer(game.id);
+                      setHoveredGameId(game.id);
                     }}
-                    aria-label={t(
-                      `View introduction and rules for ${game.name}`,
-                      `查看「${game.name}」游戏介绍与玩法`
-                    )}
-                    className="cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2FF]"
+                    onMouseLeave={() => {
+                      setHoveredGameId((prev) => (prev === game.id ? null : prev));
+                    }}
+                    className="group rounded-2xl bg-[#1A1E26] border border-[#282E3B] overflow-hidden flex flex-col justify-between transition-colors hover:border-[#00C2FF]/55"
                   >
-                    <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
-                      {!failedImages[game.id] ? (
-                        <img
-                          src={game.coverImage}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setPreviewGameId(game.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setPreviewGameId(game.id);
+                        }
+                      }}
+                      aria-label={t(
+                        `View introduction and rules for ${game.name}`,
+                        `查看「${game.name}」游戏介绍与玩法`
+                      )}
+                      className="cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00C2FF]"
+                    >
+                      <div className="relative aspect-video w-full bg-[#101217] overflow-hidden">
+                        <GameHoverPreview
+                          gameId={game.id}
+                          gameName={game.name}
+                          accentHex={game.accentHex}
+                          fallbackSrc={game.coverImage}
                           alt={t(`${game.name} arcade game preview`, `${game.name} 游戏预览`)}
-                          loading="lazy"
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                          onError={() =>
-                            setFailedImages((prev) => ({ ...prev, [game.id]: true }))
-                          }
+                          active={isCardHovered}
                           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                         />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-[#181C24] text-[#9CA3AF] gap-2">
-                          <Gamepad2 className="w-8 h-8" style={{ color: game.accentHex }} />
-                          <span className="font-display font-bold text-white">{game.name}</span>
-                        </div>
-                      )}
-                      <span
-                        className={`absolute top-3 left-3 px-2 py-0.5 rounded-md font-mono text-[10px] font-extrabold uppercase tracking-wider shadow ${
-                          getGameGenre(game.id) === 'board'
-                            ? 'bg-[#A855F7]/90 text-white'
-                            : getGameGenre(game.id) === 'card'
-                            ? 'bg-[#10D98B]/90 text-[#071710]'
-                            : 'bg-[#101217]/85 text-[#00C2FF] border border-[#00C2FF]/35'
-                        }`}
-                      >
-                        {getLocalizedFilterLabel(getGameGenre(game.id), lang, true)}
-                      </span>
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#1A1E26] via-transparent to-transparent opacity-80" />
-                    </div>
+                        <span
+                          className={`pointer-events-none absolute top-3 left-3 px-2 py-0.5 rounded-md font-mono text-[10px] font-extrabold uppercase tracking-wider shadow ${
+                            getGameGenre(game.id) === 'board'
+                              ? 'bg-[#A855F7]/90 text-white'
+                              : getGameGenre(game.id) === 'card'
+                              ? 'bg-[#10D98B]/90 text-[#071710]'
+                              : 'bg-[#101217]/85 text-[#00C2FF] border border-[#00C2FF]/35'
+                          }`}
+                        >
+                          {getLocalizedFilterLabel(getGameGenre(game.id), lang, true)}
+                        </span>
+                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#1A1E26] via-transparent to-transparent opacity-65" />
+                      </div>
 
                     <div className="p-6">
                       <div className="text-xs font-medium text-[#9CA3AF] flex items-center gap-2">
@@ -341,21 +343,22 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                     </div>
                   </div>
 
-                  <div className="px-6 pb-6">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onHostRoom(game.id);
-                      }}
-                      className="tactile-btn w-full h-11 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-extrabold text-sm shadow-[0_3px_0_#0A915D] inline-flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Play className="w-4 h-4 fill-current" />
-                      <span>{t('Play', '开始游玩')}</span>
-                    </button>
-                  </div>
-                </article>
-              ))}
+                    <div className="px-6 pb-6">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onHostRoom(game.id);
+                        }}
+                        className="tactile-btn w-full h-11 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-extrabold text-sm shadow-[0_3px_0_#0A915D] inline-flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Play className="w-4 h-4 fill-current" />
+                        <span>{t('Play', '开始游玩')}</span>
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
         </section>
@@ -416,8 +419,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#6B7280]">
           <span>
             {t(
-              'JoinStick Arcade · Multi-Device Browser Party Console',
-              'JoinStick 街机派对 · 多设备浏览器聚会游戏主机'
+              'Cloocade Party · Multi-Device Browser Party Console',
+              'Cloocade Party · 多设备浏览器聚会游戏主机'
             )}
           </span>
           <div className="flex items-center gap-5">
@@ -460,21 +463,15 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
               {/* Modal Header */}
               <div className="relative flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6 border-b border-[#262C38] bg-[#151820]">
                 <div className="w-full sm:w-44 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
-                  {!failedImages[previewGame.id] ? (
-                    <img
-                      src={previewGame.coverImage}
-                      alt={t(`${previewGame.name} arcade game preview`, `${previewGame.name} 游戏预览`)}
-                      referrerPolicy="no-referrer"
-                      onError={() =>
-                        setFailedImages((prev) => ({ ...prev, [previewGame.id]: true }))
-                      }
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Gamepad2 className="w-8 h-8" style={{ color: previewGame.accentHex }} />
-                    </div>
-                  )}
+                  <GameThumbnail
+                    gameId={previewGame.id}
+                    gameName={previewGame.name}
+                    accentHex={previewGame.accentHex}
+                    fallbackSrc={previewGame.coverImage}
+                    alt={t(`${previewGame.name} arcade game preview`, `${previewGame.name} 游戏预览`)}
+                    className="w-full h-full object-cover"
+                    eager
+                  />
                 </div>
 
                 <div className="min-w-0 flex-1 pr-8">

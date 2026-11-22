@@ -1,4 +1,5 @@
 import { GameId, GameSnapshot } from '../shared/types';
+import { CARD_GAME_IDS } from '../shared/games';
 
 // ============================================================
 // MOTION CURVES & MATH HELPERS
@@ -817,7 +818,7 @@ export function prepareArcadeFrame(
   st.lastFrameMs = nowMs;
   st.nowSec = nowMs / 1000;
 
-  if (rawSnap.gameId === 'color-clash' || rawSnap.gameId === 'liars-deck') {
+  if (CARD_GAME_IDS.has(rawSnap.gameId)) {
     st.activeGameId = rawSnap.gameId;
     return rawSnap;
   }
@@ -990,7 +991,7 @@ export function prepareArcadeFrame(
 }
 
 export function drawArcadeTrails(ctx: CanvasRenderingContext2D, st: ArcadeMotionState): void {
-  if (st.activeGameId === 'color-clash' || st.activeGameId === 'liars-deck') return;
+  if (st.activeGameId && CARD_GAME_IDS.has(st.activeGameId)) return;
   ctx.save();
   for (const pm of st.podMotion.values()) {
     for (const pt of pm.trail) {
@@ -1005,7 +1006,7 @@ export function drawArcadeTrails(ctx: CanvasRenderingContext2D, st: ArcadeMotion
 }
 
 export function drawArcadeFrontFX(ctx: CanvasRenderingContext2D, st: ArcadeMotionState): void {
-  if (st.activeGameId === 'color-clash' || st.activeGameId === 'liars-deck') return;
+  if (st.activeGameId && CARD_GAME_IDS.has(st.activeGameId)) return;
 
   // Subtle ambient arena dust motes (very low opacity so arenas stay crisp)
   ctx.save();

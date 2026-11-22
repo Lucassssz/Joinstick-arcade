@@ -734,7 +734,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     name: '海岛寻宝挖矿',
     category: '雷达寻宝',
     tagline: '跟着冷热雷达光环找宝藏，一铲挖出黄金海盗箱！',
-    description: '在阳光海滩上搜索埋藏的宝箱！越靠近黄金，光环越亮越烫（手机也会震动提醒），小心躲开红螃蟹！',
+    description: '在阳光海滩上搜索埋藏的宝箱！越靠近黄金，光环越亮越烫，小心躲开红螃蟹！',
     playerModeLabel: '单人 · 2人 · 3–8人',
     rules: [
       '在海滩上走动——离宝藏越近，脚下光环越红越亮！',
@@ -1066,6 +1066,132 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     settingLabel: '冒险轮数',
     settingOptions: { 6: '6 回合', 8: '8 回合', 10: '10 回合' },
   },
+  'boom-kittens': {
+    name: '拆弹猫咪',
+    category: '爆弹卡牌',
+    tagline: '打出功能牌甩锅避开炸弹，关键时刻拆弹绝地求生！',
+    description: '超刺激摸牌躲炸弹派对卡牌！用跳过、双倍攻击、透视未来、洗牌与讨债牌避开隐藏在牌堆里的炸弹，抽到炸弹没有拆弹牌即刻出局！',
+    playerModeLabel: '2人 · 3–8人卡牌',
+    rules: [
+      '你的私密手牌显示在手机上。轮到你时点击发光功能牌即可打出。',
+      '跳过可免摸牌，攻击×2 逼下家连摸两张，透视未来可偷看牌堆顶部是否有炸弹！',
+      '出完功能牌后点击「结束回合并摸牌」从中央牌堆摸一张牌。',
+      '摸到炸弹牌将自动消耗拆弹牌化险为夷，无拆弹牌则爆炸淘汰——最后幸存者获胜！',
+    ],
+    joystickLabel: '选择手牌',
+    actionALabel: '打出功能牌',
+    actionASublabel: '发动技能',
+    actionBLabel: '摸牌结束',
+    actionBSublabel: '抽取牌堆',
+    controlTip: '牌堆越薄炸弹概率越高，把跳过和双倍攻击留到决赛圈甩给对手！',
+    settingLabel: '炸弹烈度',
+    settingOptions: { 1: '标准炸弹', 2: '双倍高危', 3: '极速爆裂' },
+  },
+  'property-deal': {
+    name: '地产大亨牌',
+    category: '地产交易牌',
+    tagline: '每回合最多出 3 张牌：集齐同色地产、狂收租金、妙手窃地！',
+    description: '快节奏大富翁交易卡牌！打出地产卡凑齐 3 张同色成套地产，存入现金防破产，发动收租、讨债与妙手窃地抢夺对手核心地块！',
+    playerModeLabel: '单人 · 2人 · 3–8人卡牌',
+    rules: [
+      '每回合自动摸 2 张牌，最多可从手机手牌打出 3 张牌！',
+      '点击地产牌建造同色地块（集齐 3 张同色 = 1 套完整地产），现金牌存入银行。',
+      '功能牌：过起点 (+2牌)、收租金、讨债 ($5M)、妙手窃地（直接偷取对手一块地）！',
+      '率先凑齐目标套数完整地产（或总资产最高）的大亨获胜！',
+    ],
+    joystickLabel: '选择手牌',
+    actionALabel: '打出卡牌',
+    actionASublabel: '每回合3张',
+    actionBLabel: '结束回合',
+    actionBSublabel: '轮到下家',
+    controlTip: '先打过起点补牌扩大选择，再用妙手窃地补齐你的最后一块成套地产！',
+    settingLabel: '获胜套数',
+    settingOptions: { 2: '先凑齐 2 套地产', 3: '先凑齐 3 套地产' },
+  },
+  'flip-seven': {
+    name: '七连翻牌',
+    category: '搏命摸牌',
+    tagline: '连翻不重复数字冲刺七连大奖，贪心抽到重复数字立刻爆牌！',
+    description: '风靡桌游圈的搏命摸牌派对游戏！点击要牌翻开 0–12 数字牌、×2 倍率与免爆护盾，或者见好就收安全锁分——凑齐 7 张不重复数字直接斩获 +35 超级大奖！',
+    playerModeLabel: '单人 · 2人 · 3–8人卡牌',
+    rules: [
+      '轮到你时，点击「要牌」继续翻开新牌，或点击「停牌锁分」安全存下本轮得分。',
+      '每张不重复的数字牌 (0–12) 都会累加本轮积分——翻到重复数字立刻爆牌归零！',
+      '免爆护盾可自动抵挡 1 次重复爆牌；×2 倍率卡让本轮总分直接翻倍！',
+      '单轮集齐 7 张不重复数字立即触发「七连翻牌」+35 分超级大奖！',
+    ],
+    joystickLabel: '牌堆聚焦',
+    actionALabel: '要牌搏命',
+    actionASublabel: '翻开新牌',
+    actionBLabel: '停牌锁分',
+    actionBSublabel: '安全落袋',
+    controlTip: '牌堆里大数字 (9–12) 张数更多、更容易重复，没护盾时记得见好就收！',
+    settingLabel: '对局轮数',
+    settingOptions: { 3: '3 轮', 4: '4 轮', 5: '5 轮' },
+  },
+  'royal-bluff': {
+    name: '宫廷心机牌',
+    category: '身份吹牛牌',
+    tagline: '手握两张秘密身份牌，大胆假冒公爵刺客掠夺金币，敢不敢抓谎？',
+    description: '经典政变风格身份推理吹牛卡牌！每人私密持有两张宫廷角色，可自由宣称任意角色发动技能，对手可选择信任或一键「抓谎」展开生死摊牌！',
+    playerModeLabel: '2人 · 3–8人卡牌',
+    rules: [
+      '开局在手机上获得 2 张秘密宫廷身份牌与 2 枚金币。',
+      '轮到你时可发动任意技能（即使手里没有该角色也能吹牛）：公爵+3金、船长偷2金、刺客3金暗杀、大使换牌，或安全领1金/7金政变！',
+      '质疑窗口期，其他玩家可点击「抓谎！」——吹牛被抓失去 1 张身份，抓错则质疑者失去 1 张身份！',
+      '最后保有秘密身份（或财富最高）的宫廷谋士获胜！',
+    ],
+    joystickLabel: '选择行动',
+    actionALabel: '宣称发动',
+    actionASublabel: '执行技能',
+    actionBLabel: '抓谎质疑',
+    actionBSublabel: '揭穿吹牛',
+    controlTip: '前期假冒公爵狂拿 3 金币攒够 7 金，直接发动无法阻挡的皇家政变！',
+    settingLabel: '初始金币',
+    settingOptions: { 2: '经典 (2金币)', 4: '快节奏 (4金币)' },
+  },
+  'dark-flip-clash': {
+    name: '暗面翻转牌',
+    category: '双面色牌',
+    tagline: '光明面畅快出牌，一张翻转牌瞬间把全场拖入狂暴暗黑面！',
+    description: '双面翻转色彩卡牌大战！每张手牌都有光明面与暗黑面，打出「翻转 FLIP」即可令所有玩家手牌与桌面瞬间反转至暗黑面，释放 +5 罚抽与全员跳过！',
+    playerModeLabel: '单人 · 2人 · 3–8人卡牌',
+    rules: [
+      '在手机上打出与中央弃牌同颜色或同数字/符号的手牌。',
+      '随时打出「翻转 FLIP」牌，将全桌和所有人手牌在光明面与暗黑面之间瞬间切换！',
+      '暗黑面藏着超强神牌：罚抽 +5、全员跳过（你立刻再出一回合）、暗黑万能 +3！',
+      '率先清空手中所有手牌的玩家获胜！',
+    ],
+    joystickLabel: '选择手牌',
+    actionALabel: '打出卡牌',
+    actionASublabel: '同色或翻转',
+    actionBLabel: '摸牌/罚抽',
+    actionBSublabel: '抽取牌堆',
+    controlTip: '手里留一张 FLIP 翻转牌，在对手快赢时瞬间切入暗黑面送他 +5 大礼！',
+    settingLabel: '初始手牌',
+    settingOptions: { 5: '5 张（极速）', 6: '6 张（标准）', 7: '7 张（经典）' },
+  },
+  'sushi-draft': {
+    name: '回转寿司牌',
+    category: '传牌轮抽',
+    tagline: '全员同时挑 1 张寿司凑绝味套餐，翻开计分后把剩牌传给下家！',
+    description: '零等待全员同步轮抽派对卡牌！所有人同时在手机上秘密挑选 1 张寿司，翻上大屏回转餐盘并把剩余手牌顺时针传递，凑出天妇罗、刺身与芥末三倍神仙连击！',
+    playerModeLabel: '单人 · 2人 · 3–8人卡牌',
+    rules: [
+      '全员同步出牌零等待！在手机上点击 1 张寿司牌锁定到你的餐盘。',
+      '全员选好后大屏同时揭晓，剩余手牌顺时针传给下一位食客！',
+      '组合高分套餐：2×天妇罗(5分)、3×刺身(10分)、芥末×握寿司(3倍分！)、饺子递增(最高15分)、最多寿司卷(+6分)！',
+      '3 轮回转盛宴结束后总分最高的美食家夺冠！',
+    ],
+    joystickLabel: '浏览手牌',
+    actionALabel: '锁定寿司',
+    actionASublabel: '放入餐盘',
+    actionBLabel: '快速选牌',
+    actionBSublabel: '智能推荐',
+    controlTip: '先拿「芥末 Wasabi」再挑 3 分鱿鱼握寿司，直接三倍暴击狂揽 9 分！',
+    settingLabel: '盛宴轮数',
+    settingOptions: { 2: '2 轮（快局）', 3: '3 轮（经典）' },
+  },
 };
 
 export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMetadata {
@@ -1151,23 +1277,6 @@ export function translateServerMessage(msg: string, lang: Language): string {
     msg.includes('Room closed')
   ) {
     return '房主已关闭本次游戏房间。';
-  }
-
-  // Haptics test notices
-  if (msg.includes('Open the Join URL directly on your phone')) {
-    return '请直接用手机扫描二维码打开链接以体验硬件震动反馈。';
-  }
-  if (msg.includes('Vibration pulse sent!')) {
-    return '已发送震动测试！若无震感，请在手机设置中开启触感反馈并关闭省电模式。';
-  }
-  if (msg.includes('iOS Taptic tap fired')) {
-    return '已触发 iOS 触感反馈（需 iOS 18+ 且开启系统触感；Safari 仅支持点击触发）。';
-  }
-  if (msg.includes('Hardware vibrate unsupported')) {
-    return '当前浏览器不支持硬件震动，已自动启用触感音效替代。';
-  }
-  if (msg.includes('Vibration not supported')) {
-    return '当前设备或浏览器不支持震动反馈。';
   }
 
   return msg;
