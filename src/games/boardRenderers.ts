@@ -20,6 +20,7 @@ import {
   drawStudioBackdrop,
   shadeHex,
 } from './render25d';
+import { getBoardVisualTile, getMotionTime, getSpringBannerAnim } from './arcadeMotion';
 
 function drawChip(
   ctx: CanvasRenderingContext2D,
@@ -51,13 +52,17 @@ function drawChip(
 
 function drawCenterBanner(ctx: CanvasRenderingContext2D, text: string, accent = '#FFB800', y = ARENA_HEIGHT / 2): void {
   const label = tCanvas(text);
+  const anim = getSpringBannerAnim(`board:${accent}`, text);
   ctx.save();
   ctx.font = '800 26px "Plus Jakarta Sans", sans-serif';
   const w = Math.min(ARENA_WIDTH - 120, Math.max(300, ctx.measureText(label).width + 64));
   const h = 58;
+  ctx.translate(ARENA_WIDTH / 2, y);
+  ctx.scale(anim.scale, anim.scale);
+  ctx.globalAlpha = anim.alpha;
   ctx.fillStyle = 'rgba(13, 15, 20, 0.94)';
   ctx.beginPath();
-  ctx.roundRect(ARENA_WIDTH / 2 - w / 2, y - h / 2, w, h, 14);
+  ctx.roundRect(-w / 2, -h / 2, w, h, 14);
   ctx.fill();
   ctx.strokeStyle = accent;
   ctx.lineWidth = 3;
@@ -65,7 +70,7 @@ function drawCenterBanner(ctx: CanvasRenderingContext2D, text: string, accent = 
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, ARENA_WIDTH / 2, y + 1);
+  ctx.fillText(label, 0, 1);
   ctx.restore();
 }
 
@@ -163,14 +168,24 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
   ctx.stroke();
 
   // Draw all 24 3D beveled tiles (sorted top-to-bottom by row so overlap is seamless)
+  const richTime = getMotionTime();
   const sortedTiles = [...snap.tiles].sort((a, b) => getRichTileRect(a.index).y - getRichTileRect(b.index).y);
   for (const t of sortedTiles) {
     const r = getRichTileRect(t.index);
     const isDecision = snap.phase === 'decision' && snap.decisionTileIndex === t.index;
 
-    const tileTop = isDecision ? '#28364A' : '#1E2431';
+    const tileTop = isDecision ? '#2B3E57' : '#1E2431';
     const tileBorder = isDecision ? '#FFB800' : t.ownerColor ?? '#344054';
     drawExtrudedBox3D(ctx, r.x, r.y, r.w, r.h, 5, 8, tileTop, '#111620', tileBorder, false);
+    if (isDecision) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 184, 0, ${(0.55 + Math.sin(richTime * 8) * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(r.x - 2, r.y - 7, r.w + 4, r.h + 4, 8);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Top color bar on lifted face (y - 5)
     ctx.fillStyle = t.groupColor;
@@ -255,9 +270,9 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
     }
   }
 
-  // Draw 3D player pawn tokens on the board
+  // Draw 3D player pawn tokens on the board with smooth sub-tick hopping
   const tokenEntries = snap.players
-    .map((p, idx) => ({ p, idx, pos: getRichVisualPos(p.visualTile) }))
+    .map((p, idx) => ({ p, idx, pos: getRichVisualPos(getBoardVisualTile(p.id, p.visualTile, 24)) }))
     .filter((e) => !e.p.bankrupt)
     .sort((a, b) => a.pos.y - b.pos.y);
 
@@ -272,7 +287,7 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.arc(px, py - 4, 17 + Math.sin(performance.now() * 0.01) * 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py - 4, 17 + Math.sin(richTime * 10) * 2.5, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -282,6 +297,7 @@ export function renderRichStreet(ctx: CanvasRenderingContext2D, snap: RichStreet
       zHeight: pos.hopZ,
       rimColor: '#FFFFFF',
       showVisor: false,
+      playerId: p.id,
     });
 
     ctx.save();
@@ -536,7 +552,8 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
     ctx.restore();
   }
 
-  // Draw 3D player pawns
+  // Draw 3D player pawns with smooth sub-tick hopping
+  const jlTime = getMotionTime();
   const pawnList = snap.players.map((p, idx) => {
     let px = 0;
     let py = 0;
@@ -546,16 +563,17 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       const c2 = getJungleTileCenter(p.slideTo, snap.targetTile);
       px = c1.x + (c2.x - c1.x) * p.slideProgress;
       py = c1.y + (c2.y - c1.y) * p.slideProgress;
-      hopZ = Math.sin(p.slideProgress * Math.PI) * 14;
+      hopZ = Math.sin(p.slideProgress * Math.PI) * 16;
     } else {
-      const base = Math.floor(p.visualTile);
+      const smoothTile = getBoardVisualTile(p.id, p.visualTile);
+      const base = Math.floor(smoothTile);
       const next = Math.min(snap.targetTile, base + 1);
-      const frac = p.visualTile - base;
+      const frac = smoothTile - base;
       const c1 = getJungleTileCenter(base, snap.targetTile);
       const c2 = getJungleTileCenter(next, snap.targetTile);
       px = c1.x + (c2.x - c1.x) * frac;
       py = c1.y + (c2.y - c1.y) * frac;
-      hopZ = Math.sin(frac * Math.PI) * 16;
+      hopZ = Math.sin(frac * Math.PI) * 18;
     }
     const ox = ((idx % 3) - 1) * 13;
     const oy = (Math.floor(idx / 3) - 0.5) * 12;
@@ -569,7 +587,7 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.arc(px, py - 4, 16 + Math.sin(performance.now() * 0.01) * 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py - 4, 16 + Math.sin(jlTime * 10) * 2.5, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -587,6 +605,7 @@ export function renderJungleLadders(ctx: CanvasRenderingContext2D, snap: JungleL
       zHeight: hopZ,
       rimColor: '#FFFFFF',
       showVisor: false,
+      playerId: p.id,
     });
     ctx.save();
     ctx.fillStyle = '#FFFFFF';
@@ -734,12 +753,15 @@ function drawSymbol(
 export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatchSnapshot): void {
   drawStudioBackdrop(ctx, '#090B12', 'rgba(82, 139, 255, 0.1)', 'rgba(255,255,255,0.03)', 56);
 
-  // Top Target Marquee (Color + Symbol + Timer)
+  // Top Target Marquee (Color + Symbol + Timer with spring pop on new callout)
   const targetCol = MATCH_PALETTE[snap.targetColorIndex] ?? MATCH_PALETTE[0];
+  const cmAnim = getSpringBannerAnim('colormatch-marquee', `${snap.wave}-${snap.targetColorIndex}-${snap.targetSymbol}`);
   ctx.save();
+  ctx.translate(ARENA_WIDTH / 2, 53);
+  ctx.scale(cmAnim.scale, cmAnim.scale);
   ctx.fillStyle = '#161A24';
   ctx.beginPath();
-  ctx.roundRect(ARENA_WIDTH / 2 - 220, 16, 440, 74, 14);
+  ctx.roundRect(-220, -37, 440, 74, 14);
   ctx.fill();
   ctx.strokeStyle = targetCol.border;
   ctx.lineWidth = 3;
@@ -747,9 +769,9 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
 
   ctx.fillStyle = targetCol.bg;
   ctx.beginPath();
-  ctx.roundRect(ARENA_WIDTH / 2 - 204, 26, 54, 54, 10);
+  ctx.roundRect(-204, -27, 54, 54, 10);
   ctx.fill();
-  drawSymbol(ctx, snap.targetSymbol, ARENA_WIDTH / 2 - 177, 53, 18);
+  drawSymbol(ctx, snap.targetSymbol, -177, 0, 18);
 
   ctx.fillStyle = '#F8FAFC';
   ctx.font = '800 20px "Plus Jakarta Sans", sans-serif';
@@ -759,22 +781,23 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
     snap.phase === 'drop'
       ? tCanvas('FLOOR DROPPED!')
       : tCanvas(`STAND ON ${targetCol.name}!`);
-  ctx.fillText(targetLabel, ARENA_WIDTH / 2 - 134, 42);
+  ctx.fillText(targetLabel, -134, -11);
 
   ctx.fillStyle = '#9CA3AF';
   ctx.font = '700 13px "JetBrains Mono", monospace';
   ctx.fillText(
     tCanvas(`WAVE ${snap.wave}/${snap.totalWaves} · ${Math.max(0, snap.phaseTimer).toFixed(1)}s`),
-    ARENA_WIDTH / 2 - 134,
-    67
+    -134,
+    14
   );
   ctx.restore();
 
   // 2.5D Extruded Disco Tiles sorted top-to-bottom
+  const cmTime = getMotionTime();
   const tiles = [...snap.tiles].filter((t) => !t.dropped).sort((a, b) => a.y - b.y);
   for (const t of tiles) {
     const pal = MATCH_PALETTE[t.colorIndex] ?? MATCH_PALETTE[0];
-    const shake = t.warning ? Math.sin(performance.now() * 0.06 + t.id) * 3 : 0;
+    const shake = t.warning ? Math.sin(cmTime * 58 + t.id) * 3.2 : 0;
     const depth = t.warning ? 6 : 12;
 
     ctx.save();
@@ -865,6 +888,7 @@ export function renderColorMatch(ctx: CanvasRenderingContext2D, snap: ColorMatch
       alpha: p.falling ? Math.max(0.15, 1 - p.fallProgress) : 1,
       rimColor: hasSpeed ? '#FFB800' : '#FFFFFF',
       showVisor: false,
+      playerId: p.id,
     });
 
     if (!p.falling) {
@@ -887,7 +911,8 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
   ctx.fillStyle = '#0A3E52';
   ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
-  const tNow = performance.now() * 0.002;
+  const digTime = getMotionTime();
+  const tNow = digTime * 2;
   ctx.strokeStyle = 'rgba(125, 211, 252, 0.2)';
   ctx.lineWidth = 3;
   for (let i = 0; i < 4; i++) {
@@ -965,18 +990,21 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
     ctx.restore();
   }
 
-  // Revealed treasure X marks!
+  // Revealed treasure X marks with pulsing gleam
   for (const s of snap.spots) {
     if (s.revealedTimer <= 0) continue;
+    const xPulse = 1 + Math.sin(digTime * 8) * 0.14;
     ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.scale(xPulse, xPulse);
     ctx.strokeStyle = s.kind === 'crown' ? '#FF3B9A' : s.kind === 'gem' ? '#00C2FF' : '#D97706';
     ctx.lineWidth = 5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(s.x - 14, s.y - 14);
-    ctx.lineTo(s.x + 14, s.y + 14);
-    ctx.moveTo(s.x + 14, s.y - 14);
-    ctx.lineTo(s.x - 14, s.y + 14);
+    ctx.moveTo(-14, -14);
+    ctx.lineTo(14, 14);
+    ctx.moveTo(14, -14);
+    ctx.lineTo(-14, 14);
     ctx.stroke();
     ctx.restore();
   }
@@ -1022,10 +1050,11 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
       ctx.beginPath();
       ctx.ellipse(0, 0, 18, 12, 0, 0, Math.PI * 2);
       ctx.fill();
-      // Claws
+      // Claws with subtle snip wobble
+      const snip = c.stunTimer > 0 ? 0 : Math.sin(digTime * 11 + c.x * 0.04) * 2.5;
       ctx.beginPath();
-      ctx.arc(-16, -11, 6, 0, Math.PI * 2);
-      ctx.arc(16, -11, 6, 0, Math.PI * 2);
+      ctx.arc(-16, -11 + snip, 6, 0, Math.PI * 2);
+      ctx.arc(16, -11 - snip, 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#FFFFFF';
       ctx.beginPath();
@@ -1038,7 +1067,7 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
       const hasMagnet = (p.magnetTimer ?? 0) > 0;
       ctx.save();
       const heatColor = p.heat > 0.75 ? '#FF4D2E' : p.heat > 0.42 ? '#FFB800' : '#00C2FF';
-      const ringR = 28 + p.heat * 18 + Math.sin(performance.now() * (0.008 + p.heat * 0.02)) * 4;
+      const ringR = 28 + p.heat * 18 + Math.sin(digTime * (8 + p.heat * 20)) * 4;
       ctx.strokeStyle = heatColor;
       ctx.lineWidth = 3 + p.heat * 3;
       ctx.globalAlpha = 0.45 + p.heat * 0.55;
@@ -1060,6 +1089,7 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
         height: 11,
         rimColor: hasMagnet ? '#00C2FF' : '#FFFFFF',
         showVisor: false,
+        playerId: p.id,
       });
 
       const tag = hasMagnet ? 'MAG' : p.heat > 0.76 ? 'HOT!' : undefined;
@@ -1067,18 +1097,8 @@ export function renderTreasureDig(ctx: CanvasRenderingContext2D, snap: TreasureD
     }
   }
 
-  // Score popups
-  for (const pp of snap.popups) {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, pp.alpha);
-    ctx.font = '800 18px "Plus Jakarta Sans", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#0D0F14';
-    ctx.fillText(tCanvas(pp.text), pp.x + 2, pp.y + 2);
-    ctx.fillStyle = pp.colorHex;
-    ctx.fillText(tCanvas(pp.text), pp.x, pp.y);
-    ctx.restore();
-  }
+  // Score popups with spring pop
+  drawPopupTexts(ctx, snap.popups);
 
   drawChip(ctx, ARENA_WIDTH / 2, 18, `TIME ${Math.ceil(snap.timeLeft)}s`, '#FFB800', 'center');
 }
@@ -1136,8 +1156,10 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
   ctx.restore();
 
   // 3D Mystery Chest or Revealed 3D Prize
+  const aucTime = getMotionTime();
   if (snap.phase === 'bidding') {
-    const bob = Math.sin(performance.now() * 0.004) * 5;
+    const bob = Math.sin(aucTime * 4) * 5;
+    const jiggle = snap.timer <= 3.2 ? Math.sin(aucTime * 34) * 0.065 : 0;
     const chestColors = {
       royal: '#8B3314',
       wooden: '#7A4E28',
@@ -1149,6 +1171,7 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
 
     ctx.save();
     ctx.translate(cx, cy + bob);
+    if (jiggle !== 0) ctx.rotate(jiggle);
 
     // 3D chest side/front depth
     drawExtrudedBox3D(ctx, -84, -46, 168, 96, 16, 14, cCol, shadeHex(cCol, -0.42), '#FFB800', true);
@@ -1180,8 +1203,23 @@ export function renderLuckyAuction(ctx: CanvasRenderingContext2D, snap: LuckyAuc
     ctx.fillText('?', 0, -9);
     ctx.restore();
   } else {
-    // 3D Reveal prize!
-    const now = performance.now() * 0.004;
+    // 3D Reveal prize with rotating golden light rays!
+    const now = aucTime * 4;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(aucTime * 0.7);
+    for (let r = 0; r < 8; r++) {
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = 'rgba(255, 184, 0, 0.14)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-14, -135);
+      ctx.lineTo(14, -135);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
     ctx.save();
     if (snap.revealedPrize === 'duck') {
       drawSphere3D(ctx, cx, cy + 12, 40, '#FACC15', '#FEF08A', 8, true);

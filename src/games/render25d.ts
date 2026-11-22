@@ -1,4 +1,5 @@
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../shared/types';
+import { getDiceSettleMotion, getMotionTime, getPodFx } from './arcadeMotion';
 
 const shadeCache = new Map<string, string>();
 
@@ -479,6 +480,10 @@ export interface Pod3DOptions {
   hat?: 'none' | 'chef' | 'crown';
   frozen?: boolean;
   scale?: number;
+  scaleX?: number;
+  scaleY?: number;
+  flash?: number;
+  playerId?: string;
   alpha?: number;
   showVisor?: boolean;
 }
@@ -499,6 +504,10 @@ export function drawCharacterPod3D(
   const height = opts.height ?? 9;
   const zHeight = opts.zHeight ?? 0;
   const scale = opts.scale ?? 1;
+  const podFx = opts.playerId ? getPodFx(opts.playerId) : null;
+  const sx = (opts.scaleX ?? podFx?.scaleX ?? 1) * scale;
+  const sy = (opts.scaleY ?? podFx?.scaleY ?? 1) * scale;
+  const flash = opts.flash ?? podFx?.flash ?? 0;
   const alpha = opts.alpha ?? 1;
   const collar = opts.collarColor ?? '#0E1117';
   const rim = opts.rimColor ?? 'rgba(255,255,255,0.88)';
@@ -509,11 +518,11 @@ export function drawCharacterPod3D(
 
   // Ground cast shadow
   const shScale = Math.max(0.38, 1 - zHeight / 120) * scale;
-  drawShadowOval(ctx, x + 2, y + r * 0.42, r * 1.08 * shScale, r * 0.72 * shScale, 0.46 * alpha);
+  drawShadowOval(ctx, x + 2, y + r * 0.42, r * 1.08 * shScale * Math.max(0.85, sx), r * 0.72 * shScale, 0.46 * alpha);
 
   const drawY = y - zHeight;
   ctx.translate(x, drawY);
-  ctx.scale(scale, scale);
+  ctx.scale(sx, sy);
 
   // Dark extruded collar / base skirt
   const skirtGrad = ctx.createLinearGradient(-r, 0, r, 0);
@@ -547,6 +556,13 @@ export function drawCharacterPod3D(
   ctx.strokeStyle = rim;
   ctx.lineWidth = 2.2;
   ctx.stroke();
+
+  if (flash > 0.04) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${(Math.min(1, flash) * 0.65).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(0, -height, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // Specular top crescent
   ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
@@ -789,12 +805,26 @@ export function drawDie3D(
 ): void {
   ctx.save();
   const depth = Math.max(6, Math.round(size * 0.14));
-  const hop = rolling ? Math.abs(Math.sin(performance.now() * 0.025)) * 10 : 0;
+  const settle = getDiceSettleMotion(rolling);
+  const t = getMotionTime();
+  const hop = rolling ? Math.abs(Math.sin(t * 18)) * 11 : Math.abs(settle.bounceY);
 
-  drawShadowOval(ctx, x + 2, y + size * 0.55 + depth, size * 0.55, size * 0.24, rolling ? 0.3 : 0.45);
+  drawShadowOval(
+    ctx,
+    x + 2,
+    y + size * 0.55 + depth,
+    size * (0.55 - hop * 0.008),
+    size * (0.24 - hop * 0.004),
+    rolling ? 0.28 : 0.45
+  );
 
   ctx.translate(x, y - hop);
-  if (rolling) ctx.rotate(Math.sin(performance.now() * 0.04) * 0.28);
+  ctx.scale(settle.scale, settle.scale);
+  if (rolling) {
+    ctx.rotate(Math.sin(t * 28) * 0.28);
+  } else if (Math.abs(settle.wobbleAngle) > 0.002) {
+    ctx.rotate(settle.wobbleAngle);
+  }
 
   // Bottom/side bevel extrusion
   ctx.fillStyle = '#94A3B8';

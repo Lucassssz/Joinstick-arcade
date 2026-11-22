@@ -50,8 +50,11 @@ import {
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
 import { getMutatorSpec } from '../shared/modifiers';
+import { CardControllerDeck } from './CardControllerDeck';
 import {
   ActionButtonSpec,
+  CardClientAction,
+  CardPrivateState,
   ControllerInput,
   PLAYER_PALETTE,
   RemoteDirection,
@@ -224,6 +227,7 @@ export function PhoneController({
   const [controllerPrefs, setControllerPrefs] = useState<ControllerPrefs>(() => loadControllerPrefs());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repositionMode, setRepositionMode] = useState(false);
+  const [cardState, setCardState] = useState<CardPrivateState | null>(null);
   const [floatingOriginOffset, setFloatingOriginOffset] = useState<{ x: number; y: number }>({
     x: 0,
     y: 0,
@@ -231,6 +235,7 @@ export function PhoneController({
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDisconnectedRef = useRef<boolean>(false);
   const prevIsHostRef = useRef<boolean>(false);
+  const prevCardDangerRef = useRef<boolean>(false);
   const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
   const dragTargetRef = useRef<{
@@ -451,6 +456,9 @@ export function PhoneController({
     resetControlsState();
     setPassHostOpen(false);
     setRepositionMode(false);
+    if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN') {
+      setCardState(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.status, room?.selectedGameId, room?.hostPlayerId]);
 
@@ -557,11 +565,15 @@ export function PhoneController({
             if (!embedded) sessionStorage.setItem(sessionKey, msg.playerId);
             setJoinedPlayerId(msg.playerId);
             setRoom(msg.room);
+            setCardState(null);
             setErrorMsg(null);
             setClosedReason(null);
             break;
           case 'room:snapshot':
             setRoom(msg.room);
+            break;
+          case 'player:card-state':
+            setCardState(msg.cardState);
             break;
           case 'player:haptic':
             if (!embedded) {
@@ -593,6 +605,7 @@ export function PhoneController({
             if (!embedded) sessionStorage.removeItem(sessionKey);
             setClosedReason(msg.reason);
             setRoom(null);
+            setCardState(null);
             setJoinedPlayerId(null);
             break;
           case 'error':
@@ -602,6 +615,7 @@ export function PhoneController({
               if (!embedded) sessionStorage.removeItem(sessionKey);
               setJoinedPlayerId(null);
               setRoom(null);
+              setCardState(null);
             }
             setErrorMsg(msg.message);
             break;
@@ -749,11 +763,37 @@ export function PhoneController({
     }
     setJoinedPlayerId(null);
     setRoom(null);
+    setCardState(null);
     if (onExit) onExit();
   };
 
   const me = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
   const gameMeta = room ? getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang) : null;
+  const isCardGame = Boolean(
+    room && (room.selectedGameId === 'color-clash' || room.selectedGameId === 'liars-deck')
+  );
+  const isCardRedWarning = Boolean(
+    isCardGame &&
+      room?.status === 'PLAYING' &&
+      cardState?.isActionRequired &&
+      cardState.turnTimeLeft > 0 &&
+      cardState.turnTimeLeft <= 5.0
+  );
+
+  useEffect(() => {
+    if (isCardRedWarning && !prevCardDangerRef.current && !embedded) {
+      vibrate([65, 35, 65], { fromUserGesture: false, intensity: 'medium' });
+    }
+    prevCardDangerRef.current = isCardRedWarning;
+  }, [isCardRedWarning, embedded]);
+
+  const sendCardAction = (action: CardClientAction) => {
+    if (!embedded) {
+      controllerHaptics.unlock();
+      vibrate(32, { fromUserGesture: true, intensity: 'light' });
+    }
+    wsRef.current?.send({ type: 'card:action', action });
+  };
 
   // --- Multi-touch Analog Joystick Pointer Handlers (Rotation-Aware + Calibrated!) ---
   const updateStickFromPointer = (clientX: number, clientY: number) => {
@@ -2546,7 +2586,9 @@ export function PhoneController({
 
   return renderConnectedShell(
     <div
-      className="relative flex flex-col justify-between h-full w-full max-w-6xl mx-auto transition-transform duration-75"
+      className={`relative flex flex-col justify-between h-full w-full max-w-6xl mx-auto transition-transform duration-75 ${
+        isCardRedWarning ? 'p-1.5' : ''
+      }`}
       style={{
         transform:
           impactPulse === 'heavy'
@@ -2554,17 +2596,24 @@ export function PhoneController({
             : impactPulse === 'light'
             ? 'translate3d(2px, 0, 0)'
             : 'translate3d(0, 0, 0)',
-        boxShadow:
-          impactPulse === 'heavy'
-            ? 'inset 0 0 0 3px rgba(255, 77, 46, 0.75)'
-            : impactPulse === 'light'
-            ? `inset 0 0 0 2px ${me.color.hex}`
-            : 'none',
+        boxShadow: isCardRedWarning
+          ? 'inset 0 0 0 4px #FF3B30, inset 0 0 38px rgba(255, 59, 48, 0.72), 0 0 22px rgba(255, 59, 48, 0.55)'
+          : impactPulse === 'heavy'
+          ? 'inset 0 0 0 3px rgba(255, 77, 46, 0.75)'
+          : impactPulse === 'light'
+          ? `inset 0 0 0 2px ${me.color.hex}`
+          : 'none',
         borderRadius: '14px',
       }}
     >
+      {isCardRedWarning && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-[14px] border-4 border-[#FF3B30] shadow-[inset_0_0_44px_rgba(255,59,48,0.82)] animate-pulse z-20"
+        />
+      )}
       {/* Compact Top Status Bar OR Live Drag-Reposition Toolbar */}
-      {repositionMode && !embedded ? (
+      {repositionMode && !embedded && !isCardGame ? (
         <div className="flex items-center justify-between gap-2 h-10 shrink-0 px-2 rounded-xl bg-[#1A1E26] border border-[#00C2FF]/60 z-30">
           <div className="flex items-center gap-2 min-w-0">
             <Move className="w-4 h-4 text-[#00C2FF] shrink-0" />
@@ -2660,7 +2709,7 @@ export function PhoneController({
                 {t('Reconnecting...', '正在重连...')}
               </span>
             )}
-            {!embedded && (
+            {!embedded && !isCardGame && (
               <button
                 type="button"
                 onClick={() => {
@@ -2723,130 +2772,147 @@ export function PhoneController({
         </div>
       )}
 
-      {/* Main Tactile Gamepad Deck: Joystick Anchored Left, Customizable Up-Down/Angled/Horizontal A/B Anchored Right */}
-      <div className="flex-1 grid grid-cols-2 items-center gap-2 min-h-0">
-        {/* Left Half: Generous Touch Zone with Calibrated Virtual Joystick */}
-        <div
-          onPointerDown={onStickPointerDown}
-          onPointerMove={onStickPointerMove}
-          onPointerUp={releaseStick}
-          onPointerCancel={releaseStick}
-          onLostPointerCapture={releaseStick}
-          onContextMenu={(e) => e.preventDefault()}
-          className={`h-full flex flex-col justify-center touch-none select-none ${
-            repositionMode ? '' : 'cursor-grab active:cursor-grabbing'
-          } ${embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'}`}
-        >
+      {isCardGame ? (
+        <CardControllerDeck
+          cardState={cardState}
+          playerColorHex={me.color.hex}
+          embedded={embedded}
+          isCountdown={room.status === 'COUNTDOWN'}
+          countdownValue={room.countdownValue}
+          onAction={sendCardAction}
+        />
+      ) : (
+        /* Main Tactile Gamepad Deck: Joystick Anchored Left, Customizable Up-Down/Angled/Horizontal A/B Anchored Right */
+        <div className="flex-1 grid grid-cols-2 items-center gap-2 min-h-0">
+          {/* Left Half: Generous Touch Zone with Calibrated Virtual Joystick */}
           <div
-            onPointerDown={(e) => startRepositionDrag('stick', e)}
-            onPointerMove={moveRepositionDrag}
-            onPointerUp={endRepositionDrag}
-            onPointerCancel={endRepositionDrag}
-            onLostPointerCapture={endRepositionDrag}
-            className={`relative flex flex-col items-center ${
-              repositionMode
-                ? 'pointer-events-auto cursor-move rounded-3xl p-2 border-2 border-dashed border-[#00C2FF] bg-[#00C2FF]/10'
-                : 'pointer-events-none'
-            }`}
-            style={{
-              transform: `translate3d(${(embedded ? 0 : controllerPrefs.stickOffsetX) + floatingOriginOffset.x}px, ${(embedded ? 0 : controllerPrefs.stickOffsetY) + floatingOriginOffset.y}px, 0) scale(${embedded ? 1 : controllerPrefs.stickScale})`,
-            }}
+            onPointerDown={onStickPointerDown}
+            onPointerMove={onStickPointerMove}
+            onPointerUp={releaseStick}
+            onPointerCancel={releaseStick}
+            onLostPointerCapture={releaseStick}
+            onContextMenu={(e) => e.preventDefault()}
+            className={`h-full flex flex-col justify-center touch-none select-none ${
+              repositionMode ? '' : 'cursor-grab active:cursor-grabbing'
+            } ${embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'}`}
           >
-            {repositionMode && (
-              <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#00C2FF] text-[#0B1219] font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
-                {t('Drag Stick', '拖动摇杆')}
-              </span>
-            )}
             <div
-              ref={stickZoneRef}
-              className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center ${
-                embedded ? 'w-32 h-32' : 'w-40 h-40 sm:w-44 sm:h-44'
+              onPointerDown={(e) => startRepositionDrag('stick', e)}
+              onPointerMove={moveRepositionDrag}
+              onPointerUp={endRepositionDrag}
+              onPointerCancel={endRepositionDrag}
+              onLostPointerCapture={endRepositionDrag}
+              className={`relative flex flex-col items-center ${
+                repositionMode
+                  ? 'pointer-events-auto cursor-move rounded-3xl p-2 border-2 border-dashed border-[#00C2FF] bg-[#00C2FF]/10'
+                  : 'pointer-events-none'
               }`}
               style={{
-                borderColor: stickActive ? me.color.hex : '#2A303D',
-                boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
+                transform: `translate3d(${(embedded ? 0 : controllerPrefs.stickOffsetX) + floatingOriginOffset.x}px, ${(embedded ? 0 : controllerPrefs.stickOffsetY) + floatingOriginOffset.y}px, 0) scale(${embedded ? 1 : controllerPrefs.stickScale})`,
               }}
             >
-              {/* Subtle directional crosshairs */}
-              <div className="absolute inset-4 rounded-full border border-dashed border-white/10" />
-              <div className="absolute w-px h-3/4 bg-white/5" />
-              <div className="absolute h-px w-3/4 bg-white/5" />
-
-              {/* Movable tactile thumbstick knob */}
+              {repositionMode && (
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#00C2FF] text-[#0B1219] font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
+                  {t('Drag Stick', '拖动摇杆')}
+                </span>
+              )}
               <div
-                className={`rounded-full flex items-center justify-center ${
-                  embedded ? 'w-14 h-14' : 'w-[74px] h-[74px] sm:w-20 sm:h-20'
+                ref={stickZoneRef}
+                className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center ${
+                  embedded ? 'w-32 h-32' : 'w-40 h-40 sm:w-44 sm:h-44'
                 }`}
                 style={{
-                  transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
-                  backgroundColor: me.color.hex,
-                  boxShadow: `0 6px 0 ${me.color.dark}, 0 10px 20px rgba(0,0,0,0.5)`,
+                  borderColor: stickActive ? me.color.hex : '#2A303D',
+                  boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
                 }}
               >
-                <div className="w-1/2 h-1/2 rounded-full bg-black/20 border border-white/25" />
+                {/* Subtle directional crosshairs */}
+                <div className="absolute inset-4 rounded-full border border-dashed border-white/10" />
+                <div className="absolute w-px h-3/4 bg-white/5" />
+                <div className="absolute h-px w-3/4 bg-white/5" />
+
+                {/* Movable tactile thumbstick knob */}
+                <div
+                  className={`rounded-full flex items-center justify-center ${
+                    embedded ? 'w-14 h-14' : 'w-[74px] h-[74px] sm:w-20 sm:h-20'
+                  }`}
+                  style={{
+                    transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
+                    backgroundColor: me.color.hex,
+                    boxShadow: `0 6px 0 ${me.color.dark}, 0 10px 20px rgba(0,0,0,0.5)`,
+                  }}
+                >
+                  <div className="w-1/2 h-1/2 rounded-full bg-black/20 border border-white/25" />
+                </div>
               </div>
-            </div>
 
-            <span className="mt-1.5 text-[11px] font-semibold text-[#8B95A7] tracking-wide">
-              {schema.joystickLabel}
-            </span>
-          </div>
-        </div>
-
-        {/* Right Half: Calibrated Action Buttons A & B */}
-        <div
-          onContextMenu={(e) => e.preventDefault()}
-          className={`h-full flex items-center touch-none select-none ${
-            embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
-          }`}
-        >
-          <div
-            onPointerDown={(e) => startRepositionDrag('buttons', e)}
-            onPointerMove={moveRepositionDrag}
-            onPointerUp={endRepositionDrag}
-            onPointerCancel={endRepositionDrag}
-            onLostPointerCapture={endRepositionDrag}
-            className={`relative flex items-center justify-center ${
-              !embedded && controllerPrefs.buttonLayout === 'horizontal' ? 'flex-row' : 'flex-col'
-            } ${
-              repositionMode
-                ? 'cursor-move rounded-3xl p-2.5 border-2 border-dashed border-[#FF4D2E] bg-[#FF4D2E]/10'
-                : ''
-            }`}
-            style={{
-              gap: embedded ? '10px' : `${controllerPrefs.buttonGap}px`,
-              transform: `translate3d(${embedded ? 0 : controllerPrefs.buttonsOffsetX}px, ${embedded ? 0 : controllerPrefs.buttonsOffsetY}px, 0) scale(${embedded ? 1 : controllerPrefs.buttonsScale})`,
-            }}
-          >
-            {repositionMode && (
-              <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#FF4D2E] text-white font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
-                {t('Drag Buttons', '拖动按键')}
+              <span className="mt-1.5 text-[11px] font-semibold text-[#8B95A7] tracking-wide">
+                {schema.joystickLabel}
               </span>
-            )}
-            {renderActionButton(
-              firstAction,
-              !embedded && controllerPrefs.buttonLayout === 'angled'
-                ? '-translate-x-3.5'
-                : !embedded && controllerPrefs.buttonLayout === 'horizontal'
-                ? 'mt-3'
-                : ''
-            )}
-            {renderActionButton(
-              secondAction,
-              !embedded && controllerPrefs.buttonLayout === 'angled'
-                ? 'translate-x-3.5'
-                : !embedded && controllerPrefs.buttonLayout === 'horizontal'
-                ? '-mt-3'
-                : ''
-            )}
+            </div>
+          </div>
+
+          {/* Right Half: Calibrated Action Buttons A & B */}
+          <div
+            onContextMenu={(e) => e.preventDefault()}
+            className={`h-full flex items-center touch-none select-none ${
+              embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
+            }`}
+          >
+            <div
+              onPointerDown={(e) => startRepositionDrag('buttons', e)}
+              onPointerMove={moveRepositionDrag}
+              onPointerUp={endRepositionDrag}
+              onPointerCancel={endRepositionDrag}
+              onLostPointerCapture={endRepositionDrag}
+              className={`relative flex items-center justify-center ${
+                !embedded && controllerPrefs.buttonLayout === 'horizontal' ? 'flex-row' : 'flex-col'
+              } ${
+                repositionMode
+                  ? 'cursor-move rounded-3xl p-2.5 border-2 border-dashed border-[#FF4D2E] bg-[#FF4D2E]/10'
+                  : ''
+              }`}
+              style={{
+                gap: embedded ? '10px' : `${controllerPrefs.buttonGap}px`,
+                transform: `translate3d(${embedded ? 0 : controllerPrefs.buttonsOffsetX}px, ${embedded ? 0 : controllerPrefs.buttonsOffsetY}px, 0) scale(${embedded ? 1 : controllerPrefs.buttonsScale})`,
+              }}
+            >
+              {repositionMode && (
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#FF4D2E] text-white font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
+                  {t('Drag Buttons', '拖动按键')}
+                </span>
+              )}
+              {renderActionButton(
+                firstAction,
+                !embedded && controllerPrefs.buttonLayout === 'angled'
+                  ? '-translate-x-3.5'
+                  : !embedded && controllerPrefs.buttonLayout === 'horizontal'
+                  ? 'mt-3'
+                  : ''
+              )}
+              {renderActionButton(
+                secondAction,
+                !embedded && controllerPrefs.buttonLayout === 'angled'
+                  ? 'translate-x-3.5'
+                  : !embedded && controllerPrefs.buttonLayout === 'horizontal'
+                  ? '-mt-3'
+                  : ''
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Subtle Bottom Helper Strip */}
       <div className="text-center text-[11px] text-[#6B7280] shrink-0">
         {room.status === 'COUNTDOWN'
           ? t(`Match starting in ${room.countdownValue}...`, `比赛即将在 ${room.countdownValue} 秒后开始...`)
+          : isCardGame
+          ? keyboardProfile === 'wasd'
+            ? t('Tap cards above or use A/D · Space (A) · Left Shift (B)', '点击上方手牌或使用 A/D · 空格 (A) · 左 Shift (B)')
+            : keyboardProfile === 'arrows'
+            ? t('Tap cards above or use Arrows · Enter (A) · Right Shift (B)', '点击上方手牌或使用方向键 · 回车 (A) · 右 Shift (B)')
+            : t('Secret hand · 15s turn clock · Auto-passes on timeout', '私密手牌 · 每回合限时 15 秒 · 超时自动过牌')
           : !me.alive
           ? t(
               'Knocked out — watch the monitor for next round or respawn',

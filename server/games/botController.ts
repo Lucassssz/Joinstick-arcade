@@ -11,6 +11,9 @@ export interface BotMemory {
   wanderTimer: number;
   actionCooldown: number;
   strafeDir: number;
+  driftPhase: number;
+  lastColorIdx?: number;
+  colorReactionTimer?: number;
 }
 
 interface DifficultyTuning {
@@ -18,26 +21,30 @@ interface DifficultyTuning {
   abilityChance: number;
   aimJitter: number;
   reactionCooldown: number;
+  reflexFactor: number;
 }
 
 const DIFFICULTY_TUNING: Record<BotDifficulty, DifficultyTuning> = {
   chill: {
-    moveScale: 0.68,
-    abilityChance: 0.35,
-    aimJitter: 0.34,
-    reactionCooldown: 0.32,
+    moveScale: 0.56,
+    abilityChance: 0.22,
+    aimJitter: 0.42,
+    reactionCooldown: 0.55,
+    reflexFactor: 0.45,
   },
   arcade: {
-    moveScale: 0.88,
-    abilityChance: 0.68,
-    aimJitter: 0.14,
-    reactionCooldown: 0.16,
+    moveScale: 0.74,
+    abilityChance: 0.44,
+    aimJitter: 0.24,
+    reactionCooldown: 0.3,
+    reflexFactor: 0.68,
   },
   spicy: {
-    moveScale: 1.0,
-    abilityChance: 0.96,
-    aimJitter: 0.04,
-    reactionCooldown: 0.07,
+    moveScale: 0.88,
+    abilityChance: 0.72,
+    aimJitter: 0.11,
+    reactionCooldown: 0.15,
+    reflexFactor: 0.86,
   },
 };
 
@@ -47,6 +54,7 @@ export function createBotMemory(): BotMemory {
     wanderTimer: 0.6 + Math.random() * 0.8,
     actionCooldown: 0,
     strafeDir: Math.random() < 0.5 ? 1 : -1,
+    driftPhase: Math.random() * Math.PI * 2,
   };
 }
 
@@ -108,7 +116,11 @@ export function computeBotInput(
 
   const tuning = DIFFICULTY_TUNING[difficulty] ?? DIFFICULTY_TUNING.arcade;
   mem.wanderTimer -= dt;
+  mem.driftPhase = (mem.driftPhase ?? 0) + dt * 1.45;
   mem.actionCooldown = Math.max(0, mem.actionCooldown - dt);
+  if (mem.colorReactionTimer && mem.colorReactionTimer > 0) {
+    mem.colorReactionTimer = Math.max(0, mem.colorReactionTimer - dt);
+  }
   if (mem.wanderTimer <= 0) {
     mem.wanderAngle += (Math.random() - 0.5) * 1.9;
     mem.strafeDir = Math.random() < 0.5 ? 1 : -1;
@@ -145,17 +157,17 @@ export function computeBotInput(
         pwr && Math.hypot(pwr.x - snapshot.ringCenterX, pwr.y - snapshot.ringCenterY) < snapshot.ringRadius * 0.82;
       const { item: target, dist } = nearestOf(me.x, me.y, rivals);
       if (pwr && pwrSafe && pwrDist < 220) {
-        const s = steerToward(me.x, me.y, pwr.x, pwr.y, tuning);
+        const s = steerToward(me.x, me.y, pwr.x, pwr.y, tuning, mem.driftPhase * 0.5);
         dx = s.dx;
         dy = s.dy;
       } else if (target) {
-        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase);
         dx = s.dx;
         dy = s.dy;
-        if (dist < 165 && me.cooldownA <= 0 && canAct() && Math.random() < 0.2) {
+        if (dist < 160 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
           a = true;
           markActed();
-        } else if (dist < 110 && me.cooldownB <= 0 && canAct() && Math.random() < 0.25) {
+        } else if (dist < 105 && me.cooldownB <= 0 && canAct() && Math.random() < 0.18) {
           b = true;
           markActed();
         }
@@ -175,22 +187,22 @@ export function computeBotInput(
       const { item: pickup, dist: pDist } = nearestOf(me.x, me.y, snapshot.pickups);
       const { item: target, dist: tDist } = nearestOf(me.x, me.y, rivals);
 
-      if (pickup && pDist < 220) {
-        const s = steerToward(me.x, me.y, pickup.x, pickup.y, tuning);
+      if (pickup && pDist < 200) {
+        const s = steerToward(me.x, me.y, pickup.x, pickup.y, tuning, mem.driftPhase * 0.4);
         dx = s.dx;
         dy = s.dy;
       } else if (target) {
-        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
-        if (tDist < 180) {
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase);
+        if (tDist < 175) {
           // Strafe while keeping aim
-          dx = s.dx * 0.4 - s.dy * 0.65 * mem.strafeDir;
-          dy = s.dy * 0.4 + s.dx * 0.65 * mem.strafeDir;
+          dx = s.dx * 0.4 - s.dy * 0.6 * mem.strafeDir;
+          dy = s.dy * 0.4 + s.dx * 0.6 * mem.strafeDir;
         } else {
           dx = s.dx;
           dy = s.dy;
         }
-        if (tDist < 480 && Math.random() < tuning.abilityChance * 0.65) a = true;
-        if (tDist < 140 && me.cooldownB <= 0 && canAct() && Math.random() < 0.15) {
+        if (tDist < 450 && Math.random() < tuning.abilityChance * 0.46) a = true;
+        if (tDist < 135 && me.cooldownB <= 0 && canAct() && Math.random() < 0.12) {
           b = true;
           markActed();
         }
@@ -220,16 +232,16 @@ export function computeBotInput(
       let aimX = lookAhead.x;
       let aimY = lookAhead.y;
       const { item: nearCoin, dist: cDist } = nearestOf(me.x, me.y, snapshot.coins ?? []);
-      if (nearCoin && cDist < 120) {
-        aimX = lookAhead.x * 0.65 + nearCoin.x * 0.35;
-        aimY = lookAhead.y * 0.65 + nearCoin.y * 0.35;
+      if (nearCoin && cDist < 105 && Math.random() < tuning.reflexFactor) {
+        aimX = lookAhead.x * 0.68 + nearCoin.x * 0.32;
+        aimY = lookAhead.y * 0.68 + nearCoin.y * 0.32;
       }
       const { item: nearOil, dist: oDist } = nearestOf(me.x, me.y, snapshot.oils ?? []);
-      if (nearOil && oDist < 90) {
-        aimX += (me.x - nearOil.x) * 0.8;
-        aimY += (me.y - nearOil.y) * 0.8;
+      if (nearOil && oDist < 84) {
+        aimX += (me.x - nearOil.x) * 0.7;
+        aimY += (me.y - nearOil.y) * 0.7;
       }
-      const s = steerToward(me.x, me.y, aimX, aimY, tuning);
+      const s = steerToward(me.x, me.y, aimX, aimY, tuning, mem.driftPhase * 0.35);
       dx = s.dx;
       dy = s.dy;
 
@@ -240,8 +252,8 @@ export function computeBotInput(
       while (turn > Math.PI) turn -= Math.PI * 2;
       while (turn < -Math.PI) turn += Math.PI * 2;
 
-      b = Math.abs(turn) > 0.55 && me.speed > 260 && Math.random() < tuning.abilityChance;
-      a = Math.abs(turn) < 0.35 && me.nitro > 0.45 && Math.random() < tuning.abilityChance * 0.5;
+      b = Math.abs(turn) > 0.58 && me.speed > 265 && Math.random() < tuning.abilityChance * 0.75;
+      a = Math.abs(turn) < 0.32 && me.nitro > 0.5 && Math.random() < tuning.abilityChance * 0.35;
       break;
     }
 
@@ -258,16 +270,17 @@ export function computeBotInput(
           const s = steerToward(me.x, me.y, safeTile.x, safeTile.y, tuning);
           dx = s.dx;
           dy = s.dy;
-          if ((safeDist > 68 || !currentTile) && me.cooldownA <= 0 && canAct()) {
+          if ((safeDist > 72 || !currentTile) && me.cooldownA <= 0 && canAct()) {
             a = true;
             markActed();
           }
         }
       } else if (safeTile) {
-        // Keep moving smoothly across solid hexes toward gold/spring or center cluster
+        // Keep moving across solid hexes; higher difficulties favor gold/spring center clusters
+        const preferBonus = Math.random() < tuning.reflexFactor;
         const centerSolid = [...solidTiles].sort((t1, t2) => {
-          const bonus1 = t1.kind === 'gold' || t1.kind === 'spring' ? -120 : t1.kind === 'ice' ? 80 : 0;
-          const bonus2 = t2.kind === 'gold' || t2.kind === 'spring' ? -120 : t2.kind === 'ice' ? 80 : 0;
+          const bonus1 = preferBonus && (t1.kind === 'gold' || t1.kind === 'spring') ? -105 : t1.kind === 'ice' ? 75 : 0;
+          const bonus2 = preferBonus && (t2.kind === 'gold' || t2.kind === 'spring') ? -105 : t2.kind === 'ice' ? 75 : 0;
           return (
             Math.hypot(t1.x - ARENA_WIDTH / 2, t1.y - ARENA_HEIGHT / 2) + bonus1 -
             (Math.hypot(t2.x - ARENA_WIDTH / 2, t2.y - ARENA_HEIGHT / 2) + bonus2)
@@ -284,7 +297,7 @@ export function computeBotInput(
         me.y,
         snapshot.players.filter((p) => p.id !== botId && p.alive && !p.falling)
       );
-      if (rival.item && rival.dist < 85 && me.cooldownB <= 0 && canAct() && Math.random() < 0.2) {
+      if (rival.item && rival.dist < 82 && me.cooldownB <= 0 && canAct() && Math.random() < 0.14) {
         b = true;
         markActed();
       }
@@ -363,22 +376,22 @@ export function computeBotInput(
         const leftD = dangerAt(me.angle - 1.2, 85);
         const rightD = dangerAt(me.angle + 1.2, 85);
         chosenAngle = leftD < rightD ? me.angle - 1.3 : me.angle + 1.3;
-        if (ahead > 180 && leftD > 120 && rightD > 120 && me.cooldownB <= 0 && canAct()) {
+        if (ahead > 180 && leftD > 120 && rightD > 120 && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
           b = true;
           markActed();
         }
       } else {
         const { item: gp, dist: gpDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
-        if (gp && gpDist < 220) {
+        if (gp && gpDist < 200) {
           const toPick = Math.atan2(gp.y - me.y, gp.x - me.x);
           if (dangerAt(toPick, 78) < 30) chosenAngle = toPick;
-        } else if (Math.random() < 0.04) {
-          chosenAngle += (Math.random() - 0.5) * 0.7;
+        } else if (Math.random() < 0.055) {
+          chosenAngle += (Math.random() - 0.5) * 0.75;
         }
       }
       dx = Math.cos(chosenAngle) * tuning.moveScale;
       dy = Math.sin(chosenAngle) * tuning.moveScale;
-      if (ahead < 20 && me.cooldownA <= 0 && canAct() && Math.random() < 0.04) {
+      if (ahead < 20 && me.cooldownA <= 0 && canAct() && Math.random() < 0.03) {
         a = true;
         markActed();
       }
@@ -391,12 +404,12 @@ export function computeBotInput(
       const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
       const { item: tPick, dist: tPickDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       const { item: target, dist } = nearestOf(me.x, me.y, rivals);
-      if (tPick && tPickDist < 210 && dist > 160) {
-        const s = steerToward(me.x, me.y, tPick.x, tPick.y, tuning);
+      if (tPick && tPickDist < 200 && dist > 160) {
+        const s = steerToward(me.x, me.y, tPick.x, tPick.y, tuning, mem.driftPhase * 0.4);
         dx = s.dx;
         dy = s.dy;
       } else if (target) {
-        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.wanderAngle);
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase);
         if (dist < 220) {
           dx = -s.dy * mem.strafeDir;
           dy = s.dx * mem.strafeDir;
@@ -404,11 +417,11 @@ export function computeBotInput(
           dx = s.dx;
           dy = s.dy;
         }
-        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.16) {
+        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.11) {
           a = true;
           markActed();
         }
-        if (dist < 145 && me.cooldownB <= 0 && canAct() && Math.random() < 0.1) {
+        if (dist < 140 && me.cooldownB <= 0 && canAct() && Math.random() < 0.07) {
           b = true;
           markActed();
         }
@@ -425,20 +438,21 @@ export function computeBotInput(
       const ball = snapshot.ball;
       const enemyGoalX = me.team === 'red' ? ARENA_WIDTH - 40 : 40;
       const enemyGoalY = ARENA_HEIGHT / 2;
-      // Aim for point slightly behind ball aligned with enemy goal
+      // Aim slightly behind ball toward enemy goal with gentle human offset
       const bgx = enemyGoalX - ball.x;
       const bgy = enemyGoalY - ball.y;
       const bgd = Math.hypot(bgx, bgy) || 1;
+      const aimOffY = Math.sin(mem.driftPhase * 1.1) * (1 - tuning.reflexFactor) * 44;
       const desiredX = ball.x - (bgx / bgd) * 34;
-      const desiredY = ball.y - (bgy / bgd) * 34;
-      const s = steerToward(me.x, me.y, desiredX, desiredY, tuning);
+      const desiredY = ball.y - (bgy / bgd) * 34 + aimOffY;
+      const s = steerToward(me.x, me.y, desiredX, desiredY, tuning, mem.driftPhase * 0.5);
       dx = s.dx;
       dy = s.dy;
       const distBall = Math.hypot(ball.x - me.x, ball.y - me.y);
-      if (distBall < 74 && me.cooldownA <= 0 && canAct()) {
+      if (distBall < 68 && me.cooldownA <= 0 && canAct()) {
         a = true;
         markActed();
-      } else if (distBall > 170 && me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+      } else if (distBall > 180 && me.cooldownB <= 0 && canAct() && Math.random() < 0.055) {
         b = true;
         markActed();
       }
@@ -488,13 +502,13 @@ export function computeBotInput(
           }
         }
       }
-      const s = steerToward(me.x, me.y, targetX, targetY, tuning);
+      const s = steerToward(me.x, me.y, targetX, targetY, tuning, mem.driftPhase * 0.5);
       dx = s.dx;
       dy = s.dy;
-      if (me.cooldownA <= 0 && canAct() && Math.random() < 0.1) {
+      if (me.cooldownA <= 0 && canAct() && Math.random() < 0.07) {
         a = true;
         markActed();
-      } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+      } else if (me.cooldownB <= 0 && canAct() && Math.random() < 0.055) {
         b = true;
         markActed();
       }
@@ -506,27 +520,27 @@ export function computeBotInput(
       if (!me || !me.alive) break;
       const { item: orb, dist: orbD } = nearestOf(me.x, me.y, snapshot.orbs);
       const { item: lgPick, dist: lgDist } = nearestOf(me.x, me.y, snapshot.powerups ?? []);
-      if (orb && orbD < 130) {
-        const s = steerToward(orb.x, orb.y, me.x, me.y, tuning);
+      if (orb && orbD < 122) {
+        const s = steerToward(orb.x, orb.y, me.x, me.y, tuning, mem.driftPhase * 0.4);
         dx = s.dx;
         dy = s.dy;
-        if (orbD < 75 && me.cooldownA <= 0 && canAct()) {
+        if (orbD < 66 && me.cooldownA <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
           a = true;
           markActed();
         }
-      } else if (lgPick && lgDist < 200) {
+      } else if (lgPick && lgDist < 190) {
         const s = steerToward(me.x, me.y, lgPick.x, lgPick.y, tuning);
         dx = s.dx;
         dy = s.dy;
       } else {
         const { item: sh } = nearestOf(me.x, me.y, snapshot.shards);
         if (sh) {
-          const s = steerToward(me.x, me.y, sh.x, sh.y, tuning);
+          const s = steerToward(me.x, me.y, sh.x, sh.y, tuning, mem.driftPhase * 0.4);
           dx = s.dx;
           dy = s.dy;
         }
       }
-      if (snapshot.orbs.length >= 3 && me.cooldownB <= 0 && canAct() && Math.random() < 0.06) {
+      if (snapshot.orbs.length >= 3 && me.cooldownB <= 0 && canAct() && Math.random() < 0.045) {
         b = true;
         markActed();
       }
@@ -538,10 +552,10 @@ export function computeBotInput(
       if (!me) break;
       const { item: vhPick, dist: vhDist } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
       if (me.carrying >= 2) {
-        const s = steerToward(me.x, me.y, snapshot.portal.x, snapshot.portal.y, tuning);
+        const s = steerToward(me.x, me.y, snapshot.portal.x, snapshot.portal.y, tuning, mem.driftPhase * 0.4);
         dx = s.dx;
         dy = s.dy;
-      } else if (vhPick && vhDist < 170) {
+      } else if (vhPick && vhDist < 165) {
         const s = steerToward(me.x, me.y, vhPick.x, vhPick.y, tuning);
         dx = s.dx;
         dy = s.dy;
@@ -549,13 +563,13 @@ export function computeBotInput(
         const crowns = snapshot.relics.filter((r) => r.kind === 'crown');
         const { item: rel } = nearestOf(me.x, me.y, crowns.length > 0 ? crowns : snapshot.relics);
         if (rel) {
-          const s = steerToward(me.x, me.y, rel.x, rel.y, tuning);
+          const s = steerToward(me.x, me.y, rel.x, rel.y, tuning, mem.driftPhase * 0.4);
           dx = s.dx;
           dy = s.dy;
         }
       }
       const nearDrone = nearestOf(me.x, me.y, snapshot.drones.filter((d) => d.disabledTimer <= 0));
-      if (nearDrone.item && nearDrone.dist < 135) {
+      if (nearDrone.item && nearDrone.dist < 115 && Math.random() < tuning.reflexFactor) {
         if (me.cooldownB <= 0 && canAct()) {
           b = true;
           markActed();
@@ -571,24 +585,25 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me) break;
       const puck = snapshot.puck;
-      const onMySide = me.side === 'left' ? puck.x < ARENA_WIDTH * 0.55 : puck.x > ARENA_WIDTH * 0.45;
+      const onMySide = me.side === 'left' ? puck.x < ARENA_WIDTH * 0.54 : puck.x > ARENA_WIDTH * 0.46;
       const homeX = me.side === 'left' ? 190 : ARENA_WIDTH - 190;
       const targetX = onMySide
         ? me.side === 'left'
           ? Math.min(ARENA_WIDTH / 2 - 60, Math.max(115, puck.x + 12))
           : Math.max(ARENA_WIDTH / 2 + 60, Math.min(ARENA_WIDTH - 115, puck.x - 12))
         : homeX;
-      const targetY = Math.max(96, Math.min(ARENA_HEIGHT - 96, puck.y));
+      const humanOffsetY = Math.sin(mem.driftPhase * 1.35) * (1 - tuning.reflexFactor) * 48;
+      const targetY = Math.max(96, Math.min(ARENA_HEIGHT - 96, puck.y + humanOffsetY));
       const s = steerToward(me.x, me.y, targetX, targetY, tuning);
-      if (s.dist > 14) {
+      if (s.dist > 22) {
         dx = s.dx;
         dy = s.dy;
       }
       const pDist = Math.hypot(puck.x - me.x, puck.y - me.y);
-      if (pDist < 95 && me.cooldownA <= 0 && canAct()) {
+      if (pDist < 86 && me.cooldownA <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
         a = true;
         markActed();
-      } else if (pDist < 180 && pDist > 90 && me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+      } else if (pDist < 175 && pDist > 92 && me.cooldownB <= 0 && canAct() && Math.random() < 0.06) {
         b = true;
         markActed();
       }
@@ -611,7 +626,7 @@ export function computeBotInput(
         dx = s.dx;
         dy = s.dy;
       } else if (rival) {
-        const s = steerToward(me.x, me.y, rival.x, rival.y, tuning);
+        const s = steerToward(me.x, me.y, rival.x, rival.y, tuning, mem.driftPhase * 0.4);
         if (s.dist > 165) {
           dx = s.dx * 0.85 - s.dy * 0.3 * mem.strafeDir;
           dy = s.dy * 0.85 + s.dx * 0.3 * mem.strafeDir;
@@ -619,10 +634,10 @@ export function computeBotInput(
           dx = -s.dy * 0.7 * mem.strafeDir;
           dy = s.dx * 0.7 * mem.strafeDir;
         }
-        if (rival.slashTimer > 0.05 && s.dist < 175 && me.cooldownB <= 0 && canAct()) {
+        if (rival.slashTimer > 0.05 && s.dist < 170 && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor * 0.55) {
           b = true;
           markActed();
-        } else if (s.dist < 155 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
+        } else if (s.dist < 152 && me.cooldownA <= 0 && canAct() && Math.random() < 0.11) {
           dx = s.dx;
           dy = s.dy;
           a = true;
@@ -635,19 +650,19 @@ export function computeBotInput(
     case 'cannon-siege': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me) break;
-      const nearPick = (snapshot.pickups ?? []).find((pk) => Math.abs(pk.x - me.x) < 160);
+      const nearPick = (snapshot.pickups ?? []).find((pk) => Math.abs(pk.x - me.x) < 150);
       const targetY = nearPick
         ? nearPick.y
-        : snapshot.goldenTarget && Math.random() < 0.55
+        : snapshot.goldenTarget && Math.random() < 0.42
           ? snapshot.goldenTarget.y
           : ARENA_HEIGHT / 2 + Math.sin(mem.wanderAngle * 2) * 210;
       const diffY = targetY - me.y;
-      dy = Math.abs(diffY) > 16 ? Math.sign(diffY) * tuning.moveScale * 0.75 : 0;
-      a = me.cooldownA <= 0 && Math.random() < tuning.abilityChance * 0.45;
+      dy = Math.abs(diffY) > 20 ? Math.sign(diffY) * tuning.moveScale * 0.72 : 0;
+      a = me.cooldownA <= 0 && Math.random() < tuning.abilityChance * 0.36;
       const incoming = snapshot.shells.find(
-        (sh) => sh.ownerId !== me.id && Math.hypot(sh.x - me.x, sh.y - me.y) < 130
+        (sh) => sh.ownerId !== me.id && Math.hypot(sh.x - me.x, sh.y - me.y) < 118
       );
-      if (incoming && me.cooldownB <= 0 && canAct()) {
+      if (incoming && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor * 0.65) {
         b = true;
         markActed();
       }
@@ -668,7 +683,7 @@ export function computeBotInput(
           const m = Math.hypot(fx, fy) || 1;
           dx = (fx / m) * tuning.moveScale;
           dy = (fy / m) * tuning.moveScale;
-          if (dist < 115 && me.cooldownB <= 0 && canAct()) {
+          if (dist < 110 && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
             b = true;
             markActed();
           }
@@ -678,10 +693,10 @@ export function computeBotInput(
         dx = s.dx;
         dy = s.dy;
       } else {
-        const s = steerToward(me.x, me.y, snapshot.crownX, snapshot.crownY, tuning);
+        const s = steerToward(me.x, me.y, snapshot.crownX, snapshot.crownY, tuning, mem.driftPhase * 0.5);
         dx = s.dx;
         dy = s.dy;
-        if (s.dist < 145 && me.cooldownA <= 0 && canAct() && Math.random() < 0.2) {
+        if (s.dist < 140 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
           a = true;
           markActed();
         }
@@ -701,13 +716,13 @@ export function computeBotInput(
           dx = s.dx;
           dy = s.dy;
         } else if (target) {
-          const s = steerToward(me.x, me.y, target.x, target.y, tuning);
+          const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase * 0.5);
           dx = s.dx;
           dy = s.dy;
-          if (dist < 260 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
+          if (dist < 240 && me.cooldownA <= 0 && canAct() && Math.random() < 0.09) {
             a = true;
             markActed();
-          } else if (dist < 190 && me.cooldownB <= 0 && canAct() && Math.random() < 0.05) {
+          } else if (dist < 180 && me.cooldownB <= 0 && canAct() && Math.random() < 0.04) {
             b = true;
             markActed();
           }
@@ -716,20 +731,20 @@ export function computeBotInput(
         const hunters = snapshot.players.filter((p) => p.role === 'hunter');
         const { item: hunter, dist: hDist } = nearestOf(me.x, me.y, hunters);
         const frozenAlly = snapshot.players.find((p) => p.role === 'runner' && p.frozen);
-        if (hunter && hDist < 220) {
+        if (hunter && hDist < 205) {
           const d = hDist || 1;
           dx = ((me.x - hunter.x) / d) * tuning.moveScale;
           dy = ((me.y - hunter.y) / d) * tuning.moveScale;
-          if (hDist < 120 && me.cooldownA <= 0 && canAct()) {
+          if (hDist < 105 && me.cooldownA <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
             a = true;
             markActed();
           }
-        } else if (ftPick && ftDist < 200) {
+        } else if (ftPick && ftDist < 190) {
           const s = steerToward(me.x, me.y, ftPick.x, ftPick.y, tuning);
           dx = s.dx;
           dy = s.dy;
         } else if (frozenAlly) {
-          const s = steerToward(me.x, me.y, frozenAlly.x, frozenAlly.y, tuning);
+          const s = steerToward(me.x, me.y, frozenAlly.x, frozenAlly.y, tuning, mem.driftPhase * 0.4);
           dx = s.dx;
           dy = s.dy;
         } else {
@@ -748,41 +763,41 @@ export function computeBotInput(
       const { item: ghOrb, dist: ghOrbD } = nearestOf(me.x, me.y, snapshot.orbs ?? []);
       if (me.role === 'ghost') {
         const { item: near, dist } = nearestOf(me.x, me.y, hunters);
-        if (ghOrb && ghOrb.kind === 'ecto' && ghOrbD < 190 && (!near || dist > 150)) {
+        if (ghOrb && ghOrb.kind === 'ecto' && ghOrbD < 185 && (!near || dist > 150)) {
           const s = steerToward(me.x, me.y, ghOrb.x, ghOrb.y, tuning);
           dx = s.dx;
           dy = s.dy;
         } else if (near) {
-          if (me.visibility > 0.65 && dist < 240) {
-            const s = steerToward(near.x, near.y, me.x, me.y, tuning);
+          if (me.visibility > 0.65 && dist < 230) {
+            const s = steerToward(near.x, near.y, me.x, me.y, tuning, mem.driftPhase * 0.4);
             dx = s.dx;
             dy = s.dy;
-            if (me.cooldownB <= 0 && canAct()) {
+            if (me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
               b = true;
               markActed();
             }
           } else {
-            const s = steerToward(me.x, me.y, near.x, near.y, tuning);
-            dx = s.dx * 0.85;
-            dy = s.dy * 0.85;
-            if (dist < 135 && me.cooldownA <= 0 && canAct()) {
+            const s = steerToward(me.x, me.y, near.x, near.y, tuning, mem.driftPhase * 0.4);
+            dx = s.dx * 0.82;
+            dy = s.dy * 0.82;
+            if (dist < 128 && me.cooldownA <= 0 && canAct()) {
               a = true;
               markActed();
             }
           }
         }
-      } else if (ghOrb && ghOrbD < 180) {
+      } else if (ghOrb && ghOrbD < 175) {
         const s = steerToward(me.x, me.y, ghOrb.x, ghOrb.y, tuning);
         dx = s.dx;
         dy = s.dy;
       } else if (ghost) {
-        const s = steerToward(me.x, me.y, ghost.x, ghost.y, tuning, mem.wanderAngle);
-        dx = s.dx * 0.82;
-        dy = s.dy * 0.82;
-        if (ghost.visibility > 0.45 && s.dist < 300 && me.cooldownA <= 0 && canAct() && Math.random() < 0.2) {
+        const s = steerToward(me.x, me.y, ghost.x, ghost.y, tuning, mem.driftPhase);
+        dx = s.dx * 0.8;
+        dy = s.dy * 0.8;
+        if (ghost.visibility > 0.48 && s.dist < 285 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
           a = true;
           markActed();
-        } else if (ghost.visibility < 0.3 && me.cooldownB <= 0 && canAct() && Math.random() < 0.04) {
+        } else if (ghost.visibility < 0.3 && me.cooldownB <= 0 && canAct() && Math.random() < 0.03) {
           b = true;
           markActed();
         }
@@ -799,19 +814,19 @@ export function computeBotInput(
         const s = steerToward(me.x, me.y, downedAlly.x, downedAlly.y, tuning);
         dx = s.dx;
         dy = s.dy;
-      } else if (msPick && msDist < 200) {
+      } else if (msPick && msDist < 190) {
         const s = steerToward(me.x, me.y, msPick.x, msPick.y, tuning);
         dx = s.dx;
         dy = s.dy;
       } else {
         const { item: threat, dist } = nearestOf(me.x, me.y, snapshot.meteors);
         if (threat) {
-          const s = steerToward(me.x, me.y, threat.x, threat.y, tuning);
+          const s = steerToward(me.x, me.y, threat.x, threat.y, tuning, mem.driftPhase * 0.7);
           if (dist < 130) {
             // Back off slightly while firing
             dx = -s.dx * 0.5;
             dy = -s.dy * 0.5;
-            if (dist < 90 && me.cooldownB <= 0 && canAct()) {
+            if (dist < 85 && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
               b = true;
               markActed();
             }
@@ -819,7 +834,7 @@ export function computeBotInput(
             dx = s.dx;
             dy = s.dy;
           }
-          a = dist < 440 && Math.random() < tuning.abilityChance * 0.8;
+          a = dist < 420 && Math.random() < tuning.abilityChance * 0.58;
         }
       }
       break;
@@ -840,8 +855,8 @@ export function computeBotInput(
       const { item: hsPick, dist: hsPickD } = nearestOf(me.x, me.y, safeCollectibles);
       const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive && !p.falling);
       const { item: rival, dist } = nearestOf(me.x, me.y, rivals);
-      if (rival && dist < 430 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
-        const aim = steerToward(me.x, me.y, rival.x, rival.y, tuning);
+      if (rival && dist < 410 && me.cooldownA <= 0 && canAct() && Math.random() < 0.09) {
+        const aim = steerToward(me.x, me.y, rival.x, rival.y, tuning, mem.driftPhase);
         dx = aim.dx;
         dy = aim.dy;
         a = true;
@@ -857,7 +872,7 @@ export function computeBotInput(
           dy = s.dy * 0.7;
         }
       }
-      if ((me.hookedBy || (rival && dist < 105)) && me.cooldownB <= 0 && canAct()) {
+      if ((me.hookedBy || (rival && dist < 100)) && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
         b = true;
         markActed();
       }
@@ -868,22 +883,23 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
       const mySide: 'floor' | 'ceiling' = me.gravityDir === 1 ? 'floor' : 'ceiling';
+      const lookDist = difficulty === 'chill' ? 148 : difficulty === 'arcade' ? 168 : 184;
       const aheadDanger = snapshot.obstacles.find(
-        (ob) => ob.x > me.x - 20 && ob.x < me.x + 195 && (ob.side === mySide || ob.side === 'mid')
+        (ob) => ob.x > me.x - 16 && ob.x < me.x + lookDist && (ob.side === mySide || ob.side === 'mid')
       );
       if (aheadDanger) {
         if (aheadDanger.side === mySide && me.cooldownA <= 0 && canAct()) {
           a = true;
           markActed();
-        } else if (me.cooldownB <= 0 && canAct()) {
+        } else if (me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
           b = true;
           markActed();
         }
       } else {
         // Flip toward upcoming coins or pickups on the opposite lane when safe
         const rewardList = [...snapshot.coins, ...(snapshot.pickups ?? [])];
-        const nextCoin = rewardList.find((c) => c.x > me.x + 40 && c.x < me.x + 260);
-        if (nextCoin) {
+        const nextCoin = rewardList.find((c) => c.x > me.x + 40 && c.x < me.x + 250);
+        if (nextCoin && Math.random() < tuning.reflexFactor * 0.6) {
           const coinSide: 'floor' | 'ceiling' =
             nextCoin.y > (snapshot.floorY + snapshot.ceilingY) / 2 ? 'floor' : 'ceiling';
           const oppositeDanger = snapshot.obstacles.some(
@@ -907,24 +923,24 @@ export function computeBotInput(
     case 'rich-street': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.bankrupt || snapshot.activePlayerId !== botId) break;
-      // Realistic ~0.8s board-game thinking delay via turnTimeLeft
-      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 9.1 && mem.actionCooldown <= 0) {
+      // Realistic board-game thinking delay via turnTimeLeft
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 8.8 && mem.actionCooldown <= 0) {
         if (me.luckyCharge >= 100 && !me.rentShield && Math.random() < tuning.abilityChance) {
           b = true;
-          mem.actionCooldown = 0.6;
+          mem.actionCooldown = 0.65;
         } else {
           a = true;
-          mem.actionCooldown = 0.7;
+          mem.actionCooldown = 0.75;
         }
-      } else if (snapshot.phase === 'decision' && snapshot.turnTimeLeft < 7.0 && mem.actionCooldown <= 0) {
-        const keepBuffer = difficulty === 'chill' ? 320 : difficulty === 'arcade' ? 180 : 90;
+      } else if (snapshot.phase === 'decision' && snapshot.turnTimeLeft < 6.8 && mem.actionCooldown <= 0) {
+        const keepBuffer = difficulty === 'chill' ? 360 : difficulty === 'arcade' ? 220 : 120;
         const canAffordComfortably = me.cash - snapshot.decisionCost >= keepBuffer;
         if (canAffordComfortably || (snapshot.decisionAction === 'buy' && me.propertiesOwned < 2 && me.cash >= snapshot.decisionCost)) {
           a = true;
         } else {
           b = true;
         }
-        mem.actionCooldown = 0.7;
+        mem.actionCooldown = 0.75;
       }
       break;
     }
@@ -932,17 +948,16 @@ export function computeBotInput(
     case 'jungle-ladders': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || snapshot.activePlayerId !== botId) break;
-      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 9.1 && mem.actionCooldown <= 0) {
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 8.9 && mem.actionCooldown <= 0) {
         if (me.trickReady && !me.boostQueued && Math.random() < tuning.abilityChance) {
           b = true;
-          mem.actionCooldown = 0.55;
+          mem.actionCooldown = 0.6;
         } else {
-          // Spicy bots time the power meter high; chill bots roll casually
           const goodTiming =
             difficulty === 'spicy'
-              ? snapshot.powerMeter > 0.78
+              ? snapshot.powerMeter > 0.68
               : difficulty === 'arcade'
-                ? snapshot.powerMeter > 0.62
+                ? snapshot.powerMeter > 0.5
                 : true;
           if (goodTiming || snapshot.turnTimeLeft < 7.2) {
             a = true;
@@ -991,14 +1006,14 @@ export function computeBotInput(
           const s = steerToward(me.x, me.y, rival.x, rival.y, tuning, mem.wanderAngle);
           dx = s.dx;
           dy = s.dy;
-          if (dist < 135 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
+          if (dist < 135 && me.cooldownA <= 0 && canAct() && Math.random() < 0.1) {
             a = true;
             markActed();
           }
         } else {
           dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.8;
           dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.8;
-          if (me.cooldownA <= 0 && canAct() && Math.random() < 0.04) {
+          if (me.cooldownA <= 0 && canAct() && Math.random() < 0.03) {
             a = true;
             markActed();
           }
@@ -1014,10 +1029,10 @@ export function computeBotInput(
         dx = tuning.moveScale;
         let steerY = Math.sin(mem.wanderAngle) * 0.15;
         const nearApple = (snapshot.apples ?? []).find(
-          (ap) => ap.x > me.x && ap.x < me.x + 130 && Math.abs(ap.y - me.y) < 110
+          (ap) => ap.x > me.x && ap.x < me.x + 125 && Math.abs(ap.y - me.y) < 105
         );
         const nearPuddle = (snapshot.puddles ?? []).find(
-          (pd) => pd.x > me.x - 10 && pd.x < me.x + 85 && Math.abs(pd.y - me.y) < pd.ry + 18
+          (pd) => pd.x > me.x - 10 && pd.x < me.x + 80 && Math.abs(pd.y - me.y) < pd.ry + 16
         );
         if (nearPuddle) {
           steerY = Math.sign(me.y - nearPuddle.y || 1) * 0.75 * tuning.moveScale;
@@ -1025,13 +1040,14 @@ export function computeBotInput(
           steerY = Math.sign(nearApple.y - me.y) * 0.65 * tuning.moveScale;
         }
         dy = steerY;
-        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.16) {
+        if (me.cooldownA <= 0 && canAct() && Math.random() < 0.11) {
           a = true;
           markActed();
         }
       } else if (snapshot.lightState === 'yellow') {
-        const brakeNow = difficulty === 'spicy' || snapshot.lightTimer < 0.45;
-        dx = brakeNow ? 0 : tuning.moveScale * 0.45;
+        const brakeThresh = difficulty === 'spicy' ? 0.52 : difficulty === 'arcade' ? 0.36 : 0.24;
+        const brakeNow = snapshot.lightTimer < brakeThresh;
+        dx = brakeNow ? 0 : tuning.moveScale * 0.5;
       } else {
         dx = 0;
         dy = 0;
@@ -1042,10 +1058,19 @@ export function computeBotInput(
     case 'color-match': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive || me.falling) break;
+      if (mem.lastColorIdx !== snapshot.targetColorIndex) {
+        mem.lastColorIdx = snapshot.targetColorIndex;
+        mem.colorReactionTimer = difficulty === 'chill' ? 0.45 : difficulty === 'arcade' ? 0.25 : 0.11;
+      }
+      if ((mem.colorReactionTimer ?? 0) > 0) {
+        dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.25;
+        dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.25;
+        break;
+      }
       const safeTiles = snapshot.tiles.filter(
         (t) => !t.dropped && t.colorIndex === snapshot.targetColorIndex
       );
-      if (snapshot.orb && snapshot.phase === 'scramble' && snapshot.phaseTimer > 1.3 && Math.hypot(snapshot.orb.x - me.x, snapshot.orb.y - me.y) < 150) {
+      if (snapshot.orb && snapshot.phase === 'scramble' && snapshot.phaseTimer > 1.3 && Math.hypot(snapshot.orb.x - me.x, snapshot.orb.y - me.y) < 140) {
         const s = steerToward(me.x, me.y, snapshot.orb.x, snapshot.orb.y, tuning);
         dx = s.dx;
         dy = s.dy;
@@ -1055,7 +1080,7 @@ export function computeBotInput(
         for (const t of safeTiles) {
           const cx = t.x + t.w / 2;
           const cy = t.y + t.h / 2;
-          const d = Math.hypot(cx - me.x, cy - me.y) - (t.bonus ? 95 : 0);
+          const d = Math.hypot(cx - me.x, cy - me.y) - (t.bonus ? 70 * tuning.reflexFactor : 0);
           if (d < bestScore) {
             bestScore = d;
             best = t;
@@ -1065,18 +1090,17 @@ export function computeBotInput(
         const cy = best.y + best.h / 2;
         const bestD = Math.hypot(cx - me.x, cy - me.y);
         if (bestD > 26) {
-          const s = steerToward(me.x, me.y, cx, cy, tuning);
+          const s = steerToward(me.x, me.y, cx, cy, tuning, mem.driftPhase * 0.35);
           dx = s.dx;
           dy = s.dy;
-          if (bestD > 165 && me.cooldownA <= 0 && canAct() && Math.random() < 0.22) {
+          if (bestD > 170 && me.cooldownA <= 0 && canAct() && Math.random() < 0.16) {
             a = true;
             markActed();
           }
         } else {
-          // On safe tile: occasionally shove nearby rival!
           const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive && !p.falling);
           const { item: near, dist } = nearestOf(me.x, me.y, rivals);
-          if (near && dist < 95 && me.cooldownB <= 0 && canAct() && Math.random() < 0.14) {
+          if (near && dist < 92 && me.cooldownB <= 0 && canAct() && Math.random() < 0.09) {
             b = true;
             markActed();
           }
@@ -1091,7 +1115,7 @@ export function computeBotInput(
       const serveSt = snapshot.stations.find((s) => s.kind === 'serve');
       const readyGrill = snapshot.stations.find((s) => s.kind === 'grill' && s.cookingDish && s.cookProgress >= 1);
       const emptyGrill = snapshot.stations.find((s) => s.kind === 'grill' && !s.cookingDish);
-      const vipOrder = snapshot.orders.find((o) => o.vip);
+      const vipOrder = difficulty === 'chill' && Math.random() < 0.5 ? undefined : snapshot.orders.find((o) => o.vip);
       const wantedDish = (vipOrder ?? snapshot.orders[0])?.dish ?? 'burger';
       const rawKind = wantedDish === 'burger' ? 'raw-burger' : wantedDish === 'pizza' ? 'raw-pizza' : 'raw-taco';
       const rawSt = snapshot.stations.find((s) => s.kind === rawKind);
@@ -1101,15 +1125,15 @@ export function computeBotInput(
       let targetY = ARENA_HEIGHT / 2;
       let wantInteract = false;
 
-      if (nearBoots && bootsD < 160 && (me.bootsTimer ?? 0) <= 0) {
+      if (nearBoots && bootsD < 145 && (me.bootsTimer ?? 0) <= 0) {
         targetX = nearBoots.x;
         targetY = nearBoots.y;
       } else if (me.holding && me.holding.cooked && serveSt) {
         targetX = serveSt.x - 32;
         targetY = Math.max(serveSt.y + 30, Math.min(serveSt.y + serveSt.h - 30, me.y));
         const dServe = Math.hypot(targetX - me.x, targetY - me.y);
-        if (dServe < 480 && me.cooldownB <= 0 && canAct()) {
-          // Toss cooked dish straight across to serving counter!
+        const tossRange = difficulty === 'spicy' ? 360 : difficulty === 'arcade' ? 240 : 140;
+        if (dServe < tossRange && me.cooldownB <= 0 && canAct()) {
           b = true;
           markActed();
         } else if (dServe < 85) {
@@ -1155,37 +1179,42 @@ export function computeBotInput(
       const activeCrabs = snapshot.crabs.filter((c) => c.stunTimer <= 0);
       const { item: nearCrab, dist: crabDist } = nearestOf(me.x, me.y, activeCrabs);
       const { item: digPick, dist: digPickD } = nearestOf(me.x, me.y, snapshot.pickups ?? []);
-      if (nearCrab && crabDist < 95) {
+      if (nearCrab && crabDist < 88) {
         const flee = steerToward(nearCrab.x, nearCrab.y, me.x, me.y, tuning);
         dx = flee.dx;
         dy = flee.dy;
-        if (me.cooldownB <= 0 && canAct()) {
+        if (me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
           b = true;
           markActed();
         }
-      } else if (digPick && digPickD < 200) {
+      } else if (digPick && digPickD < 185) {
         const s = steerToward(me.x, me.y, digPick.x, digPick.y, tuning);
         dx = s.dx;
         dy = s.dy;
       } else {
         const revealed = snapshot.spots.filter((s) => s.revealedTimer > 0);
-        const targetList = revealed.length > 0 ? revealed : difficulty === 'spicy' ? snapshot.spots : [];
+        const targetList =
+          revealed.length > 0
+            ? revealed
+            : difficulty === 'spicy' && me.heat > 0.62
+              ? snapshot.spots
+              : [];
         const { item: spot, dist: spotDist } = nearestOf(me.x, me.y, targetList);
         if (spot) {
           const s = steerToward(me.x, me.y, spot.x, spot.y, tuning, mem.wanderAngle);
           dx = s.dx;
           dy = s.dy;
-          if (spotDist < 54 && me.cooldownA <= 0 && canAct()) {
+          if (spotDist < 52 && me.cooldownA <= 0 && canAct()) {
             a = true;
             markActed();
           }
         } else {
-          dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.85;
-          dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.85;
-          if (me.heat > 0.8 && me.cooldownA <= 0 && canAct()) {
+          dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.82;
+          dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.82;
+          if (me.heat > 0.82 && me.cooldownA <= 0 && canAct()) {
             a = true;
             markActed();
-          } else if (me.heat > 0.38 && me.cooldownB <= 0 && canAct() && Math.random() < 0.08) {
+          } else if (me.heat > 0.4 && me.cooldownB <= 0 && canAct() && Math.random() < 0.06) {
             b = true;
             markActed();
           }
@@ -1198,10 +1227,10 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.stunTimer > 0) break;
       const nearbyBomb = snapshot.items.find(
-        (it) => it.kind === 'bomb' && it.y > me.y - 180 && it.y < me.y + 20 && Math.abs(it.x - me.x) < 90
+        (it) => it.kind === 'bomb' && it.y > me.y - 165 && it.y < me.y + 20 && Math.abs(it.x - me.x) < 82
       );
       if (nearbyBomb) {
-        if (me.cooldownB <= 0 && canAct() && Math.abs(nearbyBomb.x - me.x) < 110) {
+        if (me.cooldownB <= 0 && canAct() && Math.abs(nearbyBomb.x - me.x) < 105 && Math.random() < tuning.reflexFactor) {
           b = true;
           markActed();
         } else {
@@ -1212,8 +1241,8 @@ export function computeBotInput(
         let best = goodItems[0] ?? null;
         let bestScore = -Infinity;
         for (const it of goodItems) {
-          const val = it.kind === 'magnet' ? 240 : it.kind === 'star' ? 220 : 90;
-          const score = val + it.y * 0.4 - Math.abs(it.x - me.x) * 0.7;
+          const val = it.kind === 'magnet' ? 185 : it.kind === 'star' ? 175 : 90;
+          const score = val + it.y * 0.35 - Math.abs(it.x - me.x) * 0.72;
           if (score > bestScore) {
             bestScore = score;
             best = it;
@@ -1221,9 +1250,9 @@ export function computeBotInput(
         }
         if (best) {
           const err = best.x - me.x;
-          if (Math.abs(err) > 16) {
+          if (Math.abs(err) > 22) {
             dx = Math.sign(err) * tuning.moveScale;
-            if (Math.abs(err) > 140 && best.y > me.y - 240 && me.cooldownA <= 0 && canAct()) {
+            if (Math.abs(err) > 155 && best.y > me.y - 230 && me.cooldownA <= 0 && canAct()) {
               a = true;
               markActed();
             }
@@ -1245,17 +1274,17 @@ export function computeBotInput(
         (soundsLikeDuck
           ? difficulty === 'chill'
             ? 200
-            : 100
+            : 120
           : difficulty === 'spicy'
-            ? 340
-            : 280) * (mult > 1 ? 1.55 : 1);
+            ? 295
+            : 245) * (mult > 1 ? 1.45 : 1);
       const nextBid = snapshot.highestBid + 50;
-      if (nextBid <= maxWilling && me.cash >= nextBid && Math.random() < 0.14) {
+      if (nextBid <= maxWilling && me.cash >= nextBid && Math.random() < 0.12) {
         a = true;
-        mem.actionCooldown = 1.1;
+        mem.actionCooldown = 1.2;
       } else if ((nextBid > maxWilling || me.cash < nextBid) && snapshot.timer < 7.5 && Math.random() < 0.25) {
         b = true;
-        mem.actionCooldown = 0.8;
+        mem.actionCooldown = 0.85;
       }
       break;
     }
@@ -1263,22 +1292,28 @@ export function computeBotInput(
     case 'pinball-clash': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || snapshot.balls.length === 0) break;
-      // Track ball closest to my side
       const targetBall = [...snapshot.balls].sort(
         (b1, b2) => Math.abs(b1.x - me.x) - Math.abs(b2.x - me.x)
       )[0];
-      const diffY = targetBall.y - me.y;
-      if (Math.abs(diffY) > 14) {
-        dy = Math.sign(diffY) * Math.min(1, Math.abs(diffY) / 70) * tuning.moveScale;
+      const wobbleY = Math.sin(mem.driftPhase * 1.45) * (1 - tuning.reflexFactor) * 44;
+      const diffY = targetBall.y + wobbleY - me.y;
+      if (Math.abs(diffY) > 20) {
+        dy = Math.sign(diffY) * Math.min(1, Math.abs(diffY) / 76) * tuning.moveScale;
       }
       const dist = Math.hypot(targetBall.x - me.x, targetBall.y - me.y);
-      if (dist < 115 && me.cooldownA <= 0 && canAct()) {
+      if (dist < 108 && me.cooldownA <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
         a = true;
         markActed();
-      } else if (dist < 145 && me.cooldownB <= 0 && canAct() && Math.random() < 0.14) {
+      } else if (dist < 140 && me.cooldownB <= 0 && canAct() && Math.random() < 0.1) {
         b = true;
         markActed();
       }
+      break;
+    }
+
+    case 'color-clash':
+    case 'liars-deck': {
+      // Bot card decisions run authoritatively on the server inside colorClash.ts & liarsDeck.ts
       break;
     }
 

@@ -30,7 +30,9 @@ export type GameId =
   | 'treasure-dig'
   | 'fruit-drop'
   | 'lucky-auction'
-  | 'pinball-clash';
+  | 'pinball-clash'
+  | 'color-clash'
+  | 'liars-deck';
 
 export type RoomStatus = 'SETUP' | 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
 
@@ -169,7 +171,9 @@ export interface SoundEvent {
     | 'nav'
     | 'confirm'
     | 'frenzy'
-    | 'wheel';
+    | 'wheel'
+    | 'card'
+    | 'bluff';
   playerId?: string;
   intensity?: number;
 }
@@ -1500,7 +1504,183 @@ export type GameSnapshot =
   | TreasureDigSnapshot
   | FruitDropSnapshot
   | LuckyAuctionSnapshot
-  | PinballClashSnapshot;
+  | PinballClashSnapshot
+  | ColorClashSnapshot
+  | LiarsDeckSnapshot;
+
+// --- 31 & 32. Card Games (Color Clash & Liar's Deck) ---
+export type CardColor = 'red' | 'blue' | 'gold' | 'green' | 'wild';
+export type ClashCardValue =
+  | '1'
+  | '2'
+  | '3'
+  | '4'
+  | '5'
+  | '6'
+  | '7'
+  | '8'
+  | '9'
+  | 'SKIP'
+  | 'REV'
+  | '+2'
+  | 'WILD'
+  | '+4';
+
+export interface ClashCard {
+  id: string;
+  color: CardColor;
+  value: ClashCardValue;
+}
+
+export type LiarRank = 'A' | 'K' | 'Q' | 'J' | '10' | 'JOKER';
+export type LiarSuit = 'spades' | 'hearts' | 'diamonds' | 'clubs' | 'joker';
+
+export interface LiarCard {
+  id: string;
+  rank: LiarRank;
+  suit: LiarSuit;
+}
+
+export interface FlyingCardAnim {
+  id: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  progress: number;
+  faceUp: boolean;
+  flipping?: boolean;
+  colorHex?: string;
+  rankText?: string;
+  suitSymbol?: string;
+  rotStart: number;
+  rotEnd: number;
+}
+
+export interface CardShockwave {
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  colorHex: string;
+  alpha: number;
+}
+
+export interface ColorClashPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cardCount: number;
+  score: number;
+  lastAction: string | null;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface ColorClashSnapshot {
+  gameId: 'color-clash';
+  activePlayerId: string;
+  direction: 1 | -1;
+  activeColor: 'red' | 'blue' | 'gold' | 'green';
+  topCard: ClashCard;
+  recentCards: { color: CardColor; value: ClashCardValue; rot: number }[];
+  drawPenalty: number;
+  deckCount: number;
+  discardCount: number;
+  awaitingColorPick: boolean;
+  turnTimeLeft: number;
+  turnTotal: number;
+  turnCount: number;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: ColorClashPlayerView[];
+}
+
+export interface LiarsDeckPlayerView {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cardCount: number;
+  bluffsCaught: number;
+  truthsLanded: number;
+  bustedCount: number;
+  score: number;
+  lastAction: string | null;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface LiarsDeckSnapshot {
+  gameId: 'liars-deck';
+  round: number;
+  targetRank: 'A' | 'K' | 'Q' | 'J' | '10';
+  activePlayerId: string;
+  lastClaimPlayerId: string | null;
+  lastClaimPlayerName: string | null;
+  lastClaimCount: number;
+  phase: 'selecting' | 'challenge' | 'reveal';
+  turnTimeLeft: number;
+  turnTotal: number;
+  pileCount: number;
+  revealedCards: (LiarCard & { matchesTarget: boolean })[];
+  revealVerdict: 'bluff-caught' | 'truth-confirmed' | null;
+  banner: string | null;
+  bannerColor: string | null;
+  flyingCards: FlyingCardAnim[];
+  shockwaves: CardShockwave[];
+  popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: LiarsDeckPlayerView[];
+}
+
+export interface CardPrivateHandItem {
+  id: string;
+  kind: 'clash' | 'liar';
+  color?: CardColor;
+  value?: string;
+  rank?: LiarRank;
+  suit?: LiarSuit;
+  playable: boolean;
+  selected: boolean;
+}
+
+export interface CardPrivateState {
+  gameId: 'color-clash' | 'liars-deck';
+  playerId: string;
+  hand: CardPrivateHandItem[];
+  cursorIndex: number;
+  isMyTurn: boolean;
+  isActionRequired: boolean;
+  turnTimeLeft: number;
+  turnTotal: number;
+  activeColor?: 'red' | 'blue' | 'gold' | 'green';
+  awaitingColorPick?: boolean;
+  drawPenalty?: number;
+  phase?: 'selecting' | 'challenge' | 'reveal';
+  targetRank?: 'A' | 'K' | 'Q' | 'J' | '10';
+  canCallBluff?: boolean;
+  canTrust?: boolean;
+  lastClaimSummary?: string | null;
+  selectedCount?: number;
+  statusHint: string;
+  statusHintZh: string;
+}
+
+export type CardClientAction =
+  | { type: 'select-index'; index: number }
+  | { type: 'play-card'; cardId?: string }
+  | { type: 'draw-or-pass' }
+  | { type: 'pick-color'; color: 'red' | 'blue' | 'gold' | 'green' }
+  | { type: 'toggle-card'; cardId: string }
+  | { type: 'submit-selected' }
+  | { type: 'call-bluff' }
+  | { type: 'trust-claim' };
 
 export interface FrenzyState {
   active: boolean;
@@ -1590,6 +1770,7 @@ export type ClientMessage =
   | { type: 'tournament:start' }
   | { type: 'tournament:next' }
   | { type: 'tournament:exit' }
+  | { type: 'card:action'; action: CardClientAction }
   | { type: 'controller:input'; input: ControllerInput }
   | { type: 'ping' };
 
@@ -1606,6 +1787,7 @@ export type ServerMessage =
       emoji: string;
     }
   | { type: 'game:tick'; snapshot: GameSnapshot; sounds: SoundEvent[] }
+  | { type: 'player:card-state'; cardState: CardPrivateState | null }
   | { type: 'player:haptic'; pattern: number | number[]; reason?: string }
   | { type: 'room:closed'; reason: string }
   | { type: 'error'; message: string; code?: string }

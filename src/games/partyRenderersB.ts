@@ -19,6 +19,7 @@ import {
   drawStudioBackdrop,
   shadeHex,
 } from './render25d';
+import { getMotionTime, getPodFx, getSpringBannerAnim } from './arcadeMotion';
 
 function drawHudPill(ctx: CanvasRenderingContext2D, leftText: string, centerText: string, rightText?: string) {
   ctx.save();
@@ -95,7 +96,8 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
   }
 
   // Ice Rink Pickups
-  const fBob = Math.sin(Date.now() * 0.006) * 3;
+  const freezeTime = getMotionTime();
+  const fBob = Math.sin(freezeTime * 6) * 3.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'thaw-star' ? '#FFB800' : pk.kind === 'turbo-skates' ? '#10D98B' : '#00C2FF';
     const label = pk.kind === 'thaw-star' ? '★' : pk.kind === 'turbo-skates' ? 'SPD' : 'ICE';
@@ -174,6 +176,7 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
         rimColor: p.role === 'hunter' ? '#38BDF8' : '#FFFFFF',
         frozen: p.frozen,
         showVisor: false,
+        playerId: p.id,
       });
 
       const tag = p.role === 'hunter' ? 'HUNTER' : p.frozen ? 'THAW ME!' : undefined;
@@ -181,8 +184,18 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
     }
   }
 
-  // 3D Frost bolts
+  // 3D Frost bolts with icy speed tail
   for (const b of snap.bolts) {
+    const sp = Math.hypot(b.vx, b.vy) || 1;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(125, 211, 252, 0.52)';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y - 7);
+    ctx.lineTo(b.x - (b.vx / sp) * 20, b.y - 7 - (b.vy / sp) * 20);
+    ctx.stroke();
+    ctx.restore();
     drawSphere3D(ctx, b.x, b.y, 9, '#38BDF8', '#FFFFFF', 7, true);
   }
 
@@ -190,11 +203,15 @@ export function renderFreezeTag(ctx: CanvasRenderingContext2D, snap: FreezeTagSn
 
   drawHudPill(ctx, `FROZEN ${snap.frozenCount}/${snap.runnerCount}`, `${Math.ceil(snap.timeLeft)}s`, 'FREEZE TAG');
   if (snap.banner) {
+    const anim = getSpringBannerAnim('freeze-banner', snap.banner);
     ctx.save();
+    ctx.translate(ARENA_WIDTH / 2, 76);
+    ctx.scale(anim.scale, anim.scale);
+    ctx.globalAlpha = anim.alpha;
     ctx.font = '800 22px "Bricolage Grotesque", sans-serif';
     ctx.fillStyle = '#E0F2FE';
     ctx.textAlign = 'center';
-    ctx.fillText(tCanvas(snap.banner), ARENA_WIDTH / 2, 76);
+    ctx.fillText(tCanvas(snap.banner), 0, 0);
     ctx.restore();
   }
 }
@@ -225,7 +242,8 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
   }
 
   // Manor Orbs (Flare / Ecto)
-  const gBob = Math.sin(Date.now() * 0.006) * 3;
+  const ghostTime = getMotionTime();
+  const gBob = Math.sin(ghostTime * 6) * 3.5;
   for (const ob of snap.orbs ?? []) {
     const col = ob.kind === 'flare' ? '#FFB800' : '#C084FC';
     const label = ob.kind === 'flare' ? 'FLR' : 'ECT';
@@ -292,7 +310,7 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
   ];
   items.sort((a, b) => a.y - b.y);
 
-  const bob = Math.sin(Date.now() * 0.006) * 4;
+  const bob = Math.sin(ghostTime * 6) * 4.5;
   for (const it of items) {
     if (it.kind === 'wall') {
       const { w } = it;
@@ -301,12 +319,13 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
       const { p } = it;
       if (p.role === 'ghost') {
         const vis = Math.max(0.06, p.visibility);
+        const swayX = Math.sin(ghostTime * 4.5) * 3;
         drawShadowOval(ctx, p.x, p.y + 16, 18, 9, 0.35 * vis);
 
         ctx.save();
         ctx.globalAlpha = vis;
         const gy = p.y - 10 + bob;
-        const gGrad = ctx.createRadialGradient(p.x - 6, gy - 8, 3, p.x, gy, 24);
+        const gGrad = ctx.createRadialGradient(p.x + swayX - 6, gy - 8, 3, p.x + swayX, gy, 24);
         gGrad.addColorStop(0, '#E9D5FF');
         gGrad.addColorStop(0.5, '#A855F7');
         gGrad.addColorStop(1, '#581C87');
@@ -314,12 +333,12 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
         ctx.strokeStyle = '#F3E8FF';
         ctx.lineWidth = 2.2;
         ctx.beginPath();
-        ctx.arc(p.x, gy, 20, Math.PI, 0);
-        ctx.lineTo(p.x + 20, gy + 18);
-        ctx.lineTo(p.x + 10, gy + 12);
-        ctx.lineTo(p.x, gy + 18);
-        ctx.lineTo(p.x - 10, gy + 12);
-        ctx.lineTo(p.x - 20, gy + 18);
+        ctx.arc(p.x + swayX, gy, 20, Math.PI, 0);
+        ctx.lineTo(p.x + swayX + 20, gy + 18);
+        ctx.lineTo(p.x + swayX + 10, gy + 12);
+        ctx.lineTo(p.x + swayX, gy + 18);
+        ctx.lineTo(p.x + swayX - 10, gy + 12);
+        ctx.lineTo(p.x + swayX - 20, gy + 18);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
@@ -327,19 +346,20 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
         // Glowing eyes
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.arc(p.x - 6, gy - 3, 3.3, 0, Math.PI * 2);
-        ctx.arc(p.x + 6, gy - 3, 3.3, 0, Math.PI * 2);
+        ctx.arc(p.x + swayX - 6, gy - 3, 3.3, 0, Math.PI * 2);
+        ctx.arc(p.x + swayX + 6, gy - 3, 3.3, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
         if (p.visibility > 0.32) {
-          drawNameplate(ctx, p.x, p.y - 42 + bob, p.slotIndex, p.name, '#C084FC', `HP ${p.hp}`);
+          drawNameplate(ctx, p.x + swayX, p.y - 42 + bob, p.slotIndex, p.name, '#C084FC', `HP ${p.hp}`);
         }
       } else {
         drawCharacterPod3D(ctx, p.x, p.y, 17, p.angle, p.colorHex, {
           height: 10,
           rimColor: '#FFFFFF',
           visorColor: '#FEF08A',
+          playerId: p.id,
         });
         drawNameplate(ctx, p.x, p.y - 36, p.slotIndex, p.name, p.colorHex, `HP ${p.hp}`);
       }
@@ -351,11 +371,15 @@ export function renderGhostHunt(ctx: CanvasRenderingContext2D, snap: GhostHuntSn
   const ghost = snap.players.find((p) => p.role === 'ghost');
   drawHudPill(ctx, `PHANTOM HP ${ghost?.hp ?? 0}`, `${Math.ceil(snap.timeLeft)}s`, 'GHOST HUNT');
   if (snap.banner) {
+    const anim = getSpringBannerAnim('ghost-banner', snap.banner);
     ctx.save();
+    ctx.translate(ARENA_WIDTH / 2, 76);
+    ctx.scale(anim.scale, anim.scale);
+    ctx.globalAlpha = anim.alpha;
     ctx.font = '800 22px "Bricolage Grotesque", sans-serif';
     ctx.fillStyle = '#E9D5FF';
     ctx.textAlign = 'center';
-    ctx.fillText(tCanvas(snap.banner), ARENA_WIDTH / 2, 76);
+    ctx.fillText(tCanvas(snap.banner), 0, 0);
     ctx.restore();
   }
 }
@@ -369,19 +393,22 @@ export function renderMeteorSwarm(ctx: CanvasRenderingContext2D, snap: MeteorSwa
 
   drawStudioBackdrop(ctx, '#070A12', 'rgba(0, 194, 255, 0.08)', 'rgba(0, 194, 255, 0.03)', 64);
 
-  // Parallax starfield
-  ctx.fillStyle = 'rgba(255,255,255,0.34)';
+  // Twinkling parallax starfield
+  const metTime = getMotionTime();
   for (let i = 0; i < 75; i++) {
     const sx = (i * 197 + 43) % ARENA_WIDTH;
     const sy = (i * 113 + 71) % ARENA_HEIGHT;
+    const tw = 0.2 + 0.25 * Math.sin(metTime * 2.5 + i);
+    ctx.fillStyle = `rgba(255,255,255,${tw.toFixed(2)})`;
     ctx.fillRect(sx, sy, i % 3 === 0 ? 2.5 : 1.5, i % 3 === 0 ? 2.5 : 1.5);
   }
 
-  // Central 3D Energy Core Reactor Tower
+  // Central 3D Energy Core Reactor Tower with pulse aura
+  const haloR = 66 + Math.sin(metTime * 5) * 5;
   ctx.save();
-  ctx.fillStyle = 'rgba(0, 194, 255, 0.14)';
+  ctx.fillStyle = 'rgba(0, 194, 255, 0.16)';
   ctx.beginPath();
-  ctx.arc(cx, cy, 66, 0, Math.PI * 2);
+  ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
@@ -462,7 +489,7 @@ export function renderMeteorSwarm(ctx: CanvasRenderingContext2D, snap: MeteorSwa
   }
 
   // Space Care Packages
-  const mBob = Math.sin(Date.now() * 0.006) * 3;
+  const mBob = Math.sin(metTime * 6) * 3.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'spread-shot' ? '#FFB800' : pk.kind === 'core-repair' ? '#10D98B' : '#00C2FF';
     const label = pk.kind === 'spread-shot' ? '4X' : pk.kind === 'core-repair' ? '+HP' : 'OVR';
@@ -600,7 +627,8 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
     ctx.restore();
   }
 
-  // Grapple hook lines (with rope shadow)
+  // Grapple hook lines (with rope shadow & taut chain vibration)
+  const hkTime = getMotionTime();
   for (const hk of snap.hooks) {
     ctx.save();
     ctx.strokeStyle = 'rgba(0,0,0,0.45)';
@@ -610,10 +638,23 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
     ctx.lineTo(hk.x2, hk.y2);
     ctx.stroke();
 
+    const dx = hk.x2 - hk.x1;
+    const dy = hk.y2 - hk.y1;
+    const dist = Math.hypot(dx, dy) || 1;
+    const nx = -dy / dist;
+    const ny = dx / dist;
+    const waveAmp = hk.state === 'pulling' ? 4 : 6.5;
+
     ctx.strokeStyle = hk.colorHex;
     ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(hk.x1, hk.y1 - 8);
+    const segs = 10;
+    for (let s = 1; s < segs; s++) {
+      const f = s / segs;
+      const vib = Math.sin(f * Math.PI * 3 + hkTime * 28) * Math.sin(f * Math.PI) * waveAmp;
+      ctx.lineTo(hk.x1 + dx * f + nx * vib, hk.y1 - 8 + dy * f + ny * vib);
+    }
     ctx.lineTo(hk.x2, hk.y2 - 8);
     ctx.stroke();
     ctx.restore();
@@ -622,20 +663,20 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
   }
 
   // Floating treasure coins & powerups
-  const hkPhase = Date.now() * 0.005;
+  const hkPhase = hkTime * 5;
   for (const c of snap.coins ?? []) {
     drawCoin3D(ctx, c.x, c.y, c.value >= 75 ? 16 : 13, hkPhase + c.x * 0.02, c.value >= 75 ? '#10D98B' : '#FFB800');
   }
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'long-hook' ? '#00C2FF' : '#FFB800';
     drawShadowOval(ctx, pk.x, pk.y + 8, 15, 9, 0.35);
-    drawExtrudedCylinder3D(ctx, pk.x, pk.y + Math.sin(hkPhase) * 2, 15, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
+    drawExtrudedCylinder3D(ctx, pk.x, pk.y + Math.sin(hkPhase) * 2.5, 15, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
     ctx.save();
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(tCanvas(pk.kind === 'long-hook' ? 'HOOK+' : 'SPD+'), pk.x, pk.y - 4 + Math.sin(hkPhase) * 2);
+    ctx.fillText(tCanvas(pk.kind === 'long-hook' ? 'HOOK+' : 'SPD+'), pk.x, pk.y - 4 + Math.sin(hkPhase) * 2.5);
     ctx.restore();
   }
 
@@ -671,11 +712,12 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
       ctx.restore();
     }
 
-    drawCharacterPod3D(ctx, p.x, p.y + fallDrop, 18, p.angle, p.colorHex, {
+    drawCharacterPod3D(ctx, p.x, p.y + fallDrop, 18, p.angle + (p.falling ? p.fallProgress * 6 : 0), p.colorHex, {
       height: 11,
       scale,
       alpha: p.falling ? Math.max(0.12, 1 - p.fallProgress) : 1,
       rimColor: '#FFFFFF',
+      playerId: p.id,
     });
 
     if (!p.falling) {
@@ -694,7 +736,7 @@ export function renderHookShot(ctx: CanvasRenderingContext2D, snap: HookShotSnap
 export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFlipSnapshot): void {
   drawStudioBackdrop(ctx, '#0A0D14', 'rgba(0, 194, 255, 0.06)', 'rgba(255,255,255,0.03)', 80);
 
-  // Moving background tunnel depth grid
+  // Moving background tunnel depth grid + anime speed lines
   const offset = snap.scrollX % 80;
   ctx.strokeStyle = 'rgba(255,255,255,0.045)';
   ctx.lineWidth = 1;
@@ -704,6 +746,20 @@ export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFl
     ctx.lineTo(x, snap.floorY);
   }
   ctx.stroke();
+
+  // Horizontal velocity streak lines
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 194, 255, 0.14)';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 10; i++) {
+    const sy = snap.ceilingY + 28 + ((i * 53) % Math.max(80, snap.floorY - snap.ceilingY - 56));
+    const sx = ARENA_WIDTH - (((snap.scrollX * (1.2 + (i % 3) * 0.35) + i * 193) % (ARENA_WIDTH + 180)));
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx + 48 + (i % 3) * 26, sy);
+    ctx.stroke();
+  }
+  ctx.restore();
 
   // Extruded Ceiling & Floor Neon Tracks
   // Ceiling slab
@@ -838,7 +894,8 @@ export function renderGravityFlip(ctx: CanvasRenderingContext2D, snap: GravityFl
     drawShadowOval(ctx, p.x, p.gravityDir === 1 ? p.y + 18 : p.y - 18, 16, 6, 0.36);
 
     ctx.translate(p.x, p.y);
-    ctx.scale(1, p.gravityDir);
+    const gFx = getPodFx(p.id);
+    ctx.scale(gFx.scaleX, p.gravityDir * gFx.scaleY);
 
     // 3D cube side extrusion
     ctx.fillStyle = shadeHex(p.colorHex, -0.45);

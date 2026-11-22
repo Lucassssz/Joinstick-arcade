@@ -19,6 +19,7 @@ import {
   drawStudioBackdrop,
   shadeHex,
 } from './render25d';
+import { getMotionTime, getPodFx, getSpringBannerAnim } from './arcadeMotion';
 
 function drawHudChip(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, accent = '#FFB800'): void {
   const label = tCanvas(text);
@@ -42,13 +43,17 @@ function drawHudChip(ctx: CanvasRenderingContext2D, x: number, y: number, text: 
 
 function drawBanner(ctx: CanvasRenderingContext2D, text: string, accent = '#FFB800', y = ARENA_HEIGHT / 2): void {
   const label = tCanvas(text);
+  const anim = getSpringBannerAnim(`partyC:${accent}`, text);
   ctx.save();
   ctx.font = '800 28px "Plus Jakarta Sans", sans-serif';
   const w = Math.min(ARENA_WIDTH - 100, Math.max(300, ctx.measureText(label).width + 64));
   const h = 60;
+  ctx.translate(ARENA_WIDTH / 2, y);
+  ctx.scale(anim.scale, anim.scale);
+  ctx.globalAlpha = anim.alpha;
   ctx.fillStyle = 'rgba(13, 15, 20, 0.94)';
   ctx.beginPath();
-  ctx.roundRect(ARENA_WIDTH / 2 - w / 2, y - h / 2, w, h, 14);
+  ctx.roundRect(-w / 2, -h / 2, w, h, 14);
   ctx.fill();
   ctx.strokeStyle = accent;
   ctx.lineWidth = 3;
@@ -56,7 +61,7 @@ function drawBanner(ctx: CanvasRenderingContext2D, text: string, accent = '#FFB8
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, ARENA_WIDTH / 2, y + 1);
+  ctx.fillText(label, 0, 1);
   ctx.restore();
 }
 
@@ -114,7 +119,8 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
   }
   items.sort((a, b) => a.y - b.y);
 
-  const pulse = Math.sin(performance.now() * 0.025);
+  const bombTime = getMotionTime();
+  const pulse = Math.sin(bombTime * 25);
   for (const it of items) {
     if (it.kind === 'steel') {
       drawExtrudedBox3D(
@@ -181,7 +187,7 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
               : pu.kind === 'mega'
                 ? 'M+'
                 : 'S+';
-      const bob = Math.sin(performance.now() * 0.005 + cx) * 3;
+      const bob = Math.sin(bombTime * 5 + cx) * 3;
       drawSphere3D(ctx, cx, cy, 17, col, '#FFFFFF', 5 + bob, true);
       ctx.save();
       ctx.fillStyle = '#0D0F14';
@@ -195,9 +201,9 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
       const sc = 1 + pulse * 0.09;
       drawSphere3D(ctx, bm.x, bm.y, 20 * sc, '#262C3B', bm.colorHex, 6, true);
       ctx.save();
-      ctx.fillStyle = '#FFB800';
+      ctx.fillStyle = pulse > 0 ? '#FFFFFF' : '#FFB800';
       ctx.beginPath();
-      ctx.arc(bm.x + 9, bm.y - 24, 6 + pulse * 1.5, 0, Math.PI * 2);
+      ctx.arc(bm.x + 9, bm.y - 24, 6 + pulse * 1.8, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     } else {
@@ -215,6 +221,7 @@ export function renderBombGrid(ctx: CanvasRenderingContext2D, snap: BombGridSnap
         height: 12,
         rimColor: (p.megaBombs ?? 0) > 0 ? '#FF3B9A' : '#FFFFFF',
         visorColor: '#0F131A',
+        playerId: p.id,
       });
       drawNameplate(ctx, p.x, p.y - 40, p.slotIndex, p.name, p.colorHex, (p.megaBombs ?? 0) > 0 ? 'MEGA' : undefined);
     }
@@ -301,7 +308,8 @@ export function renderRedLightDash(ctx: CanvasRenderingContext2D, snap: RedLight
     ctx.stroke();
     ctx.restore();
   }
-  const apBob = Math.sin(performance.now() * 0.006) * 3;
+  const rlTime = getMotionTime();
+  const apBob = Math.sin(rlTime * 6) * 3.5;
   for (const ap of snap.apples ?? []) {
     drawShadowOval(ctx, ap.x, ap.y + 10, 12, 6, 0.35);
     drawSphere3D(ctx, ap.x, ap.y + apBob, 12, '#FFB800', '#FEF08A', 3, false);
@@ -313,10 +321,19 @@ export function renderRedLightDash(ctx: CanvasRenderingContext2D, snap: RedLight
     ctx.restore();
   }
 
-  // Red scanning overlay when Red Light is active
+  // Red scanning beam sweep when Red Light is active
   if (snap.lightState === 'red') {
     ctx.fillStyle = 'rgba(255, 77, 46, 0.14)';
     ctx.fillRect(60, trackTop, snap.finishX - 60, trackH);
+    const scanY = trackTop + ((Math.sin(rlTime * 4.5) * 0.5 + 0.5) * trackH);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 77, 46, 0.55)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(60, scanY);
+    ctx.lineTo(1080, ARENA_HEIGHT / 2 - 82);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // Giant Standing 3D Traffic-Light Robot Mascot on the right
@@ -389,6 +406,7 @@ export function renderRedLightDash(ctx: CanvasRenderingContext2D, snap: RedLight
       height: 11,
       rimColor: '#FFFFFF',
       visorColor: '#FFFFFF',
+      playerId: p.id,
     });
 
     drawNameplate(ctx, p.x, p.y - 38, p.slotIndex, p.name, p.colorHex, p.finished ? `#${p.finishOrder}` : undefined);
@@ -567,6 +585,15 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
       } else if (isGrill) {
         if (st.cookingDish) {
           drawDishIcon(ctx, st.cookingDish, cx, cy - 6, st.cookProgress >= 1, 1.25);
+          // Rising sizzle steam wisps
+          const kTime = getMotionTime();
+          for (let wi = 0; wi < 3; wi++) {
+            const ph = (kTime * 1.4 + wi * 0.33 + st.x * 0.01) % 1;
+            ctx.fillStyle = `rgba(255, 255, 255, ${((1 - ph) * 0.32).toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(cx - 14 + wi * 14 + Math.sin(kTime * 4 + wi) * 4, cy - 16 - ph * 26, 4 + ph * 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
           ctx.fillStyle = '#11141B';
           ctx.fillRect(st.x + 18, st.y + st.h - stDepth - 16, st.w - 36, 9);
           ctx.fillStyle = st.cookProgress >= 1 ? '#10D98B' : '#FFB800';
@@ -603,6 +630,7 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
         rimColor: hasBoots ? '#00C2FF' : '#FFFFFF',
         hat: 'chef',
         showVisor: false,
+        playerId: p.id,
       });
       if (p.holding) {
         drawDishIcon(
@@ -619,22 +647,19 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
     }
   }
 
-  // Arcing 3D Flying tossed plates with floor shadows
+  // Arcing 3D Flying tossed plates with floor shadows & gentle spin
+  const kSpin = getMotionTime() * 8;
   for (const fp of snap.flyingPlates) {
     drawShadowOval(ctx, fp.x, fp.y + 18, 16, 8, 0.36);
-    drawDishIcon(ctx, fp.dish, fp.x, fp.y - 12, true, 1.15);
-  }
-
-  // Popups
-  for (const pp of snap.popups) {
     ctx.save();
-    ctx.globalAlpha = Math.max(0, pp.alpha);
-    ctx.font = '800 20px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = pp.colorHex;
-    ctx.fillText(tCanvas(pp.text), pp.x, pp.y);
+    ctx.translate(fp.x, fp.y - 12);
+    ctx.rotate(Math.sin(kSpin) * 0.25);
+    drawDishIcon(ctx, fp.dish, 0, 0, true, 1.15);
     ctx.restore();
   }
+
+  // Popups with spring animation
+  drawPopupTexts(ctx, snap.popups);
 }
 
 // ============================================================
@@ -756,8 +781,10 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
     ctx.restore();
   }
 
-  // 3D Players & Woven Baskets
+  // 3D Players & Woven Baskets (with squash-and-stretch on catches/bounces)
   for (const p of snap.players) {
+    const fFx = getPodFx(p.id);
+    const bounceLift = p.bounceTimer > 0 ? Math.sin((p.bounceTimer / 0.25) * Math.PI) * 6 : 0;
     drawShadowOval(ctx, p.x, p.y + 20, 32, 10, 0.45);
     if ((p.magnetTimer ?? 0) > 0) {
       ctx.save();
@@ -769,11 +796,14 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
       ctx.stroke();
       ctx.restore();
     }
+    ctx.save();
+    ctx.translate(p.x, p.y - bounceLift);
+    ctx.scale(fFx.scaleX, fFx.scaleY);
     // 3D Woven basket
     drawExtrudedBox3D(
       ctx,
-      p.x - 34,
-      p.y - 20,
+      -34,
+      -20,
       68,
       20,
       10,
@@ -785,14 +815,16 @@ export function renderFruitDrop(ctx: CanvasRenderingContext2D, snap: FruitDropSn
     // Basket interior dark shadow
     ctx.fillStyle = '#523412';
     ctx.beginPath();
-    ctx.roundRect(p.x - 28, p.y - 27, 56, 10, 4);
+    ctx.roundRect(-28, -27, 56, 10, 4);
     ctx.fill();
+    ctx.restore();
 
     // Character pod holding basket
     drawCharacterPod3D(ctx, p.x, p.y + 12, 16, 0, p.stunTimer > 0 ? '#64748B' : p.colorHex, {
       height: 8,
       rimColor: '#FFFFFF',
       showVisor: false,
+      playerId: p.id,
     });
 
     drawNameplate(ctx, p.x, p.y + 42, p.slotIndex, p.name, p.colorHex, p.combo > 1 ? `x${p.combo}` : undefined);
@@ -872,9 +904,19 @@ export function renderPinballClash(ctx: CanvasRenderingContext2D, snap: PinballC
   ctx.textAlign = 'center';
   ctx.fillText(tCanvas('MULTIBALL CHARGE'), ARENA_WIDTH / 2, bottom + 48);
 
-  // 3D Glowing Pop-Bumpers
+  // 3D Glowing Pop-Bumpers with outer flash ripple
   for (const bm of snap.bumpers) {
     const scale = 1 + bm.flash * 0.22;
+    if (bm.flash > 0.05) {
+      ctx.save();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.globalAlpha = Math.min(1, bm.flash);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(bm.x, bm.y - 7, bm.r * (1.25 + (1 - bm.flash) * 0.6), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     const topCol = bm.flash > 0.1 ? '#FFFFFF' : bm.colorHex;
     drawExtrudedCylinder3D(
       ctx,

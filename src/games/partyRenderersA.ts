@@ -21,6 +21,7 @@ import {
   drawStudioBackdrop,
   shadeHex,
 } from './render25d';
+import { getMotionTime, getPodFx, getSpringBannerAnim } from './arcadeMotion';
 
 function drawTopHud(ctx: CanvasRenderingContext2D, leftText: string, centerText: string, rightText?: string) {
   ctx.save();
@@ -54,20 +55,24 @@ function drawTopHud(ctx: CanvasRenderingContext2D, leftText: string, centerText:
 
 function drawBanner(ctx: CanvasRenderingContext2D, text: string, colorHex = '#FFB800') {
   const localized = tCanvas(text);
+  const anim = getSpringBannerAnim(`partyA:${colorHex}`, text);
   ctx.save();
   ctx.font = '800 28px "Bricolage Grotesque", sans-serif';
   const w = Math.max(320, ctx.measureText(localized).width + 56);
-  ctx.fillStyle = 'rgba(13, 15, 20, 0.9)';
+  ctx.translate(ARENA_WIDTH / 2, 100);
+  ctx.scale(anim.scale, anim.scale);
+  ctx.globalAlpha = anim.alpha;
+  ctx.fillStyle = 'rgba(13, 15, 20, 0.92)';
   ctx.strokeStyle = colorHex;
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2.8;
   ctx.beginPath();
-  ctx.roundRect(ARENA_WIDTH / 2 - w / 2, 74, w, 52, 14);
+  ctx.roundRect(-w / 2, -26, w, 52, 14);
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(localized, ARENA_WIDTH / 2, 101);
+  ctx.fillText(localized, 0, 1);
   ctx.restore();
 }
 
@@ -165,7 +170,8 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
   }
 
   // Golden 3D spinning shards
-  const now = Date.now() * 0.004;
+  const mNow = getMotionTime();
+  const now = mNow * 4;
   for (const sh of snap.shards) {
     drawSpinningGem3D(
       ctx,
@@ -178,19 +184,20 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
     );
   }
 
-  // Homing 3D orbs
+  // Homing 3D orbs with pulsing trail halo
   for (const o of snap.orbs) {
+    const pulseR = o.r + 7 + Math.sin(mNow * 14 + o.x * 0.05) * 3;
     ctx.save();
-    ctx.fillStyle = 'rgba(255, 59, 154, 0.2)';
+    ctx.fillStyle = 'rgba(255, 59, 154, 0.24)';
     ctx.beginPath();
-    ctx.arc(o.x, o.y, o.r + 8, 0, Math.PI * 2);
+    ctx.arc(o.x, o.y, pulseR, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     drawSphere3D(ctx, o.x, o.y, o.r, '#FF3B9A', '#FFFFFF', 7, true);
   }
 
   // Powerups (magnet / shield / star)
-  const puBob = Math.sin(Date.now() * 0.006) * 3;
+  const puBob = Math.sin(mNow * 6) * 3.5;
   for (const pu of snap.powerups ?? []) {
     const col = pu.kind === 'magnet' ? '#00C2FF' : pu.kind === 'shield' ? '#10D98B' : '#FFB800';
     const label = pu.kind === 'magnet' ? 'MAG' : pu.kind === 'shield' ? 'SHD' : '★';
@@ -238,7 +245,16 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
   ctx.lineWidth = 4;
   ctx.stroke();
 
-  // Central glowing 3D emitter dome
+  // Central glowing 3D emitter dome with pulse ring
+  const corePulse = 27 + Math.sin(mNow * 8) * 4;
+  ctx.save();
+  ctx.strokeStyle = coreAccent;
+  ctx.globalAlpha = 0.32;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(cx, cy - 12, corePulse, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
   drawSphere3D(ctx, cx, cy, 22, coreAccent, '#FFFFFF', 12, false);
 
   // 2.5D Jet Fighters (Y-sorted)
@@ -246,7 +262,7 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
   for (const p of jets) {
     drawShadowOval(ctx, p.x + 2, p.y + 12, 18, 10, 0.42);
     ctx.save();
-    ctx.globalAlpha = p.invulnTimer > 0 ? 0.55 + Math.sin(Date.now() * 0.03) * 0.3 : 1;
+    ctx.globalAlpha = p.invulnTimer > 0 ? 0.55 + Math.sin(mNow * 30) * 0.3 : 1;
     if (p.blinkTimer > 0) {
       ctx.strokeStyle = '#00C2FF';
       ctx.lineWidth = 4;
@@ -287,6 +303,8 @@ export function renderLaserGauntlet(ctx: CanvasRenderingContext2D, snap: LaserGa
 
     ctx.translate(p.x, p.y - 5);
     ctx.rotate(p.angle);
+    const jetFx = getPodFx(p.id);
+    ctx.scale(jetFx.scaleX, jetFx.scaleY);
     const jetGrad = ctx.createLinearGradient(-14, -14, 20, 14);
     jetGrad.addColorStop(0, shadeHex(p.colorHex, 0.35));
     jetGrad.addColorStop(1, p.colorHex);
@@ -375,7 +393,8 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
   ctx.restore();
 
   // Vault Pickups (EMP Cell & Cloak)
-  const vBob = Math.sin(Date.now() * 0.006) * 3;
+  const vTime = getMotionTime();
+  const vBob = Math.sin(vTime * 6) * 3.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'emp-cell' ? '#00C2FF' : '#C084FC';
     const label = pk.kind === 'emp-cell' ? 'EMP' : 'CLK';
@@ -489,7 +508,7 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
   ];
   items.sort((a, b) => a.y - b.y);
 
-  const now = Date.now() * 0.004;
+  const now = vTime * 4;
   for (const it of items) {
     if (it.kind === 'wall') {
       const { w } = it;
@@ -503,6 +522,22 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
     } else if (it.kind === 'drone') {
       const { d } = it;
       const bob = Math.sin(now * 1.4 + d.x) * 3;
+      if (d.disabledTimer <= 0) {
+        // Sweeping security spotlight cone
+        ctx.save();
+        ctx.translate(d.x, d.y - 6);
+        ctx.rotate(d.angle);
+        const coneGrad = ctx.createRadialGradient(0, 0, 8, 0, 0, 125);
+        coneGrad.addColorStop(0, 'rgba(255, 77, 46, 0.28)');
+        coneGrad.addColorStop(1, 'rgba(255, 77, 46, 0)');
+        ctx.fillStyle = coneGrad;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, 125, -0.38, 0.38);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
       drawSphere3D(ctx, d.x, d.y, d.r, d.disabledTimer > 0 ? '#00C2FF' : '#FF4D2E', '#FFFFFF', 10 + bob, true);
     } else {
       const { p } = it;
@@ -511,11 +546,12 @@ export function renderVaultHeist(ctx: CanvasRenderingContext2D, snap: VaultHeist
         alpha: p.invulnTimer > 0 ? 0.55 : 1,
         rimColor: (p.overchargeTimer ?? 0) > 0 ? '#00C2FF' : '#FFFFFF',
         showVisor: false,
+        playerId: p.id,
       });
 
       // Carrying gem badge dots orbiting player in 3D lift
       for (let c = 0; c < Math.min(5, p.carrying); c++) {
-        const a = (c / Math.min(5, p.carrying)) * Math.PI * 2 + Date.now() * 0.004;
+        const a = (c / Math.min(5, p.carrying)) * Math.PI * 2 + now;
         const gx = p.x + Math.cos(a) * 26;
         const gy = p.y - 10 + Math.sin(a) * 18;
         drawSphere3D(ctx, gx, gy, 5.5, '#10D98B', '#ECFDF5', 4, false);
@@ -578,11 +614,12 @@ export function renderHyperPong(ctx: CanvasRenderingContext2D, snap: HyperPongSn
   ctx.strokeRect(ARENA_WIDTH - 56, ARENA_HEIGHT / 2 - goalH / 2, 20, goalH);
 
   // Center Power Orb
+  const pongTime = getMotionTime();
   if (snap.powerOrb) {
     const orb = snap.powerOrb;
     const col = orb.kind === 'multiball' ? '#FFB800' : orb.kind === 'giant' ? '#10D98B' : '#FF4D2E';
     const label = orb.kind === 'multiball' ? '2X' : orb.kind === 'giant' ? 'BIG' : '🔥';
-    const pulse = Math.sin(Date.now() * 0.007) * 3;
+    const pulse = Math.sin(pongTime * 7) * 3.5;
     drawShadowOval(ctx, orb.x, orb.y + 8, 18, 12, 0.35);
     drawExtrudedCylinder3D(ctx, orb.x, orb.y + pulse * 0.4, 18, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
     ctx.save();
@@ -677,18 +714,23 @@ export function renderHyperPong(ctx: CanvasRenderingContext2D, snap: HyperPongSn
       }
       ctx.restore();
 
-      // Thick 3D mallet base + raised center grip handle
-      drawExtrudedCylinder3D(ctx, p.x, p.y, p.radius, 9, p.colorHex, shadeHex(p.colorHex, -0.45), '#FFFFFF');
+      // Thick 3D mallet base + raised center grip handle with smash squash
+      const mFx = getPodFx(p.id);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.scale(mFx.scaleX, mFx.scaleY);
+      drawExtrudedCylinder3D(ctx, 0, 0, p.radius, 9, p.colorHex, shadeHex(p.colorHex, -0.45), '#FFFFFF');
       drawExtrudedCylinder3D(
         ctx,
-        p.x,
-        p.y - 9,
+        0,
+        -9,
         p.radius * 0.4,
         11,
         shadeHex(p.colorHex, 0.25),
         shadeHex(p.colorHex, -0.35),
         '#FFFFFF'
       );
+      ctx.restore();
 
       drawNameplate(ctx, p.x, p.y - p.radius - 26, p.slotIndex, p.name, p.colorHex);
     }
@@ -750,7 +792,8 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
   }
 
   // Dojo Power Scrolls
-  const scBob = Math.sin(Date.now() * 0.006) * 3;
+  const bladeTime = getMotionTime();
+  const scBob = Math.sin(bladeTime * 6) * 3.5;
   for (const sc of snap.scrolls ?? []) {
     const col = sc.kind === 'blade-wave' ? '#FF3B9A' : '#10D98B';
     const label = sc.kind === 'blade-wave' ? 'WAVE' : 'WIND';
@@ -863,7 +906,22 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
       drawCharacterPod3D(ctx, p.x, p.y, 19, p.angle, p.colorHex, {
         height: 11,
         rimColor: '#FFFFFF',
+        playerId: p.id,
       });
+
+      // Orbiting stun stars
+      if (p.stunTimer > 0) {
+        ctx.save();
+        ctx.fillStyle = '#FFB800';
+        ctx.font = '800 12px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (let si = 0; si < 3; si++) {
+          const sa = bladeTime * 6 + (si * Math.PI * 2) / 3;
+          ctx.fillText('★', p.x + Math.cos(sa) * 18, p.y - 30 + Math.sin(sa) * 5);
+        }
+        ctx.restore();
+      }
 
       // Gleaming 3D Katana Blade held at waist/shoulder height
       ctx.save();
@@ -940,7 +998,8 @@ export function renderCannonSiege(ctx: CanvasRenderingContext2D, snap: CannonSie
   ctx.strokeRect(40, 40, ARENA_WIDTH - 80, ARENA_HEIGHT - 80);
 
   // Mid-canyon floating ammo crates
-  const cBob = Math.sin(Date.now() * 0.006) * 4;
+  const siegeTime = getMotionTime();
+  const cBob = Math.sin(siegeTime * 6) * 4;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'triple-shot' ? '#FF3B9A' : '#FFB800';
     const label = pk.kind === 'triple-shot' ? '3X' : 'HVY';
@@ -1045,11 +1104,12 @@ export function renderCannonSiege(ctx: CanvasRenderingContext2D, snap: CannonSie
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 3D shaded cannon barrel
+      // 3D shaded cannon barrel with recoil kickback right after firing
+      const recoil = p.cooldownA > 0.72 ? ((p.cooldownA - 0.72) / 0.28) * -8 : 0;
       ctx.fillStyle = '#475569';
-      ctx.fillRect(0, -6, 36, 16);
+      ctx.fillRect(recoil, -6, 36, 16);
       ctx.fillStyle = '#E2E8F0';
-      ctx.fillRect(0, -8, 36, 14);
+      ctx.fillRect(recoil, -8, 36, 14);
       ctx.fillStyle = shadeHex(p.colorHex, 0.25);
       ctx.beginPath();
       ctx.arc(0, 0, 12, 0, Math.PI * 2);
@@ -1060,8 +1120,18 @@ export function renderCannonSiege(ctx: CanvasRenderingContext2D, snap: CannonSie
     }
   }
 
-  // 3D Cannonballs & explosions
+  // 3D Cannonballs with smoky trajectory ribbon & explosions
   for (const s of snap.shells) {
+    const sp = Math.hypot(s.vx, s.vy) || 1;
+    ctx.save();
+    ctx.strokeStyle = s.heavy ? 'rgba(255, 184, 0, 0.55)' : 'rgba(226, 232, 240, 0.35)';
+    ctx.lineWidth = s.r * 1.15;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y - 14);
+    ctx.lineTo(s.x - (s.vx / sp) * 24, s.y - 14 - (s.vy / sp) * 24);
+    ctx.stroke();
+    ctx.restore();
     drawSphere3D(ctx, s.x, s.y, s.r, s.heavy ? '#FFB800' : s.colorHex, s.heavy ? '#FF4D2E' : '#FFFFFF', 14, true);
   }
   for (const ex of snap.explosions) {
@@ -1114,7 +1184,8 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
   }
 
   // Royal Pickups
-  const pkBob = Math.sin(Date.now() * 0.006) * 3;
+  const crownTime = getMotionTime();
+  const pkBob = Math.sin(crownTime * 6) * 3.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'gold-coin' ? '#FFB800' : pk.kind === 'speed-crown' ? '#10D98B' : '#00C2FF';
     const label = pk.kind === 'gold-coin' ? '+45' : pk.kind === 'speed-crown' ? 'SPD' : 'EMP';
@@ -1153,7 +1224,7 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
   ];
   items.sort((a, b) => a.y - b.y);
 
-  const bob = Math.sin(Date.now() * 0.005) * 4;
+  const bob = Math.sin(crownTime * 5) * 4.5;
   for (const it of items) {
     if (it.kind === 'obs') {
       const { o } = it;
@@ -1161,9 +1232,9 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
     } else if (it.kind === 'crown') {
       drawShadowOval(ctx, snap.crownX, snap.crownY + 12, 22, 11, 0.45);
       ctx.save();
-      ctx.fillStyle = 'rgba(255, 184, 0, 0.18)';
+      ctx.fillStyle = `rgba(255, 184, 0, ${(0.16 + Math.sin(crownTime * 5) * 0.06).toFixed(2)})`;
       ctx.beginPath();
-      ctx.arc(snap.crownX, snap.crownY, 34, 0, Math.PI * 2);
+      ctx.arc(snap.crownX, snap.crownY, 36 + Math.sin(crownTime * 5) * 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       drawCrown3D(ctx, snap.crownX, snap.crownY - 8 + bob, 1.35);
@@ -1171,9 +1242,9 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
       const { p } = it;
       if (p.hasCrown) {
         ctx.save();
-        ctx.fillStyle = 'rgba(255, 184, 0, 0.2)';
+        ctx.fillStyle = `rgba(255, 184, 0, ${(0.18 + Math.sin(crownTime * 6) * 0.06).toFixed(2)})`;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 38, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, 40 + Math.sin(crownTime * 6) * 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
@@ -1191,6 +1262,7 @@ export function renderCrownHeist(ctx: CanvasRenderingContext2D, snap: CrownHeist
         rimColor: p.hasCrown ? '#FFB800' : '#FFFFFF',
         hat: p.hasCrown ? 'crown' : 'none',
         showVisor: false,
+        playerId: p.id,
       });
 
       drawNameplate(

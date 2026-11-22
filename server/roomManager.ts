@@ -4,6 +4,7 @@ import {
   MAX_PLAYERS_PER_ROOM,
   PLAYER_PALETTE,
   type BotDifficulty,
+  type CardPrivateState,
   type ClientMessage,
   type ControllerInput,
   type FrenzyState,
@@ -89,6 +90,7 @@ interface RoomRecord {
   players: Map<string, ConnectedPlayer>;
   gameState: unknown | null;
   lastSnapshot: GameSnapshot | null;
+  lastCardStateHashes: Map<string, string>;
   rankings: RankingEntry[];
   createdAt: number;
   lastActivityAt: number;
@@ -415,6 +417,7 @@ export class RoomManager {
           players: new Map(),
           gameState: null,
           lastSnapshot: null,
+          lastCardStateHashes: new Map(),
           rankings: [],
           createdAt: Date.now(),
           lastActivityAt: Date.now(),
@@ -491,6 +494,13 @@ export class RoomManager {
               playerId: existing.id,
               room: this.buildRoomSnapshot(room),
             });
+            if (room.gameState && (room.status === 'PLAYING' || room.status === 'COUNTDOWN' || room.status === 'PAUSED')) {
+              const engine = SERVER_GAMES[room.selectedGameId];
+              const states = engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room));
+              if (states && states[existing.id]) {
+                this.send(ws, { type: 'player:card-state', cardState: states[existing.id] });
+              }
+            }
             this.broadcastRoom(room);
             return;
           }
@@ -913,6 +923,26 @@ export class RoomManager {
         return;
       }
 
+      case 'card:action': {
+        const binding = this.bindings.get(ws);
+        if (!binding || binding.role !== 'player' || !binding.playerId) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room || room.status !== 'PLAYING' || room.frenzy.freezing || !room.gameState) return;
+        const player = room.players.get(binding.playerId);
+        if (!player || player.isBot) return;
+
+        const engine = SERVER_GAMES[room.selectedGameId];
+        if (!engine.handleCardAction) return;
+        engine.handleCardAction(room.gameState, player.id, msg.action, this.toInputPlayers(room));
+        room.lastSnapshot = engine.getSnapshot(room.gameState);
+        room.lastActivityAt = Date.now();
+        this.pushCardStates(room, undefined, true);
+        if (room.lastSnapshot) {
+          this.broadcastTick(room, room.lastSnapshot, []);
+        }
+        return;
+      }
+
       case 'controller:input': {
         const binding = this.bindings.get(ws);
         if (!binding || binding.role !== 'player' || !binding.playerId) return;
@@ -931,6 +961,51 @@ export class RoomManager {
         };
         room.lastActivityAt = Date.now();
         return;
+      }
+    }
+  }
+
+  private pushCardStates(
+    room: RoomRecord,
+    providedStates?: Record<string, CardPrivateState>,
+    force = false
+  ): void {
+    const engine = SERVER_GAMES[room.selectedGameId];
+    const states =
+      providedStates ??
+      (room.gameState ? engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room)) : undefined);
+    if (!states) return;
+
+    for (const p of room.players.values()) {
+      if (p.isBot || !p.connected || !p.ws) continue;
+      const cs = states[p.id];
+      if (!cs) continue;
+      const hash = JSON.stringify({
+        h: cs.hand.map((c) => `${c.id}:${c.playable ? 1 : 0}:${c.selected ? 1 : 0}`),
+        c: cs.cursorIndex,
+        m: cs.isMyTurn,
+        r: cs.isActionRequired,
+        t: Math.ceil(cs.turnTimeLeft),
+        ac: cs.activeColor,
+        aw: cs.awaitingColorPick,
+        dp: cs.drawPenalty,
+        ph: cs.phase,
+        tr: cs.targetRank,
+        cb: cs.canCallBluff,
+        ct: cs.canTrust,
+      });
+      if (force || room.lastCardStateHashes.get(p.id) !== hash) {
+        room.lastCardStateHashes.set(p.id, hash);
+        this.send(p.ws, { type: 'player:card-state', cardState: cs });
+      }
+    }
+  }
+
+  private clearCardStates(room: RoomRecord): void {
+    room.lastCardStateHashes.clear();
+    for (const p of room.players.values()) {
+      if (!p.isBot && p.connected && p.ws) {
+        this.send(p.ws, { type: 'player:card-state', cardState: null });
       }
     }
   }
@@ -1123,6 +1198,7 @@ export class RoomManager {
     };
     room.gameState = null;
     room.lastSnapshot = null;
+    this.clearCardStates(room);
     room.rankings = [];
     const visibleGames = filterGamesByPlayerMode(room.lobbyFilter);
     const idx = Math.max(
@@ -1161,6 +1237,7 @@ export class RoomManager {
     };
     room.gameState = null;
     room.lastSnapshot = null;
+    this.clearCardStates(room);
     room.rankings = [];
     for (const p of room.players.values()) {
       p.ready = p.isBot ? true : false;
@@ -1582,6 +1659,16 @@ export class RoomManager {
         return snap.players.some(
           (p) => p.tile >= snap.targetTile * (earlyFrenzy ? 0.5 : 0.72)
         );
+      case 'color-clash':
+        return (
+          snap.players.some((p) => p.cardCount <= 2) ||
+          snap.turnCount >= (earlyFrenzy ? 7 : 14)
+        );
+      case 'liars-deck':
+        return (
+          snap.players.some((p) => p.cardCount <= 2) ||
+          snap.round >= (earlyFrenzy ? 2 : 3)
+        );
     }
   }
 
@@ -1693,10 +1780,12 @@ export class RoomManager {
     }
 
     const playerList = this.toInputPlayers(room);
+    room.lastCardStateHashes.clear();
     room.gameState = engine.createState(playerList, room.gameSettingValue);
     room.lastSnapshot = engine.getSnapshot(room.gameState);
     room.rankings = [];
     room.lastActivityAt = Date.now();
+    this.pushCardStates(room, undefined, true);
 
     if (showBriefing) {
       room.status = 'BRIEFING';
@@ -1869,6 +1958,10 @@ export class RoomManager {
 
       this.broadcastTick(room, result.snapshot, result.sounds);
 
+      if (result.privateStates) {
+        this.pushCardStates(room, result.privateStates);
+      }
+
       // Coalesce & dispatch targeted phone haptics (human phones only)
       if (result.haptics.length > 0) {
         const strongestByPlayer = new Map<string, { pattern: number | number[]; reason?: string; weight: number }>();
@@ -1905,6 +1998,7 @@ export class RoomManager {
         room.status = 'RESULTS';
         room.frenzy.freezing = false;
         room.remoteFocus.modalIndex = 0;
+        this.clearCardStates(room);
 
         const baseRankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
         const anyBonus = [...room.players.values()].some((p) => p.bonusScore > 0);

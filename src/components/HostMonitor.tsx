@@ -201,8 +201,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 arcadeAudio.play(s);
                 if (s.type === 'frenzy') {
                   fxRef.current.shake = Math.max(fxRef.current.shake, 16);
-                } else if (s.type === 'ko' || s.type === 'pulse') {
-                  fxRef.current.shake = Math.max(fxRef.current.shake, 9);
+                } else if (s.type === 'ko' || s.type === 'pulse' || s.type === 'bluff') {
+                  fxRef.current.shake = Math.max(fxRef.current.shake, 10);
                 } else if (s.type === 'bump') {
                   fxRef.current.shake = Math.max(fxRef.current.shake, 4 * (s.intensity ?? 0.5));
                 }

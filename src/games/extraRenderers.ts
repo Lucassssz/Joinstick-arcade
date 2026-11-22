@@ -21,6 +21,7 @@ import {
   drawStudioBackdrop,
   shadeHex,
 } from './render25d';
+import { getMotionTime, getPodFx, getSpringBannerAnim } from './arcadeMotion';
 
 function drawHudChip(
   ctx: CanvasRenderingContext2D,
@@ -53,20 +54,31 @@ function drawCenterBanner(
   text: string,
   accentHex = '#FFB800'
 ): void {
+  const anim = getSpringBannerAnim(`extra:${accentHex}`, text);
   ctx.save();
-  ctx.fillStyle = 'rgba(12, 14, 19, 0.9)';
+  ctx.translate(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+  ctx.scale(anim.scale, anim.scale);
+  ctx.globalAlpha = anim.alpha;
+
+  ctx.fillStyle = 'rgba(12, 14, 19, 0.92)';
   ctx.beginPath();
-  ctx.roundRect(ARENA_WIDTH / 2 - 250, ARENA_HEIGHT / 2 - 42, 500, 84, 16);
+  ctx.roundRect(-250, -42, 500, 84, 16);
   ctx.fill();
   ctx.strokeStyle = accentHex;
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(-244, -36, 488, 72, 12);
   ctx.stroke();
 
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '800 28px "Bricolage Grotesque", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(tCanvas(text), ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+  ctx.fillText(tCanvas(text), 0, 0);
   ctx.restore();
 }
 
@@ -115,8 +127,9 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
       innerAccent = 'rgba(56, 189, 248, 0.45)';
     }
 
+    const hNow = getMotionTime();
     if (tile.state === 'cracking') {
-      jitterX = Math.sin(Date.now() * 0.06 + tile.id) * 2.5 * tile.progress;
+      jitterX = Math.sin(hNow * 58 + tile.id) * 2.8 * tile.progress;
       oy = tile.progress * 5;
       depth = Math.max(8, 15 - tile.progress * 5);
       fill = tile.progress > 0.55 ? '#6B2622' : '#58411E';
@@ -126,7 +139,7 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
     } else if (tile.state === 'falling') {
       scale = Math.max(0.25, 1 - tile.progress * 0.72);
       alpha = Math.max(0, 1 - tile.progress);
-      oy = tile.progress * 54;
+      oy = tile.progress * 58;
       fill = '#451A1A';
       side = '#240C0C';
       stroke = '#FF4D2E';
@@ -135,6 +148,9 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
 
     ctx.globalAlpha = alpha;
     ctx.translate(tile.x + jitterX, tile.y + oy);
+    if (tile.state === 'falling') {
+      ctx.rotate((tile.id % 2 === 0 ? 1 : -1) * tile.progress * 0.42);
+    }
     ctx.scale(scale, scale);
 
     drawExtrudedHex3D(ctx, 0, 0, tile.radius - 2, depth, fill, side, stroke, innerAccent);
@@ -167,7 +183,7 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
     }
 
     if (tile.targeted) {
-      const pulse = 0.55 + Math.sin(Date.now() * 0.02) * 0.35;
+      const pulse = 0.55 + Math.sin(hNow * 20) * 0.35;
       ctx.strokeStyle = `rgba(255, 77, 46, ${pulse})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -226,6 +242,7 @@ export function renderHexDrop(ctx: CanvasRenderingContext2D, snap: HexDropSnapsh
       scale,
       alpha: p.falling ? Math.max(0.1, 1 - p.fallProgress * 0.9) : 1,
       rimColor: '#F8FAFC',
+      playerId: p.id,
     });
 
     if (!p.falling) {
@@ -284,7 +301,9 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
   ctx.stroke();
 
   // Workshop Jump Pads
+  const fuseTime = getMotionTime();
   for (const jp of snap.jumpPads ?? []) {
+    const jpPulse = 0.72 + Math.sin(fuseTime * 6 + jp.x * 0.02) * 0.25;
     ctx.save();
     ctx.fillStyle = 'rgba(16, 217, 139, 0.16)';
     ctx.strokeStyle = '#10D98B';
@@ -293,18 +312,19 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
     ctx.arc(jp.x, jp.y, jp.r, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.strokeStyle = '#A7F3D0';
+    ctx.strokeStyle = `rgba(167, 243, 208, ${jpPulse.toFixed(2)})`;
     ctx.lineWidth = 2.5;
+    const bounceOff = Math.sin(fuseTime * 8) * 2.5;
     ctx.beginPath();
-    ctx.moveTo(jp.x - 9, jp.y + 4);
-    ctx.lineTo(jp.x, jp.y - 6);
-    ctx.lineTo(jp.x + 9, jp.y + 4);
+    ctx.moveTo(jp.x - 9, jp.y + 4 + bounceOff);
+    ctx.lineTo(jp.x, jp.y - 6 + bounceOff);
+    ctx.lineTo(jp.x + 9, jp.y + 4 + bounceOff);
     ctx.stroke();
     ctx.restore();
   }
 
   // Fuse pickups
-  const fuseNow = Date.now() * 0.0045;
+  const fuseNow = fuseTime * 4.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'speed' ? '#10D98B' : pk.kind === 'shield' ? '#00C2FF' : '#38BDF8';
     const label = pk.kind === 'speed' ? 'SPD' : pk.kind === 'shield' ? 'SHD' : '+2.5';
@@ -335,7 +355,7 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
   }
 
   const urgency = snap.bombMaxTime > 0 ? 1 - snap.bombTimer / snap.bombMaxTime : 0;
-  const flashFast = Math.sin(Date.now() * (0.012 + urgency * 0.04)) > 0;
+  const flashFast = Math.sin(fuseTime * (12 + urgency * 36)) > 0;
 
   // Y-sort pillars and players
   type Item =
@@ -401,20 +421,22 @@ export function renderFusePass(ctx: CanvasRenderingContext2D, snap: FusePassSnap
       drawCharacterPod3D(ctx, p.x, p.y, 19, p.angle, p.colorHex, {
         height: 11,
         rimColor: p.hasBomb ? (flashFast ? '#FF4D2E' : '#FFB800') : '#FFFFFF',
+        playerId: p.id,
       });
 
       // Render glossy 3D ticking bomb hovering above holder
       if (p.hasBomb) {
         const bx = p.x;
-        const by = p.y - 36;
+        const by = p.y - 36 + Math.sin(fuseTime * 10) * 2.5;
         const bombCol = flashFast ? '#FF4D2E' : '#252B38';
         drawSphere3D(ctx, bx, by, 14, bombCol, '#FFB800', 0, false);
 
         ctx.save();
-        // Fuse spark
-        ctx.fillStyle = '#FFB800';
+        // Sputtering fuse spark
+        const sparkR = 4.5 + Math.sin(fuseTime * 42) * 2;
+        ctx.fillStyle = flashFast ? '#FFFFFF' : '#FFB800';
         ctx.beginPath();
-        ctx.arc(bx + 10, by - 12, flashFast ? 6 : 4, 0, Math.PI * 2);
+        ctx.arc(bx + 10, by - 12, sparkR, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = '#FFFFFF';
@@ -518,10 +540,12 @@ export function renderGridRunners(ctx: CanvasRenderingContext2D, snap: GridRunne
       ctx.stroke();
     };
 
+    const gridTime = getMotionTime();
+    const crestAlpha = 0.78 + 0.2 * Math.sin(gridTime * 7);
     drawRibbon(4, 12, 'rgba(0,0,0,0.65)', 0.55);
     drawRibbon(1, 10, shadeHex(trail.colorHex, -0.45), 0.9);
     drawRibbon(-4, 7, trail.colorHex, 0.95);
-    drawRibbon(-6, 2.5, '#FFFFFF', 0.88);
+    drawRibbon(-6, 2.5, '#FFFFFF', crestAlpha);
     ctx.restore();
   }
 
@@ -531,7 +555,7 @@ export function renderGridRunners(ctx: CanvasRenderingContext2D, snap: GridRunne
   }
 
   // Grid pickups
-  const gridNow = Date.now() * 0.0045;
+  const gridNow = getMotionTime() * 4.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'energy' ? '#10D98B' : pk.kind === 'emp' ? '#FF3B9A' : '#FFB800';
     const label = pk.kind === 'energy' ? '⚡' : pk.kind === 'emp' ? 'EMP' : '★';
@@ -588,12 +612,16 @@ export function renderGridRunners(ctx: CanvasRenderingContext2D, snap: GridRunne
 
     ctx.rotate(p.angle);
 
+    const pFx = getPodFx(p.id);
+    ctx.scale(pFx.scaleX, pFx.scaleY);
+
     // Overdrive tail glow
     if (p.overdriveTimer > 0) {
+      const tailLen = 30 + Math.sin(getMotionTime() * 40 + p.slotIndex) * 8;
       ctx.fillStyle = '#FFFFFF';
       ctx.beginPath();
       ctx.moveTo(-14, -5);
-      ctx.lineTo(-34, 0);
+      ctx.lineTo(-tailLen, 0);
       ctx.lineTo(-14, 5);
       ctx.closePath();
       ctx.fill();
@@ -686,7 +714,8 @@ export function renderRicochetTanks(
   ctx.stroke();
 
   // Proximity mines on floor
-  const blink = Math.floor(Date.now() / 220) % 2 === 0;
+  const tankTime = getMotionTime();
+  const blink = Math.floor(tankTime * 4.5) % 2 === 0;
   for (const m of snap.mines) {
     drawExtrudedCylinder3D(
       ctx,
@@ -702,7 +731,7 @@ export function renderRicochetTanks(
   }
 
   // Supply Pickups
-  const nowBob = Math.sin(Date.now() * 0.006) * 3;
+  const nowBob = Math.sin(tankTime * 6) * 3.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'triple' ? '#FF3B9A' : pk.kind === 'speed' ? '#10D98B' : '#00C2FF';
     const label = pk.kind === 'triple' ? '3X' : pk.kind === 'speed' ? 'SPD' : 'SHD';
@@ -839,9 +868,21 @@ export function renderRicochetTanks(
     }
   }
 
-  // 3D Ricochet shells
+  // 3D Ricochet shells with speed tail
   for (const sh of snap.shells) {
-    drawSphere3D(ctx, sh.x, sh.y, 7.5, sh.bounces > 0 ? '#FFB800' : sh.colorHex, '#FFFFFF', 6, true);
+    const shCol = sh.bounces > 0 ? '#FFB800' : sh.colorHex;
+    const sp = Math.hypot(sh.vx, sh.vy) || 1;
+    ctx.save();
+    ctx.strokeStyle = shCol;
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sh.x, sh.y - 6);
+    ctx.lineTo(sh.x - (sh.vx / sp) * 20, sh.y - 6 - (sh.vy / sp) * 20);
+    ctx.stroke();
+    ctx.restore();
+    drawSphere3D(ctx, sh.x, sh.y, 7.5, shCol, '#FFFFFF', 6, true);
   }
 
   // Explosions
@@ -974,7 +1015,8 @@ export function renderTurboStriker(
   }
 
   // Pitch Powerups
-  const puPulse = Math.sin(Date.now() * 0.007) * 3;
+  const strikerTime = getMotionTime();
+  const puPulse = Math.sin(strikerTime * 7) * 3.5;
   for (const pu of snap.powerups ?? []) {
     const col = pu.kind === 'mega-kick' ? '#FF7A00' : pu.kind === 'speed' ? '#10D98B' : '#FFB800';
     const txt = pu.kind === 'mega-kick' ? '⚡' : pu.kind === 'speed' ? 'SPD' : '2●';
@@ -1005,11 +1047,26 @@ export function renderTurboStriker(
 
   for (const item of pitchItems) {
     if (item.kind === 'ball') {
+      const bSpeed = Math.hypot(b.vx, b.vy);
+      if (bSpeed > 140) {
+        ctx.save();
+        ctx.strokeStyle = b.lastTouchColor ?? '#FFFFFF';
+        ctx.globalAlpha = Math.min(0.45, bSpeed / 950);
+        ctx.lineWidth = b.radius * 1.1;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y - 4);
+        ctx.lineTo(b.x - b.vx * 0.065, b.y - 4 - b.vy * 0.065);
+        ctx.stroke();
+        ctx.restore();
+      }
       drawSphere3D(ctx, b.x, b.y, b.radius, '#F8FAFC', b.lastTouchColor ?? '#121419', 4, true);
       ctx.save();
+      ctx.translate(b.x, b.y - 4);
+      ctx.rotate(b.spin || strikerTime * 2);
       ctx.fillStyle = '#1E2430';
       ctx.beginPath();
-      ctx.arc(b.x, b.y - 4, 6.2, 0, Math.PI * 2);
+      ctx.arc(3.5, 0, 5.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     } else if (item.kind === 'bonusBall') {
@@ -1065,6 +1122,7 @@ export function renderTurboStriker(
         rimColor: teamColor,
         collarColor: shadeHex(teamColor, -0.45),
         visorColor: '#FFFFFF',
+        playerId: p.id,
       });
 
       drawNameplate(
@@ -1164,9 +1222,10 @@ export function renderPaintRush(ctx: CanvasRenderingContext2D, snap: PaintRushSn
   }
 
   // Golden bonus tiles overlay
+  const paintTime = getMotionTime();
   const bonusSet = new Set(snap.bonusCells ?? []);
   if (bonusSet.size > 0) {
-    const pulse = 0.55 + Math.sin(Date.now() * 0.008) * 0.25;
+    const pulse = 0.55 + Math.sin(paintTime * 8) * 0.25;
     ctx.save();
     for (const idx of bonusSet) {
       const r = Math.floor(idx / snap.cols);
@@ -1186,7 +1245,7 @@ export function renderPaintRush(ctx: CanvasRenderingContext2D, snap: PaintRushSn
   }
 
   // Paint pickups
-  const pkBob = Math.sin(Date.now() * 0.006) * 3;
+  const pkBob = Math.sin(paintTime * 6) * 3.5;
   for (const pk of snap.pickups ?? []) {
     const col = pk.kind === 'wide' ? '#00C2FF' : pk.kind === 'bomb' ? '#FF3B9A' : '#10D98B';
     const label = pk.kind === 'wide' ? 'W' : pk.kind === 'bomb' ? 'B' : '⚡';
@@ -1258,6 +1317,7 @@ export function renderPaintRush(ctx: CanvasRenderingContext2D, snap: PaintRushSn
       height: 11,
       rimColor: '#FFFFFF',
       showVisor: false,
+      playerId: p.id,
     });
 
     if ((p.wideTimer ?? 0) > 0) {

@@ -595,6 +595,15 @@ class ArcadeAudioEngine {
         this.tone(880, 0.065, 'triangle', 0.11, 1046, 0.06);
         this.tone(1046.5, 0.12, 'triangle', 0.13, undefined, 0.12);
         break;
+      case 'card':
+        this.tone(520, 0.04, 'triangle', 0.1, 840, 0);
+        this.scheduleNoiseHit(this.ctx ? this.ctx.currentTime : 0, 0.032, 'highpass', 3200, 0.045);
+        break;
+      case 'bluff':
+        this.tone(246.94, 0.14, 'sawtooth', 0.13, 220, 0);
+        this.tone(369.99, 0.16, 'triangle', 0.14, undefined, 0.08);
+        this.tone(523.25, 0.24, 'triangle', 0.16, 659.25, 0.16);
+        break;
     }
   }
 }

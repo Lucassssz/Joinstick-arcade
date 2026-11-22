@@ -312,6 +312,18 @@ export const GAME_FRENZY_PERKS: Record<GameId, FrenzyGamePerk> = {
     perk2En: '1.18× PINBALL SPEED',
     perk2Zh: '1.18× 极速弹珠',
   },
+  'color-clash': {
+    perk1En: '2× VICTORY SCORE',
+    perk1Zh: '胜利双倍积分',
+    perk2En: 'WILD +4 SHOWDOWN',
+    perk2Zh: '终极加牌狂潮',
+  },
+  'liars-deck': {
+    perk1En: '2× BLUFF & CATCH PTS',
+    perk1Zh: '抓谎与骗局双倍分',
+    perk2En: 'HIGH-STAKES REVEAL',
+    perk2Zh: '极限开牌时刻',
+  },
 };
 
 export const TOURNAMENT_TOTAL_GAMES = 5;

@@ -1,4 +1,6 @@
 import type {
+  CardClientAction,
+  CardPrivateState,
   ControllerInput,
   GameId,
   GameSnapshot,
@@ -36,6 +38,8 @@ import { treasureDigModule } from './treasureDig.ts';
 import { fruitDropModule } from './fruitDrop.ts';
 import { luckyAuctionModule } from './luckyAuction.ts';
 import { pinballClashModule } from './pinballClash.ts';
+import { colorClashModule } from './colorClash.ts';
+import { liarsDeckModule } from './liarsDeck.ts';
 
 export interface ServerPlayerInputState {
   id: string;
@@ -68,6 +72,7 @@ export interface StepOutput {
   sounds: SoundEvent[];
   haptics: HapticTrigger[];
   hudUpdates: Record<string, PlayerHudUpdate>;
+  privateStates?: Record<string, CardPrivateState>;
   finished: boolean;
   rankings?: RankingEntry[];
 }
@@ -76,6 +81,13 @@ export interface ServerGameModule<TState = unknown> {
   id: GameId;
   createState(players: ServerPlayerInputState[], settingValue: number): TState;
   addPlayer?(state: TState, player: ServerPlayerInputState): void;
+  handleCardAction?(
+    state: TState,
+    playerId: string,
+    action: CardClientAction,
+    players: ServerPlayerInputState[]
+  ): void;
+  getPrivateStates?(state: TState, players: ServerPlayerInputState[]): Record<string, CardPrivateState>;
   step(state: TState, players: ServerPlayerInputState[], dt: number): StepOutput;
   getSnapshot(state: TState): GameSnapshot;
   getRankings(state: TState, players: ServerPlayerInputState[]): RankingEntry[];
@@ -112,4 +124,6 @@ export const SERVER_GAMES: Record<GameId, ServerGameModule<any>> = {
   'fruit-drop': fruitDropModule,
   'lucky-auction': luckyAuctionModule,
   'pinball-clash': pinballClashModule,
+  'color-clash': colorClashModule,
+  'liars-deck': liarsDeckModule,
 };

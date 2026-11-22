@@ -802,6 +802,48 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     settingLabel: '获胜进球',
     settingOptions: { 5: '先得 5 球', 7: '先得 7 球', 9: '先得 9 球' },
   },
+  'color-clash': {
+    name: '变色狂潮',
+    category: '派对卡牌',
+    tagline: '颜色数字精准接龙，连环 +2/+4 甩光手牌！',
+    description: '每部手机都是专属私密手牌！匹配中央牌面的颜色或符号，用反转、跳过和加牌炸弹轰炸好友，15 秒倒计时内先出完手牌即获胜。',
+    playerModeLabel: '2人 · 3–8人卡牌',
+    rules: [
+      '私密手牌只显示在你的手机上——直接点击高亮卡牌（或摇杆 + A）出牌！',
+      '每回合限时 15 秒：超时未出牌将自动跳过并移交下一位玩家。',
+      '打出 +2 或变色 +4 可叠加罚抽张数，或自由指定桌面新颜色！',
+      '最先出光手牌的玩家立刻赢得本局胜利！',
+    ],
+    joystickLabel: '选牌',
+    actionALabel: '出牌',
+    actionASublabel: '打出此牌',
+    actionBLabel: '摸牌',
+    actionBSublabel: '摸牌/跳过',
+    controlTip: '直接点按手机屏幕上的发光手牌，即可极速飞牌上桌！',
+    settingLabel: '初始手牌',
+    settingOptions: { 5: '5 张（快节奏）', 7: '7 张（经典）', 9: '9 张（持久战）' },
+  },
+  'liars-deck': {
+    name: '欺诈牌局',
+    category: '心理吹牛牌',
+    tagline: '暗牌盲出强装镇定，抓出桌上的超级大骗子！',
+    description: '每位玩家只能在手机查看自己的底牌！轮流朝牌桌扣出 1–3 张暗牌并声称符合桌面目标点数，随时拍下「抓谎」大屏开牌揭穿真相！',
+    playerModeLabel: '2人 · 3–8人欺诈',
+    rules: [
+      '留意大屏桌面目标点数（如 A 或 K）——小丑牌 JOKER 永远算作万能真牌！',
+      '轮到你时有 15 秒选择 1–3 张卡牌扣牌出击（说真话或偷梁换柱都行）。',
+      '出牌后对手可点击「抓谎！」——说谎者将吞下桌面全部牌堆！',
+      '若对方出的是真牌，质疑者吞下全部牌堆！先清空手牌者夺冠！',
+    ],
+    joystickLabel: '挑牌',
+    actionALabel: '出牌',
+    actionASublabel: '出牌/信任',
+    actionBLabel: '抓谎!',
+    actionBSublabel: '选牌/质疑',
+    controlTip: '守住表情！你可以一口气扣出最多 3 张牌冒充桌面目标牌。',
+    settingLabel: '初始手牌',
+    settingOptions: { 4: '4 张（快局）', 5: '5 张（标准）', 6: '6 张（高赌注）' },
+  },
 };
 
 export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMetadata {
@@ -948,6 +990,19 @@ const EXACT_GAME_TEXT_ZH: Record<string, string> = {
   OUT: '出局',
   BANK: '金库',
   'EMP SLOW-MO': '电磁减速',
+  '1 CARD LEFT!': '只剩 1 张！',
+  'EMPTY HAND!': '清空手牌！',
+  'TIME OUT · PASSED!': '超时 · 自动过牌！',
+  'SKIP!': '跳过回合！',
+  'REVERSE!': '方向反转！',
+  'BLUFF CAUGHT!': '抓谎成功！',
+  '100% HONEST!': '货真价实！',
+  'TRUSTED!': '全员信任！',
+  'PICK A COLOR!': '选择新颜色！',
+  'CHALLENGE WINDOW!': '质疑抓谎窗口！',
+  DECK: '牌库',
+  PILE: '牌堆',
+  TARGET: '目标',
   'VAULT HEIST': '金库大劫案',
   'BRING GEMS TO CENTER': '把宝石送回中心',
   'HYPER PONG': '超级霓虹乒乓',
@@ -1632,6 +1687,42 @@ export function translateGameText(text: string, lang: Language): string {
   }
   if ((m = trimmed.match(/^(\d+) goals · (\d+) pts$/i))) {
     return `${m[1]} 球 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) cards left$/i))) {
+    return `剩余 ${m[1]} 张`;
+  }
+  if ((m = trimmed.match(/^(\d+) cards · (\d+) pts$/i))) {
+    return `${m[1]} 张牌 · ${m[2]} 分`;
+  }
+  if ((m = trimmed.match(/^(\d+) cards · (\d+) caught$/i))) {
+    return `${m[1]} 张牌 · 抓谎 ${m[2]} 次`;
+  }
+  if ((m = trimmed.match(/^YOUR TURN · (\d+)s$/i))) {
+    return `轮到你 · ${m[1]}秒`;
+  }
+  if ((m = trimmed.match(/^BLUFF CHECK · (\d+)s$/i))) {
+    return `抓谎时刻 · ${m[1]}秒`;
+  }
+  if ((m = trimmed.match(/^(.+) PLAYED (\d+)× ([A-Z0-9]+)!$/i))) {
+    return `${m[1]} 扣出了 ${m[2]} 张「${m[3]}」！`;
+  }
+  if ((m = trimmed.match(/^(.+) CALLED BLUFF!$/i))) {
+    return `${m[1]} 大喊：抓谎！！`;
+  }
+  if ((m = trimmed.match(/^LIAR! (.+) TOOK \+(\d+) CARDS!$/i))) {
+    return `抓谎成功！${m[1]} 吞下 +${m[2]} 张牌！`;
+  }
+  if ((m = trimmed.match(/^TRUTH! (.+) TOOK \+(\d+) CARDS!$/i))) {
+    return `竟是真牌！${m[1]} 吞下 +${m[2]} 张牌！`;
+  }
+  if ((m = trimmed.match(/^STACK \+(\d+)!$/i))) {
+    return `连环加牌 +${m[1]}！`;
+  }
+  if ((m = trimmed.match(/^DREW \+(\d+)!$/i))) {
+    return `罚抽 +${m[1]} 张！`;
+  }
+  if ((m = trimmed.match(/^(.+) PASSED \(TIMEOUT\)$/i))) {
+    return `${m[1]} 超时自动过牌`;
   }
   if ((m = trimmed.match(/^\+(\d+)!$/i))) {
     return `+${m[1]}！`;

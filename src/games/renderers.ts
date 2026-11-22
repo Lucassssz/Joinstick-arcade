@@ -53,14 +53,27 @@ import {
   renderPinballClash,
   renderRedLightDash,
 } from './partyRenderersC';
+import { renderColorClash, renderLiarsDeck } from './cardRenderers';
+import {
+  ArcadeMotionState,
+  createArcadeMotionState,
+  drawArcadeFrontFX,
+  easeOutBack,
+  getMotionTime,
+  getPodFx,
+  getSpringBannerAnim,
+  prepareArcadeFrame,
+  setActiveArcadeMotion,
+} from './arcadeMotion';
 
 export interface RenderFxState {
   skidMarks: { x: number; y: number; alpha: number; color: string }[];
   shake: number;
+  arcade: ArcadeMotionState;
 }
 
 export function createRenderFxState(): RenderFxState {
-  return { skidMarks: [], shake: 0 };
+  return { skidMarks: [], shake: 0, arcade: createArcadeMotionState() };
 }
 
 let activeCanvasLang: Language = 'en';
@@ -114,13 +127,20 @@ export function drawPopupTexts(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const pop of popups) {
-    ctx.globalAlpha = Math.max(0, Math.min(1, pop.alpha));
+    const a = Math.max(0, Math.min(1, pop.alpha));
+    const popIn = a > 0.78 ? easeOutBack((1 - a) / 0.22, 2.1) : 1;
+    const scale = 0.72 + 0.34 * popIn - (1 - a) * 0.08;
+    ctx.save();
+    ctx.translate(pop.x, pop.y);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = a;
     const txt = tCanvas(pop.text);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = 'rgba(10, 12, 18, 0.92)';
-    ctx.strokeText(txt, pop.x, pop.y);
+    ctx.lineWidth = 4.5;
+    ctx.strokeStyle = 'rgba(10, 12, 18, 0.94)';
+    ctx.strokeText(txt, 0, 0);
     ctx.fillStyle = pop.colorHex;
-    ctx.fillText(txt, pop.x, pop.y);
+    ctx.fillText(txt, 0, 0);
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -192,7 +212,7 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
   }
 
   // Power orbs on arena floor
-  const pNow = Date.now() * 0.0045;
+  const pNow = getMotionTime() * 4.5;
   for (const orb of snap.powerups ?? []) {
     const col = orb.kind === 'giant' ? '#FFB800' : orb.kind === 'shock' ? '#00C2FF' : '#10D98B';
     const glyph = orb.kind === 'giant' ? 'BIG' : orb.kind === 'shock' ? 'ZAP' : '★';
@@ -283,6 +303,7 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
         height: 8,
         rimColor: (p.giantTimer ?? 0) > 0 ? '#FFB800' : '#F8FAFC',
         visorColor: '#FFFFFF',
+        playerId: p.id,
       });
 
       // Front headlights on top face
@@ -325,20 +346,24 @@ function renderBumperBrawl(ctx: CanvasRenderingContext2D, snap: BumperBrawlSnaps
 
   // Round winner banner
   if (snap.roundBanner) {
+    const anim = getSpringBannerAnim('bumper-round', snap.roundBanner);
     ctx.save();
-    ctx.fillStyle = 'rgba(12, 14, 19, 0.88)';
+    ctx.translate(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+    ctx.scale(anim.scale, anim.scale);
+    ctx.globalAlpha = anim.alpha;
+    ctx.fillStyle = 'rgba(12, 14, 19, 0.9)';
     ctx.beginPath();
-    ctx.roundRect(ARENA_WIDTH / 2 - 240, ARENA_HEIGHT / 2 - 42, 480, 84, 16);
+    ctx.roundRect(-240, -42, 480, 84, 16);
     ctx.fill();
     ctx.strokeStyle = '#FFB800';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.8;
     ctx.stroke();
 
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '800 28px "Bricolage Grotesque", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(tCanvas(snap.roundBanner), ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+    ctx.fillText(tCanvas(snap.roundBanner), 0, 0);
     ctx.restore();
   }
 }
@@ -417,7 +442,7 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
   drawStudioBackdrop(ctx, '#080B12', 'rgba(0, 194, 255, 0.08)', 'rgba(0, 194, 255, 0.04)', 60);
 
   // Multi-layer depth starfield
-  const now = Date.now() * 0.001;
+  const now = getMotionTime();
   for (const s of STATIC_STARS) {
     const drift = (now * (s.layer + 1) * 5) % ARENA_WIDTH;
     const sx = (s.x + drift) % ARENA_WIDTH;
@@ -461,7 +486,7 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
   }
 
   // Pickups (3D hovering orbs)
-  const tNow = Date.now() * 0.004;
+  const tNow = now * 4;
   for (const pk of snap.pickups) {
     const color =
       pk.kind === 'shield'
@@ -596,15 +621,27 @@ function renderAstroBlaster(ctx: CanvasRenderingContext2D, snap: AstroBlasterSna
 
     ctx.rotate(ship.angle);
 
-    // Thruster flame
+    const podFx = getPodFx(ship.id);
+    ctx.scale(podFx.scaleX, podFx.scaleY);
+
+    // Thruster flame with flicker
     const speed = Math.hypot(ship.vx, ship.vy);
     if (speed > 45 || ship.boostTimer > 0) {
-      const flameLen = ship.boostTimer > 0 ? 30 : Math.min(20, speed / 18);
+      const flicker = 0.85 + 0.25 * Math.sin(now * 38 + ship.slotIndex);
+      const flameLen = (ship.boostTimer > 0 ? 32 : Math.min(22, speed / 17)) * flicker;
       ctx.fillStyle = ship.boostTimer > 0 ? '#10D98B' : '#FFB800';
       ctx.beginPath();
-      ctx.moveTo(-14, -5);
+      ctx.moveTo(-14, -5.5);
       ctx.lineTo(-14 - flameLen, 0);
-      ctx.lineTo(-14, 5);
+      ctx.lineTo(-14, 5.5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#FFFBEB';
+      ctx.beginPath();
+      ctx.moveTo(-14, -2.4);
+      ctx.lineTo(-14 - flameLen * 0.52, 0);
+      ctx.lineTo(-14, 2.4);
       ctx.closePath();
       ctx.fill();
     }
@@ -799,19 +836,21 @@ function renderTurboDrift(
     ctx.restore();
   }
 
-  // Boost chevron pads
+  // Boost chevron pads (animated flowing pulse)
+  const driftNow = getMotionTime() * 5;
   for (const pad of snap.boostPads) {
     ctx.save();
     ctx.translate(pad.x, pad.y);
     ctx.rotate(pad.angle);
-    ctx.fillStyle = 'rgba(255, 184, 0, 0.14)';
+    ctx.fillStyle = 'rgba(255, 184, 0, 0.16)';
     ctx.beginPath();
     ctx.roundRect(-24, -20, 48, 40, 6);
     ctx.fill();
-    ctx.strokeStyle = '#FFB800';
-    ctx.lineWidth = 4;
     for (let c = -1; c <= 1; c++) {
       const ox = c * 14;
+      const pulse = 0.55 + 0.45 * Math.sin(driftNow * 2.2 - c * 1.4);
+      ctx.strokeStyle = `rgba(255, 184, 0, ${pulse.toFixed(2)})`;
+      ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.moveTo(ox - 6, -15);
       ctx.lineTo(ox + 6, 0);
@@ -839,7 +878,6 @@ function renderTurboDrift(
   }
 
   // Track Coins & Mystery Boxes
-  const driftNow = Date.now() * 0.005;
   for (const c of snap.coins ?? []) {
     const bob = Math.sin(driftNow + c.x * 0.03) * 3.5;
     if (c.kind === 'mystery') {
@@ -910,11 +948,19 @@ function renderTurboDrift(
       ctx.save();
       ctx.translate(0, -4);
       ctx.rotate(car.angle);
+      const flameReach = 34 + Math.sin(driftNow * 9 + car.slotIndex) * 7;
       ctx.fillStyle = '#FFB800';
       ctx.beginPath();
-      ctx.moveTo(-17, -5);
-      ctx.lineTo(-38, 0);
-      ctx.lineTo(-17, 5);
+      ctx.moveTo(-17, -5.5);
+      ctx.lineTo(-flameReach, 0);
+      ctx.lineTo(-17, 5.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.moveTo(-17, -2.5);
+      ctx.lineTo(-flameReach * 0.55, 0);
+      ctx.lineTo(-17, 2.5);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -1062,113 +1108,131 @@ function renderTurboDrift(
 
 export function renderGameSnapshot(
   ctx: CanvasRenderingContext2D,
-  snap: GameSnapshot,
+  rawSnap: GameSnapshot,
   fx: RenderFxState,
   lang: Language = 'en'
 ): void {
   activeCanvasLang = lang;
+  const snap = prepareArcadeFrame(rawSnap, fx.arcade);
+  setActiveArcadeMotion(fx.arcade);
   ctx.save();
-  if (fx.shake > 0.2) {
-    const ox = (Math.random() - 0.5) * fx.shake;
-    const oy = (Math.random() - 0.5) * fx.shake;
-    ctx.translate(ox, oy);
-    fx.shake *= 0.85;
-  } else {
-    fx.shake = 0;
-  }
 
-  switch (snap.gameId) {
-    case 'bumper-brawl':
-      renderBumperBrawl(ctx, snap);
-      break;
-    case 'astro-blaster':
-      renderAstroBlaster(ctx, snap);
-      break;
-    case 'turbo-drift':
-      renderTurboDrift(ctx, snap, fx);
-      break;
-    case 'hex-drop':
-      renderHexDrop(ctx, snap);
-      break;
-    case 'fuse-pass':
-      renderFusePass(ctx, snap);
-      break;
-    case 'grid-runners':
-      renderGridRunners(ctx, snap);
-      break;
-    case 'ricochet-tanks':
-      renderRicochetTanks(ctx, snap);
-      break;
-    case 'turbo-striker':
-      renderTurboStriker(ctx, snap);
-      break;
-    case 'paint-rush':
-      renderPaintRush(ctx, snap);
-      break;
-    case 'laser-gauntlet':
-      renderLaserGauntlet(ctx, snap);
-      break;
-    case 'vault-heist':
-      renderVaultHeist(ctx, snap);
-      break;
-    case 'hyper-pong':
-      renderHyperPong(ctx, snap);
-      break;
-    case 'blade-duel':
-      renderBladeDuel(ctx, snap);
-      break;
-    case 'cannon-siege':
-      renderCannonSiege(ctx, snap);
-      break;
-    case 'crown-heist':
-      renderCrownHeist(ctx, snap);
-      break;
-    case 'freeze-tag':
-      renderFreezeTag(ctx, snap);
-      break;
-    case 'ghost-hunt':
-      renderGhostHunt(ctx, snap);
-      break;
-    case 'meteor-swarm':
-      renderMeteorSwarm(ctx, snap);
-      break;
-    case 'hook-shot':
-      renderHookShot(ctx, snap);
-      break;
-    case 'gravity-flip':
-      renderGravityFlip(ctx, snap);
-      break;
-    case 'rich-street':
-      renderRichStreet(ctx, snap);
-      break;
-    case 'jungle-ladders':
-      renderJungleLadders(ctx, snap);
-      break;
-    case 'bomb-grid':
-      renderBombGrid(ctx, snap);
-      break;
-    case 'red-light-dash':
-      renderRedLightDash(ctx, snap);
-      break;
-    case 'color-match':
-      renderColorMatch(ctx, snap);
-      break;
-    case 'kitchen-rush':
-      renderKitchenRush(ctx, snap);
-      break;
-    case 'treasure-dig':
-      renderTreasureDig(ctx, snap);
-      break;
-    case 'fruit-drop':
-      renderFruitDrop(ctx, snap);
-      break;
-    case 'lucky-auction':
-      renderLuckyAuction(ctx, snap);
-      break;
-    case 'pinball-clash':
-      renderPinballClash(ctx, snap);
-      break;
-  }
+  try {
+    const isCardGame = snap.gameId === 'color-clash' || snap.gameId === 'liars-deck';
+    const kickX = isCardGame ? 0 : fx.arcade.kickX;
+    const kickY = isCardGame ? 0 : fx.arcade.kickY;
 
-  ctx.restore();
+    if (fx.shake > 0.2 || Math.abs(kickX) > 0.1 || Math.abs(kickY) > 0.1) {
+      const ox = kickX + (fx.shake > 0.2 ? (Math.random() - 0.5) * fx.shake : 0);
+      const oy = kickY + (fx.shake > 0.2 ? (Math.random() - 0.5) * fx.shake : 0);
+      ctx.translate(ox, oy);
+      fx.shake *= 0.85;
+    } else {
+      fx.shake = 0;
+    }
+
+    switch (snap.gameId) {
+      case 'bumper-brawl':
+        renderBumperBrawl(ctx, snap);
+        break;
+      case 'astro-blaster':
+        renderAstroBlaster(ctx, snap);
+        break;
+      case 'turbo-drift':
+        renderTurboDrift(ctx, snap, fx);
+        break;
+      case 'hex-drop':
+        renderHexDrop(ctx, snap);
+        break;
+      case 'fuse-pass':
+        renderFusePass(ctx, snap);
+        break;
+      case 'grid-runners':
+        renderGridRunners(ctx, snap);
+        break;
+      case 'ricochet-tanks':
+        renderRicochetTanks(ctx, snap);
+        break;
+      case 'turbo-striker':
+        renderTurboStriker(ctx, snap);
+        break;
+      case 'paint-rush':
+        renderPaintRush(ctx, snap);
+        break;
+      case 'laser-gauntlet':
+        renderLaserGauntlet(ctx, snap);
+        break;
+      case 'vault-heist':
+        renderVaultHeist(ctx, snap);
+        break;
+      case 'hyper-pong':
+        renderHyperPong(ctx, snap);
+        break;
+      case 'blade-duel':
+        renderBladeDuel(ctx, snap);
+        break;
+      case 'cannon-siege':
+        renderCannonSiege(ctx, snap);
+        break;
+      case 'crown-heist':
+        renderCrownHeist(ctx, snap);
+        break;
+      case 'freeze-tag':
+        renderFreezeTag(ctx, snap);
+        break;
+      case 'ghost-hunt':
+        renderGhostHunt(ctx, snap);
+        break;
+      case 'meteor-swarm':
+        renderMeteorSwarm(ctx, snap);
+        break;
+      case 'hook-shot':
+        renderHookShot(ctx, snap);
+        break;
+      case 'gravity-flip':
+        renderGravityFlip(ctx, snap);
+        break;
+      case 'rich-street':
+        renderRichStreet(ctx, snap);
+        break;
+      case 'jungle-ladders':
+        renderJungleLadders(ctx, snap);
+        break;
+      case 'bomb-grid':
+        renderBombGrid(ctx, snap);
+        break;
+      case 'red-light-dash':
+        renderRedLightDash(ctx, snap);
+        break;
+      case 'color-match':
+        renderColorMatch(ctx, snap);
+        break;
+      case 'kitchen-rush':
+        renderKitchenRush(ctx, snap);
+        break;
+      case 'treasure-dig':
+        renderTreasureDig(ctx, snap);
+        break;
+      case 'fruit-drop':
+        renderFruitDrop(ctx, snap);
+        break;
+      case 'lucky-auction':
+        renderLuckyAuction(ctx, snap);
+        break;
+      case 'pinball-clash':
+        renderPinballClash(ctx, snap);
+        break;
+      case 'color-clash':
+        renderColorClash(ctx, snap);
+        break;
+      case 'liars-deck':
+        renderLiarsDeck(ctx, snap);
+        break;
+    }
+
+    drawArcadeFrontFX(ctx, fx.arcade);
+  } finally {
+    setActiveArcadeMotion(null);
+    ctx.restore();
+  }
 }
