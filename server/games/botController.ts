@@ -586,24 +586,42 @@ export function computeBotInput(
       if (!me) break;
       const puck = snapshot.puck;
       const onMySide = me.side === 'left' ? puck.x < ARENA_WIDTH * 0.54 : puck.x > ARENA_WIDTH * 0.46;
-      const homeX = me.side === 'left' ? 190 : ARENA_WIDTH - 190;
-      const targetX = onMySide
-        ? me.side === 'left'
-          ? Math.min(ARENA_WIDTH / 2 - 60, Math.max(115, puck.x + 12))
-          : Math.max(ARENA_WIDTH / 2 + 60, Math.min(ARENA_WIDTH - 115, puck.x - 12))
-        : homeX;
-      const humanOffsetY = Math.sin(mem.driftPhase * 1.35) * (1 - tuning.reflexFactor) * 48;
-      const targetY = Math.max(96, Math.min(ARENA_HEIGHT - 96, puck.y + humanOffsetY));
+      const homeX = me.side === 'left' ? 185 : ARENA_WIDTH - 185;
+      const puckInCorner =
+        (puck.x < 190 || puck.x > ARENA_WIDTH - 190) && (puck.y < 155 || puck.y > ARENA_HEIGHT - 155);
+      const puckBehindMe = me.side === 'left' ? puck.x < me.x + 14 : puck.x > me.x - 14;
+
+      let targetX = homeX;
+      let targetY = ARENA_HEIGHT / 2;
+
+      if (puckInCorner || puckBehindMe) {
+        // Retreat to goal-guard stance so the bot never pins the puck into a corner or back wall
+        targetX = me.side === 'left' ? 175 : ARENA_WIDTH - 175;
+        targetY = Math.max(210, Math.min(ARENA_HEIGHT - 210, puck.y * 0.5 + (ARENA_HEIGHT / 2) * 0.5));
+      } else if (onMySide) {
+        // Always approach from the GOAL side (behind the puck) to drive it forward toward the opponent
+        targetX =
+          me.side === 'left'
+            ? Math.min(ARENA_WIDTH / 2 - 60, Math.max(145, puck.x - 34))
+            : Math.max(ARENA_WIDTH / 2 + 60, Math.min(ARENA_WIDTH - 145, puck.x + 34));
+        const humanOffsetY = Math.sin(mem.driftPhase * 1.35) * (1 - tuning.reflexFactor) * 44;
+        targetY = Math.max(115, Math.min(ARENA_HEIGHT - 115, puck.y + humanOffsetY));
+      } else {
+        const humanOffsetY = Math.sin(mem.driftPhase * 1.35) * (1 - tuning.reflexFactor) * 44;
+        targetY = Math.max(130, Math.min(ARENA_HEIGHT - 130, puck.y * 0.7 + (ARENA_HEIGHT / 2) * 0.3 + humanOffsetY));
+      }
+
       const s = steerToward(me.x, me.y, targetX, targetY, tuning);
-      if (s.dist > 22) {
+      if (s.dist > 20) {
         dx = s.dx;
         dy = s.dy;
       }
       const pDist = Math.hypot(puck.x - me.x, puck.y - me.y);
-      if (pDist < 86 && me.cooldownA <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
+      const puckInFront = me.side === 'left' ? puck.x >= me.x - 6 : puck.x <= me.x + 6;
+      if (puckInFront && !puckInCorner && pDist < 86 && me.cooldownA <= 0 && canAct() && Math.random() < tuning.reflexFactor) {
         a = true;
         markActed();
-      } else if (pDist < 175 && pDist > 92 && me.cooldownB <= 0 && canAct() && Math.random() < 0.06) {
+      } else if (puckInFront && pDist < 175 && pDist > 92 && me.cooldownB <= 0 && canAct() && Math.random() < 0.06) {
         b = true;
         markActed();
       }
@@ -1114,8 +1132,15 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me) break;
       const serveSt = snapshot.stations.find((s) => s.kind === 'serve');
-      const readyGrill = snapshot.stations.find((s) => s.kind === 'grill' && s.cookingDish && s.cookProgress >= 1);
-      const emptyGrill = snapshot.stations.find((s) => s.kind === 'grill' && !s.cookingDish);
+      const sinkSt = snapshot.stations.find((s) => s.kind === 'sink');
+      const burningGrill = snapshot.stations.find((s) => s.kind === 'grill' && s.onFire);
+      const readyGrill = snapshot.stations.find(
+        (s) => s.kind === 'grill' && s.cookingDish && s.cookProgress >= 1 && !s.onFire
+      );
+      const emptyGrill = snapshot.stations.find((s) => s.kind === 'grill' && !s.cookingDish && !s.onFire);
+      const activeChop = snapshot.stations.find((s) => s.kind === 'chop' && s.cookingDish);
+      const emptyChop = snapshot.stations.find((s) => s.kind === 'chop' && !s.cookingDish);
+
       const vipOrder = difficulty === 'chill' && Math.random() < 0.5 ? undefined : snapshot.orders.find((o) => o.vip);
       const wantedDish = (vipOrder ?? snapshot.orders[0])?.dish ?? 'burger';
       const rawKind = wantedDish === 'burger' ? 'raw-burger' : wantedDish === 'pizza' ? 'raw-pizza' : 'raw-taco';
@@ -1126,40 +1151,71 @@ export function computeBotInput(
       let targetY = ARENA_HEIGHT / 2;
       let wantInteract = false;
 
-      if (nearBoots && bootsD < 145 && (me.bootsTimer ?? 0) <= 0) {
+      if (burningGrill) {
+        // Priority 1: Extinguish Stove Fire!
+        targetX = burningGrill.x < me.x ? burningGrill.x + burningGrill.w + 30 : burningGrill.x - 30;
+        targetY = burningGrill.y + burningGrill.h / 2;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 105) wantInteract = true;
+      } else if (nearBoots && bootsD < 135 && (me.bootsTimer ?? 0) <= 0) {
         targetX = nearBoots.x;
         targetY = nearBoots.y;
       } else if (me.holding && me.holding.cooked && serveSt) {
-        targetX = serveSt.x - 32;
-        targetY = Math.max(serveSt.y + 30, Math.min(serveSt.y + serveSt.h - 30, me.y));
+        // Deliver cooked plate to Serve Conveyor
+        targetX = serveSt.x - 34;
+        targetY = Math.max(serveSt.y + 34, Math.min(serveSt.y + serveSt.h - 34, me.y));
         const dServe = Math.hypot(targetX - me.x, targetY - me.y);
-        const tossRange = difficulty === 'spicy' ? 360 : difficulty === 'arcade' ? 240 : 140;
-        if (dServe < tossRange && me.cooldownB <= 0 && canAct()) {
+        const tossRange = difficulty === 'spicy' ? 320 : difficulty === 'arcade' ? 220 : 130;
+        if (dServe < tossRange && me.x > 760 && me.cooldownB <= 0 && canAct()) {
           b = true;
           markActed();
-        } else if (dServe < 85) {
+        } else if (dServe < 88) {
           wantInteract = true;
         }
+      } else if (me.holding && !me.holding.cooked && me.holding.stage === 'chopped' && emptyGrill) {
+        // Take chopped ingredient to an empty Stove
+        targetX = emptyGrill.x - 34;
+        targetY = emptyGrill.y + emptyGrill.h / 2;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
+      } else if (me.holding && !me.holding.cooked && emptyChop) {
+        // Take raw ingredient to an empty Cutting Board
+        targetX = emptyChop.x - 34;
+        targetY = emptyChop.y + emptyChop.h / 2;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
       } else if (me.holding && !me.holding.cooked && emptyGrill) {
+        // Fallback if all cutting boards are full: put directly on stove
         targetX = emptyGrill.x - 34;
         targetY = emptyGrill.y + emptyGrill.h / 2;
         if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
       } else if (!me.holding && readyGrill) {
+        // Grab finished dish from Stove before it burns!
         targetX = readyGrill.x + readyGrill.w + 34;
         targetY = readyGrill.y + readyGrill.h / 2;
         if (me.x < readyGrill.x + readyGrill.w / 2) targetX = readyGrill.x - 34;
         if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
+      } else if (!me.holding && activeChop) {
+        // Stand at Cutting Board to finish chopping & auto-pickup
+        targetX = activeChop.x + activeChop.w + 30;
+        targetY = activeChop.y + activeChop.h / 2;
+        if (me.x < activeChop.x + activeChop.w / 2) targetX = activeChop.x - 30;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
+      } else if (!me.holding && sinkSt && (sinkSt.dirtyPlates ?? 0) >= 2) {
+        // Wash dirty plates at the Sink for bonus points
+        targetX = sinkSt.x - 34;
+        targetY = sinkSt.y + sinkSt.h / 2;
+        if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
       } else if (!me.holding && rawSt) {
+        // Grab raw ingredient from crate
         targetX = rawSt.x + rawSt.w + 34;
         targetY = rawSt.y + rawSt.h / 2;
         if (Math.hypot(targetX - me.x, targetY - me.y) < 92) wantInteract = true;
       }
 
-      const crossingGrills = (me.x < 500 && targetX > 690) || (me.x > 690 && targetX < 500);
-      if (crossingGrills) {
-        const aisleY = Math.abs(me.y - 295) < Math.abs(me.y - 486) ? 295 : 486;
+      // Smoothly route through the 2 horizontal kitchen walkways (y=285 or y=484) when crossing island columns
+      const colOf = (x: number) => (x < 335 ? 0 : x < 630 ? 1 : 2);
+      if (colOf(me.x) !== colOf(targetX)) {
+        const aisleY = Math.abs(me.y - 285) < Math.abs(me.y - 484) ? 285 : 484;
         if (Math.abs(me.y - aisleY) > 28) {
-          targetX = me.x < 600 ? 465 : 725;
+          targetX = me.x;
           targetY = aisleY;
         }
       }

@@ -731,6 +731,9 @@ export interface BladeDuelPlayerState {
   y: number;
   angle: number;
   alive: boolean;
+  hp: number;
+  maxHp: number;
+  invulnTimer: number;
   slashTimer: number;
   parryTimer: number;
   stunTimer: number;
@@ -751,7 +754,7 @@ export interface BladeDuelSnapshot {
   roundBanner: string | null;
   dangerRadius?: number;
   pillars: { x: number; y: number; r: number }[];
-  scrolls?: { id: string; kind: 'blade-wave' | 'wind-step'; x: number; y: number }[];
+  scrolls?: { id: string; kind: 'blade-wave' | 'wind-step' | 'heart'; x: number; y: number }[];
   waveProjectiles?: { x: number; y: number; angle: number; colorHex: string }[];
   slashes: { x: number; y: number; angle: number; colorHex: string; alpha: number }[];
   sparks: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
@@ -1250,6 +1253,7 @@ export interface ColorMatchSnapshot {
 
 // --- 26. Kitchen Rush ---
 export type DishKind = 'burger' | 'pizza' | 'taco';
+export type KitchenItemStage = 'raw' | 'chopped' | 'cooked' | 'plated';
 
 export interface KitchenOrderState {
   id: string;
@@ -1262,7 +1266,7 @@ export interface KitchenOrderState {
 
 export interface KitchenStationState {
   id: string;
-  kind: 'raw-burger' | 'raw-pizza' | 'raw-taco' | 'grill' | 'serve';
+  kind: 'raw-burger' | 'raw-pizza' | 'raw-taco' | 'chop' | 'grill' | 'sink' | 'serve' | 'trash';
   x: number;
   y: number;
   w: number;
@@ -1270,6 +1274,10 @@ export interface KitchenStationState {
   cookingDish: DishKind | null;
   cookProgress: number; // 0..1
   cookOwnerId: string | null;
+  burnProgress?: number; // 0..1 after cooked on grill
+  onFire?: boolean;
+  dirtyPlates?: number;
+  cleanPlates?: number;
 }
 
 export interface KitchenPlayerState {
@@ -1280,9 +1288,10 @@ export interface KitchenPlayerState {
   x: number;
   y: number;
   angle: number;
-  holding: { dish: DishKind; cooked: boolean } | null;
+  holding: { dish: DishKind; cooked: boolean; stage?: KitchenItemStage; gourmet?: boolean } | null;
   dashTimer: number;
   bootsTimer?: number;
+  choppingTimer?: number;
   combo?: number;
   served: number;
   score: number;
@@ -1294,9 +1303,10 @@ export interface KitchenRushSnapshot {
   gameId: 'kitchen-rush';
   timeLeft: number;
   totalTime: number;
+  teamScore?: number;
   orders: KitchenOrderState[];
   stations: KitchenStationState[];
-  flyingPlates: { id: string; dish: DishKind; x: number; y: number; colorHex: string }[];
+  flyingPlates: { id: string; dish: DishKind; x: number; y: number; colorHex: string; gourmet?: boolean }[];
   boots?: { id: string; x: number; y: number }[];
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: KitchenPlayerState[];
@@ -1772,6 +1782,12 @@ export type ClientMessage =
   | { type: 'tournament:exit' }
   | { type: 'card:action'; action: CardClientAction }
   | { type: 'controller:input'; input: ControllerInput }
+  | {
+      type: 'host:ui-haptic';
+      event: string;
+      targetPlayerId?: string;
+      label?: string;
+    }
   | { type: 'ping' };
 
 export type ServerMessage =
@@ -1788,7 +1804,15 @@ export type ServerMessage =
     }
   | { type: 'game:tick'; snapshot: GameSnapshot; sounds: SoundEvent[] }
   | { type: 'player:card-state'; cardState: CardPrivateState | null }
-  | { type: 'player:haptic'; pattern: number | number[]; reason?: string }
+  | {
+      type: 'player:haptic';
+      pattern: number | number[];
+      reason?: string;
+      event?: string;
+      label?: string;
+      intensity?: 'light' | 'medium' | 'heavy';
+    }
   | { type: 'room:closed'; reason: string }
   | { type: 'error'; message: string; code?: string }
   | { type: 'pong' };
+

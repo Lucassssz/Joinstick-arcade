@@ -44,7 +44,7 @@ interface BladeDuelState {
   nextId: number;
   scrollTimer: number;
   pillars: { x: number; y: number; r: number }[];
-  scrolls: { id: string; kind: 'blade-wave' | 'wind-step'; x: number; y: number }[];
+  scrolls: { id: string; kind: 'blade-wave' | 'wind-step' | 'heart'; x: number; y: number }[];
   waveProjectiles: InternalWave[];
   slashes: { x: number; y: number; angle: number; colorHex: string; alpha: number }[];
   sparks: { x: number; y: number; radius: number; colorHex: string; alpha: number }[];
@@ -55,6 +55,8 @@ interface BladeDuelState {
 const SLASH_CD = 1.25;
 const PARRY_CD = 1.7;
 const PARRY_WINDOW = 0.44; // Generous intermediate parry window
+const MAX_HP = 3;
+const HIT_INVULN = 1.05;
 const PLAYER_R = 20;
 const CX = ARENA_WIDTH / 2;
 const CY = ARENA_HEIGHT / 2;
@@ -68,7 +70,10 @@ function spawnScroll(state: BladeDuelState) {
     { x: CX + 180, y: ARENA_HEIGHT - 180 },
   ];
   const sp = spots[Math.floor(Math.random() * spots.length)];
-  const kind: 'blade-wave' | 'wind-step' = Math.random() < 0.55 ? 'blade-wave' : 'wind-step';
+  const anyWounded = state.duelists.some((d) => d.alive && d.hp < d.maxHp);
+  const roll = Math.random();
+  const kind: 'blade-wave' | 'wind-step' | 'heart' =
+    anyWounded && roll < 0.36 ? 'heart' : roll < 0.68 ? 'blade-wave' : 'wind-step';
   state.scrolls.push({
     id: `sc_${state.nextId++}`,
     kind,
@@ -77,8 +82,56 @@ function spawnScroll(state: BladeDuelState) {
   });
 }
 
+function applyDuelDamage(
+  state: BladeDuelState,
+  victim: InternalDuelist,
+  attacker: InternalDuelist | undefined,
+  knockAngle: number,
+  koLabel: string,
+  sounds: SoundEvent[],
+  haptics: HapticTrigger[],
+  players: ServerPlayerInputState[]
+) {
+  if (!victim.alive || victim.invulnTimer > 0) return;
+
+  victim.hp = Math.max(0, victim.hp - 1);
+  victim.slashTimer = 0;
+  victim.parryTimer = 0;
+  victim.vx = Math.cos(knockAngle) * 520;
+  victim.vy = Math.sin(knockAngle) * 520;
+
+  if (victim.hp > 0) {
+    victim.invulnTimer = HIT_INVULN;
+    if (attacker && attacker.id !== victim.id) {
+      attacker.score += 45;
+    }
+    state.sparks.push({ x: victim.x, y: victim.y, radius: 18, colorHex: '#FF4D2E', alpha: 1 });
+    state.popups.push({
+      x: victim.x,
+      y: victim.y - 26,
+      text: `-1 ♥ (${victim.hp} LEFT)`,
+      colorHex: '#FF4D2E',
+      alpha: 1,
+    });
+    sounds.push({ type: 'hit', playerId: victim.id });
+    if (!victim.isBot) haptics.push({ playerId: victim.id, pattern: [45, 25, 45], reason: 'blade-hit' });
+    if (attacker && !attacker.isBot) haptics.push({ playerId: attacker.id, pattern: 35, reason: 'blade-strike' });
+  } else {
+    victim.alive = false;
+    victim.invulnTimer = 0;
+    if (attacker && attacker.id !== victim.id) {
+      attacker.score += 100;
+    }
+    const col = attacker?.colorHex ?? '#FF4D2E';
+    state.sparks.push({ x: victim.x, y: victim.y, radius: 24, colorHex: col, alpha: 1 });
+    state.popups.push({ x: victim.x, y: victim.y - 26, text: koLabel, colorHex: col, alpha: 1 });
+    sounds.push({ type: 'ko' });
+    for (const pl of players) haptics.push({ playerId: pl.id, pattern: [65, 35, 85], reason: 'ko' });
+  }
+}
+
 function resetRound(state: BladeDuelState) {
-  state.roundTimer = 35;
+  state.roundTimer = 40;
   state.dangerRadius = 560;
   state.slashes = [];
   state.waveProjectiles = [];
@@ -99,6 +152,9 @@ function resetRound(state: BladeDuelState) {
     d.vx = 0;
     d.vy = 0;
     d.alive = true;
+    d.hp = MAX_HP;
+    d.maxHp = MAX_HP;
+    d.invulnTimer = 0;
     d.slashTimer = 0;
     d.parryTimer = 0;
     d.stunTimer = 0;
@@ -126,6 +182,9 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       vy: 0,
       angle: idx === 0 ? 0 : Math.PI,
       alive: true,
+      hp: MAX_HP,
+      maxHp: MAX_HP,
+      invulnTimer: 0,
       slashTimer: 0,
       parryTimer: 0,
       stunTimer: 0,
@@ -143,7 +202,7 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
     const state: BladeDuelState = {
       round: 1,
       targetWins,
-      roundTimer: 35,
+      roundTimer: 40,
       roundBanner: null,
       betweenRoundTimer: 0,
       dangerRadius: 560,
@@ -216,7 +275,7 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       state.scrollTimer -= dt;
       if (state.scrollTimer <= 0 && state.scrolls.length < 2) {
         spawnScroll(state);
-        state.scrollTimer = 7.5;
+        state.scrollTimer = 7.0;
       }
 
       for (let idx = 0; idx < state.duelists.length; idx++) {
@@ -230,6 +289,7 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
         d.stunTimer = Math.max(0, d.stunTimer - dt);
         d.waveTimer = Math.max(0, d.waveTimer - dt);
         d.windTimer = Math.max(0, d.windTimer - dt);
+        d.invulnTimer = Math.max(0, d.invulnTimer - dt);
 
         let dx = 0;
         let dy = 0;
@@ -310,6 +370,15 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
             if (sc.kind === 'blade-wave') {
               d.waveTimer = 8.5;
               state.popups.push({ x: d.x, y: d.y - 26, text: 'BLADE WAVE!', colorHex: '#FF3B9A', alpha: 1 });
+            } else if (sc.kind === 'heart') {
+              if (d.hp < d.maxHp) {
+                d.hp += 1;
+                state.popups.push({ x: d.x, y: d.y - 26, text: '+1 ♥ LIFE!', colorHex: '#FF4D2E', alpha: 1 });
+              } else {
+                d.windTimer = 5.0;
+                state.popups.push({ x: d.x, y: d.y - 26, text: 'FULL ♥ +40', colorHex: '#FFB800', alpha: 1 });
+                d.score += 10;
+              }
             } else {
               d.windTimer = 8.0;
               state.popups.push({ x: d.x, y: d.y - 26, text: 'WIND STEP!', colorHex: '#10D98B', alpha: 1 });
@@ -321,12 +390,10 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
           }
         }
 
-        // Sudden death ring out-of-bounds KO
+        // Sudden death ring out-of-bounds damage
         if (state.roundTimer < 14 && Math.hypot(d.x - CX, d.y - CY) > state.dangerRadius) {
-          d.alive = false;
-          state.sparks.push({ x: d.x, y: d.y, radius: 22, colorHex: '#FF4D2E', alpha: 1 });
-          state.popups.push({ x: d.x, y: d.y - 24, text: 'RING OUT!', colorHex: '#FF4D2E', alpha: 1 });
-          sounds.push({ type: 'ko' });
+          const inwardAngle = Math.atan2(CY - d.y, CX - d.x);
+          applyDuelDamage(state, d, undefined, inwardAngle, 'RING OUT!', sounds, haptics, players);
         }
 
         d.cooldownA = d.slashCd / SLASH_CD;
@@ -363,12 +430,8 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
               state.sparks.push({ x: target.x, y: target.y, radius: 18, colorHex: '#FFB800', alpha: 1 });
               state.popups.push({ x: target.x, y: target.y - 28, text: 'DEFLECT +45', colorHex: '#FFB800', alpha: 1 });
               sounds.push({ type: 'pulse', playerId: target.id });
-            } else {
-              target.alive = false;
-              if (owner) owner.score += 100;
-              state.sparks.push({ x: target.x, y: target.y, radius: 22, colorHex: w.colorHex, alpha: 1 });
-              state.popups.push({ x: target.x, y: target.y - 24, text: 'WAVE KO!', colorHex: w.colorHex, alpha: 1 });
-              sounds.push({ type: 'ko' });
+            } else if (target.invulnTimer <= 0) {
+              applyDuelDamage(state, target, owner, w.angle, 'WAVE KO!', sounds, haptics, players);
               state.waveProjectiles.splice(wi, 1);
             }
             break;
@@ -409,12 +472,10 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
               sounds.push({ type: 'pulse', playerId: b.id });
               if (!b.isBot) haptics.push({ playerId: b.id, pattern: [25, 20, 60], reason: 'parry-win' });
               if (!a.isBot) haptics.push({ playerId: a.id, pattern: [60, 30, 60], reason: 'parried' });
-            } else {
-              b.alive = false;
-              a.score += 100;
-              state.sparks.push({ x: b.x, y: b.y, radius: 22, colorHex: a.colorHex, alpha: 1 });
-              sounds.push({ type: 'ko' });
-              for (const pl of players) haptics.push({ playerId: pl.id, pattern: [65, 35, 85], reason: 'ko' });
+            } else if (b.invulnTimer <= 0) {
+              a.slashTimer = 0;
+              const knockAng = Math.atan2(b.y - a.y, b.x - a.x);
+              applyDuelDamage(state, b, a, knockAng, 'SLASH KO!', sounds, haptics, players);
             }
           } else if (b.slashTimer > 0) {
             if (a.parryTimer > 0) {
@@ -428,12 +489,10 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
               sounds.push({ type: 'pulse', playerId: a.id });
               if (!a.isBot) haptics.push({ playerId: a.id, pattern: [25, 20, 60], reason: 'parry-win' });
               if (!b.isBot) haptics.push({ playerId: b.id, pattern: [60, 30, 60], reason: 'parried' });
-            } else {
-              a.alive = false;
-              b.score += 100;
-              state.sparks.push({ x: a.x, y: a.y, radius: 22, colorHex: b.colorHex, alpha: 1 });
-              sounds.push({ type: 'ko' });
-              for (const pl of players) haptics.push({ playerId: pl.id, pattern: [65, 35, 85], reason: 'ko' });
+            } else if (a.invulnTimer <= 0) {
+              b.slashTimer = 0;
+              const knockAng = Math.atan2(a.y - b.y, a.x - b.x);
+              applyDuelDamage(state, a, b, knockAng, 'SLASH KO!', sounds, haptics, players);
             }
           }
         }
@@ -452,7 +511,13 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
       }
 
       if (state.roundTimer <= 0 && state.betweenRoundTimer <= 0) {
-        state.roundBanner = 'DRAW — NEXT ROUND';
+        const sortedAlive = [...aliveDuelists].sort((a, b) => b.hp - a.hp);
+        if (sortedAlive.length >= 2 && sortedAlive[0].hp > sortedAlive[1].hp) {
+          sortedAlive[0].roundsWon += 1;
+          state.roundBanner = `${sortedAlive[0].name} WINS ON LIFE!`;
+        } else {
+          state.roundBanner = 'DRAW — NEXT ROUND';
+        }
         state.betweenRoundTimer = 1.6;
       }
     }
@@ -460,10 +525,11 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
     for (const p of players) {
       const d = state.duelists.find((du) => du.id === p.id);
       if (!d) continue;
+      const heartsText = `${'♥'.repeat(Math.max(0, d.hp))}${'♡'.repeat(Math.max(0, d.maxHp - d.hp))}`;
       hudUpdates[p.id] = {
         score: d.roundsWon,
         alive: d.alive,
-        statText: `Wins ${d.roundsWon}/${state.targetWins} · ${d.parries} Parries`,
+        statText: `${heartsText} · Wins ${d.roundsWon}/${state.targetWins}`,
         cooldownA: d.cooldownA,
         cooldownB: d.cooldownB,
       };
@@ -507,6 +573,9 @@ export const bladeDuelModule: ServerGameModule<BladeDuelState> = {
         y: d.y,
         angle: d.angle,
         alive: d.alive,
+        hp: d.hp,
+        maxHp: d.maxHp,
+        invulnTimer: d.invulnTimer,
         slashTimer: d.slashTimer,
         parryTimer: d.parryTimer,
         stunTimer: d.stunTimer,

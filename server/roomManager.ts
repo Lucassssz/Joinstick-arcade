@@ -66,6 +66,38 @@ interface ConnectedPlayer {
   disconnectedAt: number | null;
 }
 
+interface HostHapticTracker {
+  lastActivePlayerId: string | null;
+  lastPhase: string | null;
+  lastRoundOrWave: number | null;
+  lastBanner: string | null;
+  lastLightState: string | null;
+  lastHolderId: string | null;
+  lastFeverActive: boolean;
+  lastFiresCount: number;
+  lastHighestBidderId: string | null;
+  lastCardTurnByPlayer: Map<string, boolean>;
+  lastCardActionReqByPlayer: Map<string, boolean>;
+  lastSentAtByPlayer: Map<string, number>;
+}
+
+function createHostHapticTracker(): HostHapticTracker {
+  return {
+    lastActivePlayerId: null,
+    lastPhase: null,
+    lastRoundOrWave: null,
+    lastBanner: null,
+    lastLightState: null,
+    lastHolderId: null,
+    lastFeverActive: false,
+    lastFiresCount: 0,
+    lastHighestBidderId: null,
+    lastCardTurnByPlayer: new Map(),
+    lastCardActionReqByPlayer: new Map(),
+    lastSentAtByPlayer: new Map(),
+  };
+}
+
 interface RoomRecord {
   code: string;
   hostToken: string;
@@ -91,6 +123,7 @@ interface RoomRecord {
   gameState: unknown | null;
   lastSnapshot: GameSnapshot | null;
   lastCardStateHashes: Map<string, string>;
+  hapticTracker: HostHapticTracker;
   rankings: RankingEntry[];
   createdAt: number;
   lastActivityAt: number;
@@ -263,8 +296,63 @@ export class RoomManager {
     }
     const picked = candidates[Math.floor(Math.random() * candidates.length)];
     room.hostPlayerId = picked.id;
-    if (picked.ws) {
-      this.send(picked.ws, { type: 'player:haptic', pattern: [45, 30, 85], reason: 'host' });
+    this.dispatchHapticToPlayer(room, picked.id, {
+      pattern: [45, 30, 85],
+      reason: 'host-transfer',
+      event: 'host-transfer',
+      label: 'HOST REMOTE ACTIVE',
+      intensity: 'medium',
+      minGapMs: 0,
+    });
+  }
+
+  private dispatchHapticToPlayer(
+    room: RoomRecord,
+    playerId: string,
+    spec: {
+      pattern: number | number[];
+      reason: string;
+      event?: string;
+      label?: string;
+      intensity?: 'light' | 'medium' | 'heavy';
+      minGapMs?: number;
+    }
+  ): void {
+    const p = room.players.get(playerId);
+    if (!p || p.isBot || !p.connected || !p.ws) return;
+    const now = Date.now();
+    const minGap = spec.minGapMs ?? 140;
+    const lastSent = room.hapticTracker.lastSentAtByPlayer.get(playerId) ?? 0;
+    if (minGap > 0 && now - lastSent < minGap) return;
+    room.hapticTracker.lastSentAtByPlayer.set(playerId, now);
+    this.send(p.ws, {
+      type: 'player:haptic',
+      pattern: spec.pattern,
+      reason: spec.reason,
+      event: spec.event ?? spec.reason,
+      label: spec.label,
+      intensity: spec.intensity,
+    });
+  }
+
+  private broadcastHapticToRoom(
+    room: RoomRecord,
+    spec: {
+      pattern: number | number[];
+      reason: string;
+      event?: string;
+      label?: string;
+      intensity?: 'light' | 'medium' | 'heavy';
+      minGapMs?: number;
+      excludePlayerId?: string;
+      onlyAlive?: boolean;
+    }
+  ): void {
+    for (const p of room.players.values()) {
+      if (p.isBot || !p.connected || !p.ws) continue;
+      if (spec.excludePlayerId && p.id === spec.excludePlayerId) continue;
+      if (spec.onlyAlive && !p.alive) continue;
+      this.dispatchHapticToPlayer(room, p.id, spec);
     }
   }
 
@@ -418,6 +506,7 @@ export class RoomManager {
           gameState: null,
           lastSnapshot: null,
           lastCardStateHashes: new Map(),
+          hapticTracker: createHostHapticTracker(),
           rankings: [],
           createdAt: Date.now(),
           lastActivityAt: Date.now(),
@@ -703,6 +792,14 @@ export class RoomManager {
         }
         room.lastActivityAt = Date.now();
         this.playHostSound(room, 'confirm');
+        this.broadcastHapticToRoom(room, {
+          pattern: [22, 28, 34],
+          reason: 'phase-transition',
+          event: 'phase-transition',
+          label: 'GAME ROOM',
+          intensity: 'light',
+          minGapMs: 80,
+        });
         this.broadcastRoom(room);
         return;
       }
@@ -784,6 +881,16 @@ export class RoomManager {
             snapshot: room.lastSnapshot as any,
             sounds: [{ type: 'ready', playerId: player.id }],
           });
+          if (room.hostPlayerId && room.hostPlayerId !== player.id) {
+            this.dispatchHapticToPlayer(room, room.hostPlayerId, {
+              pattern: 18,
+              reason: 'player-ready',
+              event: 'player-ready',
+              label: `${player.name} READY`,
+              intensity: 'light',
+              minGapMs: 120,
+            });
+          }
         }
 
         // During Rules Briefing: as soon as EVERY connected human presses Ready, start immediately (no auto-countdown!)
@@ -870,9 +977,25 @@ export class RoomManager {
         if (room.status === 'PLAYING' && msg.paused) {
           room.status = 'PAUSED';
           room.remoteFocus.modalIndex = 0;
+          this.broadcastHapticToRoom(room, {
+            pattern: 22,
+            reason: 'pause',
+            event: 'phase-transition',
+            label: 'MATCH PAUSED',
+            intensity: 'light',
+            minGapMs: 60,
+          });
           this.broadcastRoom(room);
         } else if (room.status === 'PAUSED' && !msg.paused) {
           room.status = 'PLAYING';
+          this.broadcastHapticToRoom(room, {
+            pattern: [22, 24, 34],
+            reason: 'resume',
+            event: 'phase-transition',
+            label: 'MATCH RESUMED',
+            intensity: 'light',
+            minGapMs: 60,
+          });
           this.broadcastRoom(room);
         }
         return;
@@ -962,6 +1085,41 @@ export class RoomManager {
         room.lastActivityAt = Date.now();
         return;
       }
+
+      case 'host:ui-haptic': {
+        const room = this.getPrivilegedRoom(ws);
+        if (!room) return;
+        const reason = (msg.event || 'host-alert').slice(0, 32);
+        const label = msg.label ? msg.label.slice(0, 36) : undefined;
+        const pattern: number | number[] =
+          reason === 'turn-start'
+            ? [26, 36, 46]
+            : reason === 'action-required'
+              ? [34, 28, 54]
+              : reason === 'chaos-wheel'
+                ? [24, 24, 42]
+                : [24, 26, 36];
+        if (msg.targetPlayerId) {
+          this.dispatchHapticToPlayer(room, msg.targetPlayerId, {
+            pattern,
+            reason,
+            event: reason,
+            label,
+            intensity: 'medium',
+            minGapMs: 90,
+          });
+        } else {
+          this.broadcastHapticToRoom(room, {
+            pattern,
+            reason,
+            event: reason,
+            label,
+            intensity: 'light',
+            minGapMs: 90,
+          });
+        }
+        return;
+      }
     }
   }
 
@@ -980,6 +1138,35 @@ export class RoomManager {
       if (p.isBot || !p.connected || !p.ws) continue;
       const cs = states[p.id];
       if (!cs) continue;
+
+      // Detect private card turn / action-required transitions and vibrate the player's phone
+      const prevTurn = room.hapticTracker.lastCardTurnByPlayer.get(p.id) ?? false;
+      const prevActionReq = room.hapticTracker.lastCardActionReqByPlayer.get(p.id) ?? false;
+      room.hapticTracker.lastCardTurnByPlayer.set(p.id, cs.isMyTurn);
+      room.hapticTracker.lastCardActionReqByPlayer.set(p.id, cs.isActionRequired);
+
+      if (room.status === 'PLAYING') {
+        if (!prevTurn && cs.isMyTurn) {
+          this.dispatchHapticToPlayer(room, p.id, {
+            pattern: [26, 36, 46],
+            reason: 'turn-start',
+            event: 'turn-start',
+            label: 'YOUR TURN!',
+            intensity: 'medium',
+            minGapMs: 120,
+          });
+        } else if (!prevActionReq && cs.isActionRequired) {
+          this.dispatchHapticToPlayer(room, p.id, {
+            pattern: [34, 28, 54],
+            reason: 'action-required',
+            event: 'action-required',
+            label: cs.awaitingColorPick ? 'PICK A COLOR!' : 'CHALLENGE OR TRUST!',
+            intensity: 'medium',
+            minGapMs: 120,
+          });
+        }
+      }
+
       const hash = JSON.stringify({
         h: cs.hand.map((c) => `${c.id}:${c.playable ? 1 : 0}:${c.selected ? 1 : 0}`),
         c: cs.cursorIndex,
@@ -1003,6 +1190,8 @@ export class RoomManager {
 
   private clearCardStates(room: RoomRecord): void {
     room.lastCardStateHashes.clear();
+    room.hapticTracker.lastCardTurnByPlayer.clear();
+    room.hapticTracker.lastCardActionReqByPlayer.clear();
     for (const p of room.players.values()) {
       if (!p.isBot && p.connected && p.ws) {
         this.send(p.ws, { type: 'player:card-state', cardState: null });
@@ -1119,6 +1308,14 @@ export class RoomManager {
     room.mutatorSpinSeq += 1;
     room.lastActivityAt = Date.now();
     this.playHostSound(room, 'wheel');
+    this.broadcastHapticToRoom(room, {
+      pattern: [24, 24, 42],
+      reason: 'chaos-wheel',
+      event: 'chaos-wheel',
+      label: `CHAOS: ${picked.name.toUpperCase()}`,
+      intensity: 'medium',
+      minGapMs: 80,
+    });
     this.broadcastRoom(room);
   }
 
@@ -1781,8 +1978,12 @@ export class RoomManager {
 
     const playerList = this.toInputPlayers(room);
     room.lastCardStateHashes.clear();
+    room.hapticTracker = createHostHapticTracker();
     room.gameState = engine.createState(playerList, room.gameSettingValue);
     room.lastSnapshot = engine.getSnapshot(room.gameState);
+    if (room.lastSnapshot) {
+      this.seedHostHapticTracker(room, room.lastSnapshot);
+    }
     room.rankings = [];
     room.lastActivityAt = Date.now();
     this.pushCardStates(room, undefined, true);
@@ -1792,6 +1993,14 @@ export class RoomManager {
       room.remoteFocus.modalIndex = 0;
       room.countdownValue = 0;
       room.countdownTimer = 0;
+      this.broadcastHapticToRoom(room, {
+        pattern: [22, 28, 34],
+        reason: 'briefing',
+        event: 'phase-transition',
+        label: 'RULES BRIEFING',
+        intensity: 'light',
+        minGapMs: 80,
+      });
       this.broadcastRoom(room);
       if (room.lastSnapshot) {
         this.broadcastTick(room, room.lastSnapshot, []);
@@ -1829,7 +2038,14 @@ export class RoomManager {
           }
           for (const p of room.players.values()) {
             if (p.connected && !p.isBot && p.ws) {
-              this.send(p.ws, { type: 'player:haptic', pattern: 35, reason: 'countdown' });
+              this.send(p.ws, {
+                type: 'player:haptic',
+                pattern: 35,
+                reason: 'countdown',
+                event: 'countdown',
+                label: `READY ${nextVal}...`,
+                intensity: 'light',
+              });
             }
           }
         }
@@ -1842,7 +2058,14 @@ export class RoomManager {
           }
           for (const p of room.players.values()) {
             if (p.connected && !p.isBot && p.ws) {
-              this.send(p.ws, { type: 'player:haptic', pattern: [55, 35, 95], reason: 'go' });
+              this.send(p.ws, {
+                type: 'player:haptic',
+                pattern: [55, 35, 95],
+                reason: 'go',
+                event: 'go',
+                label: 'GO! GO! GO!',
+                intensity: 'heavy',
+              });
             }
           }
         }
@@ -1864,7 +2087,14 @@ export class RoomManager {
           }
           for (const p of room.players.values()) {
             if (p.connected && !p.isBot && p.ws) {
-              this.send(p.ws, { type: 'player:haptic', pattern: [45, 25, 85], reason: 'go' });
+              this.send(p.ws, {
+                type: 'player:haptic',
+                pattern: [45, 25, 85],
+                reason: 'go',
+                event: 'go',
+                label: 'FRENZY GO!',
+                intensity: 'heavy',
+              });
             }
           }
         } else if (freezeBroadcastCounter >= 3) {
@@ -1955,6 +2185,9 @@ export class RoomManager {
               type: 'player:haptic',
               pattern: [60, 35, 95, 35, 120],
               reason: 'frenzy',
+              event: 'frenzy-alert',
+              label: '2X FRENZY MODE!',
+              intensity: 'heavy',
             });
           }
         }
@@ -1968,7 +2201,8 @@ export class RoomManager {
         this.pushCardStates(room, result.privateStates);
       }
 
-      // Coalesce & dispatch targeted phone haptics (human phones only)
+      // Coalesce & dispatch targeted phone haptics from game engine (human phones only)
+      const playersWithEngineHaptic = new Set<string>();
       if (result.haptics.length > 0) {
         const strongestByPlayer = new Map<string, { pattern: number | number[]; reason?: string; weight: number }>();
         for (const h of result.haptics) {
@@ -1983,6 +2217,8 @@ export class RoomManager {
         for (const [playerId, h] of strongestByPlayer.entries()) {
           const target = room.players.get(playerId);
           if (target && target.connected && !target.isBot && target.ws) {
+            playersWithEngineHaptic.add(playerId);
+            room.hapticTracker.lastSentAtByPlayer.set(playerId, Date.now());
             this.send(target.ws, {
               type: 'player:haptic',
               pattern: h.pattern,
@@ -1991,6 +2227,10 @@ export class RoomManager {
           }
         }
       }
+
+      // Detect Host UI events (turn transitions, action prompts, round changes, game alerts)
+      // and dispatch subtle smartphone vibrations to players who didn't already get an engine hit this tick
+      this.detectHostSnapshotHaptics(room, result.snapshot, playersWithEngineHaptic);
 
       // Sync lightweight HUD updates (scores, cooldowns, alive state) at ~6Hz to phones & host
       hudBroadcastCounter += 1;
@@ -2031,12 +2271,295 @@ export class RoomManager {
 
         for (const p of room.players.values()) {
           if (p.connected && !p.isBot && p.ws) {
-            this.send(p.ws, { type: 'player:haptic', pattern: [70, 40, 120], reason: 'win' });
+            this.send(p.ws, {
+              type: 'player:haptic',
+              pattern: [70, 40, 120],
+              reason: 'win',
+              event: 'podium-reveal',
+              label: 'MATCH COMPLETE!',
+              intensity: 'heavy',
+            });
           }
         }
         this.broadcastRoom(room);
       }
     }, TICK_MS);
+  }
+
+  private extractHostSnapshotMeta(snap: GameSnapshot): {
+    activePlayerId: string | null;
+    phase: string | null;
+    roundOrWave: number | null;
+    banner: string | null;
+    lightState: string | null;
+    holderId: string | null;
+    feverActive: boolean;
+    firesCount: number;
+    highestBidderId: string | null;
+  } {
+    let activePlayerId: string | null = null;
+    let phase: string | null = null;
+    let roundOrWave: number | null = null;
+    let banner: string | null = null;
+    let lightState: string | null = null;
+    let holderId: string | null = null;
+    let feverActive = false;
+    let firesCount = 0;
+    let highestBidderId: string | null = null;
+
+    if ('activePlayerId' in snap && typeof snap.activePlayerId === 'string') {
+      activePlayerId = snap.activePlayerId;
+    } else if ('turnIndex' in snap && typeof snap.turnIndex === 'number' && 'players' in snap) {
+      activePlayerId = snap.players[snap.turnIndex]?.id ?? null;
+    }
+
+    if ('phase' in snap && typeof snap.phase === 'string') {
+      phase = snap.phase;
+    }
+
+    if ('round' in snap && typeof snap.round === 'number') {
+      roundOrWave = snap.round;
+    } else if ('wave' in snap && typeof snap.wave === 'number') {
+      roundOrWave = snap.wave;
+    }
+
+    if ('roundBanner' in snap && typeof snap.roundBanner === 'string' && snap.roundBanner) {
+      banner = snap.roundBanner;
+    } else if ('goalBanner' in snap && typeof snap.goalBanner === 'string' && snap.goalBanner) {
+      banner = snap.goalBanner;
+    } else if ('banner' in snap && typeof snap.banner === 'string' && snap.banner) {
+      banner = snap.banner;
+    } else if ('eventText' in snap && typeof snap.eventText === 'string' && snap.eventText) {
+      banner = snap.eventText;
+    }
+
+    if (snap.gameId === 'red-light-dash') {
+      lightState = snap.lightState;
+    } else if (snap.gameId === 'fuse-pass') {
+      holderId = snap.bombHolderId;
+    } else if (snap.gameId === 'freeze-tag') {
+      holderId = snap.players.find((p) => p.role === 'hunter')?.id ?? null;
+    } else if (snap.gameId === 'fruit-drop') {
+      feverActive = Boolean(snap.feverActive);
+    } else if (snap.gameId === 'kitchen-rush') {
+      firesCount = snap.stations.filter((st) => st.kind === 'grill' && st.onFire).length;
+    } else if (snap.gameId === 'lucky-auction') {
+      highestBidderId = snap.highestBidderId;
+    }
+
+    return {
+      activePlayerId,
+      phase,
+      roundOrWave,
+      banner,
+      lightState,
+      holderId,
+      feverActive,
+      firesCount,
+      highestBidderId,
+    };
+  }
+
+  private seedHostHapticTracker(room: RoomRecord, snap: GameSnapshot): void {
+    const meta = this.extractHostSnapshotMeta(snap);
+    room.hapticTracker.lastActivePlayerId = meta.activePlayerId;
+    room.hapticTracker.lastPhase = meta.phase;
+    room.hapticTracker.lastRoundOrWave = meta.roundOrWave;
+    room.hapticTracker.lastBanner = meta.banner;
+    room.hapticTracker.lastLightState = meta.lightState;
+    room.hapticTracker.lastHolderId = meta.holderId;
+    room.hapticTracker.lastFeverActive = meta.feverActive;
+    room.hapticTracker.lastFiresCount = meta.firesCount;
+    room.hapticTracker.lastHighestBidderId = meta.highestBidderId;
+  }
+
+  private detectHostSnapshotHaptics(
+    room: RoomRecord,
+    snap: GameSnapshot,
+    skipPlayers: Set<string>
+  ): void {
+    const tracker = room.hapticTracker;
+    const meta = this.extractHostSnapshotMeta(snap);
+
+    // 1. Turn Transitions (Board & Card Games: Rich Street, Jungle Ladders, Color Clash, Liar's Deck)
+    if (meta.activePlayerId && meta.activePlayerId !== tracker.lastActivePlayerId) {
+      const nextTurnPlayerId = meta.activePlayerId;
+      tracker.lastActivePlayerId = nextTurnPlayerId;
+      if (!skipPlayers.has(nextTurnPlayerId)) {
+        this.dispatchHapticToPlayer(room, nextTurnPlayerId, {
+          pattern: [26, 36, 46],
+          reason: 'turn-start',
+          event: 'turn-start',
+          label: 'YOUR TURN!',
+          intensity: 'medium',
+          minGapMs: 110,
+        });
+      }
+      // Subtle table rhythm tick for other connected human players
+      for (const p of room.players.values()) {
+        if (p.id !== nextTurnPlayerId && !p.isBot && p.connected && !skipPlayers.has(p.id)) {
+          this.dispatchHapticToPlayer(room, p.id, {
+            pattern: 18,
+            reason: 'turn-change',
+            event: 'turn-change',
+            label: 'TURN CHANGED',
+            intensity: 'light',
+            minGapMs: 220,
+          });
+        }
+      }
+    }
+
+    // 2. Phase Transitions & Action Prompts (Rich Street Buy Prompt, Lucky Auction Reveal, Liar's Deck Challenge)
+    if (meta.phase && meta.phase !== tracker.lastPhase) {
+      tracker.lastPhase = meta.phase;
+      if (snap.gameId === 'rich-street' && meta.phase === 'buy-prompt' && meta.activePlayerId) {
+        if (!skipPlayers.has(meta.activePlayerId)) {
+          this.dispatchHapticToPlayer(room, meta.activePlayerId, {
+            pattern: [34, 28, 54],
+            reason: 'buy-prompt',
+            event: 'action-required',
+            label: 'BUY PROPERTY?',
+            intensity: 'medium',
+            minGapMs: 100,
+          });
+        }
+      } else if (snap.gameId === 'lucky-auction' && meta.phase === 'reveal') {
+        this.broadcastHapticToRoom(room, {
+          pattern: [28, 30, 44],
+          reason: 'round-transition',
+          event: 'round-transition',
+          label: 'CHEST REVEAL!',
+          intensity: 'medium',
+          minGapMs: 140,
+        });
+      }
+    }
+
+    // 3. Round / Wave Transitions on the Host Screen
+    if (
+      meta.roundOrWave !== null &&
+      tracker.lastRoundOrWave !== null &&
+      meta.roundOrWave > tracker.lastRoundOrWave
+    ) {
+      tracker.lastRoundOrWave = meta.roundOrWave;
+      this.broadcastHapticToRoom(room, {
+        pattern: [28, 32, 44],
+        reason: 'round-transition',
+        event: 'round-transition',
+        label: `ROUND ${meta.roundOrWave}`,
+        intensity: 'medium',
+        minGapMs: 160,
+      });
+    } else if (meta.roundOrWave !== null && tracker.lastRoundOrWave === null) {
+      tracker.lastRoundOrWave = meta.roundOrWave;
+    }
+
+    // 4. Host Announcement Banners (Goals, Round Winners, Board Events, Sudden Death)
+    if (meta.banner && meta.banner !== tracker.lastBanner) {
+      tracker.lastBanner = meta.banner;
+      this.broadcastHapticToRoom(room, {
+        pattern: [24, 26, 38],
+        reason: 'host-alert',
+        event: 'host-alert',
+        label: meta.banner.slice(0, 32),
+        intensity: 'medium',
+        minGapMs: 180,
+      });
+    } else if (!meta.banner) {
+      tracker.lastBanner = null;
+    }
+
+    // 5. Red Light Dash Traffic Light Warnings on Host
+    if (snap.gameId === 'red-light-dash' && meta.lightState !== tracker.lastLightState) {
+      tracker.lastLightState = meta.lightState;
+      if (meta.lightState === 'warning') {
+        this.broadcastHapticToRoom(room, {
+          pattern: [24, 22, 30],
+          reason: 'yellow-light',
+          event: 'timer-warning',
+          label: 'YELLOW LIGHT!',
+          intensity: 'medium',
+          onlyAlive: true,
+          minGapMs: 120,
+        });
+      } else if (meta.lightState === 'red') {
+        this.broadcastHapticToRoom(room, {
+          pattern: [36, 26, 52],
+          reason: 'red-light',
+          event: 'host-alert',
+          label: 'RED LIGHT — FREEZE!',
+          intensity: 'medium',
+          onlyAlive: true,
+          minGapMs: 120,
+        });
+      }
+    }
+
+    // 6. Fuse Pass Bomb Holder & Freeze Tag "IT" Role Transfers
+    if (
+      (snap.gameId === 'fuse-pass' || snap.gameId === 'freeze-tag') &&
+      meta.holderId &&
+      meta.holderId !== tracker.lastHolderId
+    ) {
+      tracker.lastHolderId = meta.holderId;
+      if (!skipPlayers.has(meta.holderId)) {
+        this.dispatchHapticToPlayer(room, meta.holderId, {
+          pattern: [40, 26, 58],
+          reason: snap.gameId === 'fuse-pass' ? 'bomb-holder' : 'tagger',
+          event: 'action-required',
+          label: snap.gameId === 'fuse-pass' ? 'PASS THE BOMB!' : 'YOU ARE IT!',
+          intensity: 'medium',
+          minGapMs: 110,
+        });
+      }
+    }
+
+    // 7. Kitchen Rush Stove Fire Alert
+    if (snap.gameId === 'kitchen-rush') {
+      if (meta.firesCount > tracker.lastFiresCount) {
+        this.broadcastHapticToRoom(room, {
+          pattern: [30, 24, 46],
+          reason: 'stove-fire',
+          event: 'host-alert',
+          label: '🔥 STOVE FIRE!',
+          intensity: 'medium',
+          minGapMs: 160,
+        });
+      }
+      tracker.lastFiresCount = meta.firesCount;
+    }
+
+    // 8. Fruit Drop Fever Time Alert
+    if (snap.gameId === 'fruit-drop') {
+      if (meta.feverActive && !tracker.lastFeverActive) {
+        this.broadcastHapticToRoom(room, {
+          pattern: [30, 24, 46],
+          reason: 'fever',
+          event: 'host-alert',
+          label: 'FEVER TIME!',
+          intensity: 'medium',
+          minGapMs: 160,
+        });
+      }
+      tracker.lastFeverActive = meta.feverActive;
+    }
+
+    // 9. Lucky Auction Highest Bidder Change
+    if (snap.gameId === 'lucky-auction' && meta.highestBidderId !== tracker.lastHighestBidderId) {
+      tracker.lastHighestBidderId = meta.highestBidderId;
+      if (meta.highestBidderId) {
+        this.broadcastHapticToRoom(room, {
+          pattern: 20,
+          reason: 'high-bid',
+          event: 'host-alert',
+          label: `HIGH BID: $${snap.highestBid}`,
+          intensity: 'light',
+          excludePlayerId: meta.highestBidderId,
+          minGapMs: 180,
+        });
+      }
+    }
   }
 
   private toInputPlayers(room: RoomRecord): ServerPlayerInputState[] {

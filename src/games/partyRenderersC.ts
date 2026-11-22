@@ -423,72 +423,151 @@ export function renderRedLightDash(ctx: CanvasRenderingContext2D, snap: RedLight
 }
 
 // ============================================================
-// 26. KITCHEN RUSH (2.5D Counters, Grills & Chef Toques)
+// 26. KITCHEN RUSH (Nintendo Switch Overcooked!-Style 2.5D Kitchen)
 // ============================================================
-function drawDishIcon(ctx: CanvasRenderingContext2D, dish: DishKind, x: number, y: number, cooked: boolean, scale = 1): void {
+function drawDishIcon(
+  ctx: CanvasRenderingContext2D,
+  dish: DishKind,
+  x: number,
+  y: number,
+  cooked: boolean,
+  scale = 1,
+  stage?: 'raw' | 'chopped' | 'cooked' | 'plated',
+  gourmet?: boolean
+): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
+  const isChopped = stage === 'chopped';
+
   if (cooked) {
-    // 3D beveled serving plate
-    ctx.fillStyle = '#CBD5E1';
+    // 3D beveled ceramic serving plate (gold-rimmed if gourmet!)
+    ctx.fillStyle = gourmet ? '#F59E0B' : '#CBD5E1';
     ctx.beginPath();
-    ctx.arc(0, 2.5, 18, 0, Math.PI * 2);
+    ctx.arc(0, 2.5, 19, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
     ctx.arc(0, 0, 18, 0, Math.PI * 2);
     ctx.fill();
+    if (gourmet) {
+      ctx.strokeStyle = '#F59E0B';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 14.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else if (isChopped) {
+    // Wooden prep tray under chopped ingredients
+    ctx.fillStyle = '#A16207';
+    ctx.beginPath();
+    ctx.roundRect(-16, -12, 32, 24, 6);
+    ctx.fill();
+    ctx.fillStyle = '#FEF3C7';
+    ctx.beginPath();
+    ctx.roundRect(-14, -10, 28, 20, 4);
+    ctx.fill();
   }
+
   if (dish === 'burger') {
-    ctx.fillStyle = '#D97706';
-    ctx.beginPath();
-    ctx.roundRect(-12, -10, 24, 9, 4);
-    ctx.fill();
-    ctx.fillStyle = cooked ? '#78350F' : '#FCA5A5';
-    ctx.fillRect(-13, -1, 26, 6);
-    ctx.fillStyle = '#10D98B';
-    ctx.fillRect(-12, 5, 24, 3);
-    ctx.fillStyle = '#D97706';
-    ctx.fillRect(-12, 8, 24, 4);
+    if (isChopped && !cooked) {
+      // Diced patty, sliced lettuce & bun halves
+      ctx.fillStyle = '#EF4444';
+      ctx.beginPath();
+      ctx.arc(-5, -2, 5, 0, Math.PI * 2);
+      ctx.arc(5, 2, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#10D98B';
+      ctx.fillRect(-10, 3, 8, 4);
+      ctx.fillStyle = '#D97706';
+      ctx.fillRect(1, -7, 9, 5);
+    } else {
+      ctx.fillStyle = '#D97706';
+      ctx.beginPath();
+      ctx.roundRect(-12, -10, 24, 9, 4);
+      ctx.fill();
+      ctx.fillStyle = cooked ? '#78350F' : '#FCA5A5';
+      ctx.fillRect(-13, -1, 26, 6);
+      ctx.fillStyle = '#10D98B';
+      ctx.fillRect(-12, 5, 24, 3);
+      ctx.fillStyle = '#D97706';
+      ctx.fillRect(-12, 8, 24, 4);
+    }
   } else if (dish === 'pizza') {
-    ctx.fillStyle = '#F59E0B';
-    ctx.beginPath();
-    ctx.moveTo(0, -13);
-    ctx.lineTo(13, 12);
-    ctx.lineTo(-13, 12);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = cooked ? '#EF4444' : '#FCA5A5';
-    ctx.beginPath();
-    ctx.arc(-3, 2, 3, 0, Math.PI * 2);
-    ctx.arc(4, 5, 3, 0, Math.PI * 2);
-    ctx.fill();
+    if (isChopped && !cooked) {
+      // Rolled dough disc + sliced pepperoni & cheese shreds
+      ctx.fillStyle = '#FDE047';
+      ctx.beginPath();
+      ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#EF4444';
+      ctx.beginPath();
+      ctx.arc(-3, -2, 2.6, 0, Math.PI * 2);
+      ctx.arc(4, 2, 2.6, 0, Math.PI * 2);
+      ctx.arc(-1, 4, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#F59E0B';
+      ctx.beginPath();
+      ctx.moveTo(0, -13);
+      ctx.lineTo(13, 12);
+      ctx.lineTo(-13, 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = cooked ? '#EF4444' : '#FCA5A5';
+      ctx.beginPath();
+      ctx.arc(-3, 2, 3, 0, Math.PI * 2);
+      ctx.arc(4, 5, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else {
-    ctx.fillStyle = '#FACC15';
-    ctx.beginPath();
-    ctx.arc(0, 6, 13, Math.PI, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = cooked ? '#EA580C' : '#94A3B8';
-    ctx.fillRect(-9, 1, 18, 5);
+    if (isChopped && !cooked) {
+      // Diced taco beef, salsa & shredded lettuce
+      ctx.fillStyle = '#FACC15';
+      ctx.fillRect(-10, -6, 20, 4);
+      ctx.fillStyle = '#EA580C';
+      ctx.fillRect(-9, -1, 18, 5);
+      ctx.fillStyle = '#10D98B';
+      ctx.fillRect(-8, 4, 16, 3);
+    } else {
+      ctx.fillStyle = '#FACC15';
+      ctx.beginPath();
+      ctx.arc(0, 6, 13, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = cooked ? '#EA580C' : '#94A3B8';
+      ctx.fillRect(-9, 1, 18, 5);
+    }
   }
   ctx.restore();
 }
 
 export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRushSnapshot): void {
-  // Warm checkered tile kitchen floor
-  ctx.fillStyle = '#181615';
+  const kTime = getMotionTime();
+
+  // Warm Nintendo Switch Overcooked!-style checkered tile floor
+  ctx.fillStyle = '#1A1715';
   ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
   const sq = 48;
   for (let y = 96; y < ARENA_HEIGHT; y += sq) {
     for (let x = 0; x < ARENA_WIDTH; x += sq) {
-      ctx.fillStyle = (Math.floor(x / sq) + Math.floor(y / sq)) % 2 === 0 ? '#25211E' : '#1E1B18';
+      ctx.fillStyle = (Math.floor(x / sq) + Math.floor(y / sq)) % 2 === 0 ? '#2B2520' : '#221D19';
       ctx.fillRect(x, y, sq, sq);
     }
   }
 
-  // Top Order Tickets Strip
+  // Subtle floor workflow guide arrows between stations (CRATE -> CHOP -> GRILL -> SERVE)
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  ctx.font = '900 13px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('1. GRAB ▶', 255, 110);
+  ctx.fillText('2. CHOP 🔪 ▶', 555, 110);
+  ctx.fillText('3. GRILL 🍳 ▶', 865, 110);
+  ctx.restore();
+
+  // Top Order Tickets Strip & Team Star Scoreboard
   ctx.fillStyle = '#13151C';
   ctx.fillRect(0, 0, ARENA_WIDTH, 96);
   ctx.strokeStyle = '#2B3140';
@@ -499,41 +578,52 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
   ctx.stroke();
 
   snap.orders.forEach((ord, idx) => {
-    const ox = 28 + idx * 210;
-    const oy = 14;
+    const ox = 22 + idx * 204;
+    const oy = 12;
     drawArenaSlab(
       ctx,
       ox,
       oy,
       192,
-      68,
+      72,
       12,
       5,
       ord.vip ? '#2B2214' : '#1E232F',
       '#10131B',
-      ord.timeLeft < 7 ? '#FF4D2E' : '#FFB800',
+      ord.timeLeft < 7 ? '#FF4D2E' : ord.vip ? '#FFB800' : '#38BDF8',
       ord.vip ? 2.6 : 2
     );
 
-    drawDishIcon(ctx, ord.dish, ox + 36, oy + 32, true, 1.05);
+    drawDishIcon(ctx, ord.dish, ox + 32, oy + 28, true, 0.98, 'plated', true);
     ctx.fillStyle = ord.vip ? '#FDE047' : '#FFFFFF';
-    ctx.font = '800 14px "Plus Jakarta Sans", sans-serif';
+    ctx.font = '800 13px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(tCanvas(ord.dish.toUpperCase()), ox + 66, oy + 26);
+    ctx.fillText(tCanvas(ord.dish.toUpperCase()), ox + 60, oy + 22);
     if (ord.vip) {
       ctx.fillStyle = '#FFB800';
-      ctx.font = '800 11px "JetBrains Mono", monospace';
+      ctx.font = '800 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'right';
-      ctx.fillText('VIP', ox + 178, oy + 26);
+      ctx.fillText('VIP ★', ox + 180, oy + 22);
     }
 
+    // Mini Switch-style Recipe Step Icons on ticket: [🔪 CHOP] -> [🍳 GRILL] -> [🍽️]
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '700 9.5px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('🔪CHOP → 🍳COOK', ox + 60, oy + 38);
+
     ctx.fillStyle = '#0E1117';
-    ctx.fillRect(ox + 66, oy + 42, 108, 10);
+    ctx.fillRect(ox + 60, oy + 49, 118, 8);
     ctx.fillStyle = ord.timeLeft < 7 ? '#FF4D2E' : '#10D98B';
-    ctx.fillRect(ox + 66, oy + 42, 108 * Math.max(0, ord.timeLeft / ord.maxTime), 10);
+    ctx.fillRect(ox + 60, oy + 49, 118 * Math.max(0, ord.timeLeft / ord.maxTime), 8);
   });
 
-  drawHudChip(ctx, ARENA_WIDTH - 120, 32, `TIME ${Math.ceil(snap.timeLeft)}s`, '#FF7A1A');
+  // Team Star Rating & Score Badge on top right
+  const teamScore = snap.teamScore ?? snap.players.reduce((acc, p) => acc + p.score, 0);
+  const starCount = teamScore >= 1100 ? 3 : teamScore >= 650 ? 2 : teamScore >= 280 ? 1 : 0;
+  const starStr = `${'★'.repeat(starCount)}${'☆'.repeat(3 - starCount)} ${teamScore}`;
+  drawHudChip(ctx, ARENA_WIDTH - 275, 32, starStr, '#FFB800');
+  drawHudChip(ctx, ARENA_WIDTH - 108, 32, `TIME ${Math.ceil(snap.timeLeft)}s`, '#FF7A1A');
 
   // Chef Speed Boots pickups on kitchen floor
   for (const bt of snap.boots ?? []) {
@@ -564,11 +654,49 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
       const { st } = it;
       const isServe = st.kind === 'serve';
       const isGrill = st.kind === 'grill';
-      const topFill = isServe ? '#174536' : isGrill ? '#45231D' : '#362D23';
-      const frontFill = isServe ? '#0D2920' : isGrill ? '#29130F' : '#211B14';
-      const borderCol = isServe ? '#10D98B' : isGrill ? '#FF7A1A' : '#B48852';
+      const isChop = st.kind === 'chop';
+      const isSink = st.kind === 'sink';
+      const isTrash = st.kind === 'trash';
 
-      drawExtrudedBox3D(ctx, st.x, st.y, st.w, st.h, stDepth, 14, topFill, frontFill, borderCol);
+      const topFill = isServe
+        ? '#174536'
+        : isGrill
+          ? st.onFire
+            ? '#5C1916'
+            : '#332421'
+          : isChop
+            ? '#4A3728'
+            : isSink
+              ? '#1E3A5F'
+              : isTrash
+                ? '#27272A'
+                : '#362D23';
+      const frontFill = isServe
+        ? '#0D2920'
+        : isGrill
+          ? '#1E1210'
+          : isChop
+            ? '#2E2118'
+            : isSink
+              ? '#112238'
+              : isTrash
+                ? '#18181B'
+                : '#211B14';
+      const borderCol = isServe
+        ? '#10D98B'
+        : isGrill
+          ? st.onFire
+            ? '#FF4D2E'
+            : '#FF7A1A'
+          : isChop
+            ? '#F59E0B'
+            : isSink
+              ? '#38BDF8'
+              : isTrash
+                ? '#71717A'
+                : '#B48852';
+
+      drawExtrudedBox3D(ctx, st.x, st.y, st.w, st.h, stDepth, 12, topFill, frontFill, borderCol);
 
       const cx = st.x + st.w / 2;
       const cy = st.y + st.h / 2 - stDepth;
@@ -578,43 +706,181 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
 
       if (st.kind === 'raw-burger' || st.kind === 'raw-pizza' || st.kind === 'raw-taco') {
         const dish: DishKind = st.kind === 'raw-burger' ? 'burger' : st.kind === 'raw-pizza' ? 'pizza' : 'taco';
-        drawDishIcon(ctx, dish, cx, cy - 6, false, 1.35);
+        // Crate inner recess
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+        ctx.beginPath();
+        ctx.roundRect(st.x + 12, st.y - stDepth + 10, st.w - 24, st.h - 28, 8);
+        ctx.fill();
+        drawDishIcon(ctx, dish, cx, cy - 6, false, 1.25, 'raw');
         ctx.fillStyle = '#F8FAFC';
-        ctx.font = '700 11px "JetBrains Mono", monospace';
-        ctx.fillText(tCanvas(dish.toUpperCase()), cx, st.y + st.h - stDepth - 14);
-      } else if (isGrill) {
+        ctx.font = '800 10.5px "JetBrains Mono", monospace';
+        ctx.fillText(tCanvas(dish.toUpperCase()), cx, st.y + st.h - stDepth - 11);
+      } else if (isTrash) {
+        // Dark Trash Chute opening
+        ctx.fillStyle = '#09090B';
+        ctx.beginPath();
+        ctx.roundRect(st.x + 18, st.y - stDepth + 12, st.w - 36, st.h - 32, 8);
+        ctx.fill();
+        ctx.fillStyle = '#A1A1AA';
+        ctx.font = '800 10.5px "JetBrains Mono", monospace';
+        ctx.fillText(tCanvas('TRASH'), cx, cy + 16);
+      } else if (isChop) {
+        // Butcher-block wood cutting board inset
+        ctx.fillStyle = '#D9A05B';
+        ctx.beginPath();
+        ctx.roundRect(st.x + 14, st.y - stDepth + 10, st.w - 28, st.h - 26, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#925E28';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
         if (st.cookingDish) {
-          drawDishIcon(ctx, st.cookingDish, cx, cy - 6, st.cookProgress >= 1, 1.25);
-          // Rising sizzle steam wisps
-          const kTime = getMotionTime();
+          const done = st.cookProgress >= 1;
+          drawDishIcon(ctx, st.cookingDish, cx, cy - 5, false, 1.15, done ? 'chopped' : 'raw');
+          // Progress bar
+          ctx.fillStyle = '#11141B';
+          ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, st.w - 32, 8);
+          ctx.fillStyle = done ? '#00C2FF' : '#F59E0B';
+          ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, (st.w - 32) * st.cookProgress, 8);
+        } else {
+          // Gleaming chef knife icon on empty cutting board
+          ctx.save();
+          ctx.translate(cx, cy - 2);
+          ctx.rotate(-0.35);
+          ctx.fillStyle = '#E2E8F0';
+          ctx.beginPath();
+          ctx.moveTo(-16, -4);
+          ctx.lineTo(10, -6);
+          ctx.lineTo(6, 5);
+          ctx.lineTo(-16, 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#451A03';
+          ctx.fillRect(-26, -3, 11, 5);
+          ctx.restore();
+          ctx.fillStyle = '#451A03';
+          ctx.font = '800 10.5px "JetBrains Mono", monospace';
+          ctx.fillText(tCanvas('CHOP'), cx, cy + 16);
+        }
+      } else if (isGrill) {
+        // Cast-iron circular skillet burner on stove top
+        ctx.fillStyle = '#141416';
+        ctx.beginPath();
+        ctx.arc(cx, cy - 3, 25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = st.onFire ? '#FF4D2E' : st.cookingDish ? '#FF7A1A' : '#52525B';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        if (st.onFire) {
+          // Animated 3D Stove Fire Flames!
+          for (let fi = 0; fi < 4; fi++) {
+            const fx = cx - 18 + fi * 12 + Math.sin(kTime * 11 + fi) * 4;
+            const fy = cy - 4 - Math.abs(Math.cos(kTime * 9 + fi)) * 14;
+            const fr = 10 + Math.sin(kTime * 14 + fi) * 3;
+            ctx.fillStyle = fi % 2 === 0 ? '#FF4D2E' : '#FACC15';
+            ctx.beginPath();
+            ctx.arc(fx, fy, fr, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '900 10px "JetBrains Mono", monospace';
+          ctx.fillText('🔥 TAP A/B!', cx, st.y + st.h - stDepth - 10);
+        } else if (st.cookingDish) {
+          const isDone = st.cookProgress >= 1;
+          const burnP = st.burnProgress ?? 0;
+          drawDishIcon(ctx, st.cookingDish, cx, cy - 4, isDone, 1.12, isDone ? 'cooked' : 'chopped');
+
+          // Rising sizzle steam wisps (darker smoke if starting to burn!)
           for (let wi = 0; wi < 3; wi++) {
-            const ph = (kTime * 1.4 + wi * 0.33 + st.x * 0.01) % 1;
-            ctx.fillStyle = `rgba(255, 255, 255, ${((1 - ph) * 0.32).toFixed(2)})`;
+            const ph = (kTime * 1.5 + wi * 0.33 + st.x * 0.01) % 1;
+            ctx.fillStyle =
+              burnP > 0.45
+                ? `rgba(255, 110, 46, ${((1 - ph) * 0.55).toFixed(2)})`
+                : `rgba(255, 255, 255, ${((1 - ph) * 0.34).toFixed(2)})`;
             ctx.beginPath();
             ctx.arc(cx - 14 + wi * 14 + Math.sin(kTime * 4 + wi) * 4, cy - 16 - ph * 26, 4 + ph * 4, 0, Math.PI * 2);
             ctx.fill();
           }
+
+          // Cook / Overcook progress bar
           ctx.fillStyle = '#11141B';
-          ctx.fillRect(st.x + 18, st.y + st.h - stDepth - 16, st.w - 36, 9);
-          ctx.fillStyle = st.cookProgress >= 1 ? '#10D98B' : '#FFB800';
-          ctx.fillRect(st.x + 18, st.y + st.h - stDepth - 16, (st.w - 36) * st.cookProgress, 9);
+          ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, st.w - 32, 8);
+          if (!isDone) {
+            ctx.fillStyle = '#FFB800';
+            ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, (st.w - 32) * st.cookProgress, 8);
+          } else if (burnP > 0.35) {
+            // Flashing burn danger bar
+            ctx.fillStyle = Math.sin(kTime * 16) > 0 ? '#FF4D2E' : '#FACC15';
+            ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, (st.w - 32) * burnP, 8);
+            ctx.fillStyle = '#FF4D2E';
+            ctx.font = '900 10px "JetBrains Mono", monospace';
+            ctx.fillText('⚠ BURNING!', cx, st.y - stDepth + 10);
+          } else {
+            ctx.fillStyle = '#10D98B';
+            ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, st.w - 32, 8);
+          }
         } else {
           ctx.fillStyle = '#FF7A1A';
-          ctx.font = '800 13px "JetBrains Mono", monospace';
-          ctx.fillText(tCanvas('GRILL'), cx, cy);
+          ctx.font = '800 11.5px "JetBrains Mono", monospace';
+          ctx.fillText(tCanvas('STOVE'), cx, cy);
+        }
+      } else if (isSink) {
+        // Bubbly Stainless Kitchen Sink & Plate Drying Rack
+        ctx.fillStyle = '#0284C7';
+        ctx.beginPath();
+        ctx.roundRect(st.x + 14, st.y - stDepth + 12, st.w - 28, 48, 8);
+        ctx.fill();
+        // Animated soap bubbles
+        for (let bi = 0; bi < 4; bi++) {
+          const bx = st.x + 28 + bi * 22 + Math.sin(kTime * 3 + bi) * 3;
+          const by = st.y - stDepth + 34 + Math.cos(kTime * 4 + bi) * 4;
+          ctx.fillStyle = 'rgba(224, 242, 254, 0.75)';
+          ctx.beginPath();
+          ctx.arc(bx, by, 5 + (bi % 2) * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        const dirty = st.dirtyPlates ?? 0;
+        const clean = st.cleanPlates ?? 0;
+        ctx.fillStyle = '#E0F2FE';
+        ctx.font = '800 10.5px "JetBrains Mono", monospace';
+        ctx.fillText(dirty > 0 ? `WASH (${dirty}) +45` : `PLATES: ${clean}`, cx, cy + 22);
+        if (dirty > 0) {
+          ctx.fillStyle = '#11141B';
+          ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, st.w - 32, 7);
+          ctx.fillStyle = '#38BDF8';
+          ctx.fillRect(st.x + 16, st.y + st.h - stDepth - 14, (st.w - 32) * st.cookProgress, 7);
         }
       } else {
+        // Animated Switch-style Serve Conveyor Belt
+        ctx.fillStyle = '#0A1F17';
+        ctx.beginPath();
+        ctx.roundRect(st.x + 14, st.y - stDepth + 16, st.w - 28, st.h - 34, 10);
+        ctx.fill();
+
+        const beltOffset = (kTime * 36) % 36;
+        ctx.strokeStyle = 'rgba(16, 217, 139, 0.28)';
+        ctx.lineWidth = 3;
+        for (let by = st.y - stDepth + 24 + beltOffset; by < st.y + st.h - stDepth - 22; by += 36) {
+          ctx.beginPath();
+          ctx.moveTo(st.x + 22, by);
+          ctx.lineTo(cx, by + 10);
+          ctx.lineTo(st.x + st.w - 22, by);
+          ctx.stroke();
+        }
+
         ctx.fillStyle = '#10D98B';
-        ctx.font = '800 18px "Plus Jakarta Sans", sans-serif';
-        ctx.fillText(tCanvas('SERVE'), cx, cy - 10);
+        ctx.font = '800 17px "Plus Jakarta Sans", sans-serif';
+        ctx.fillText(tCanvas('SERVE'), cx, cy - 12);
         ctx.fillStyle = '#A7F3D0';
-        ctx.font = '700 12px "JetBrains Mono", monospace';
-        ctx.fillText(tCanvas('A / TOSS B'), cx, cy + 16);
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillText(tCanvas('A / TOSS B'), cx, cy + 14);
       }
       ctx.restore();
     } else {
       const { p } = it;
       const hasBoots = (p.bootsTimer ?? 0) > 0;
+      const isChopping = (p.choppingTimer ?? 0) > 0;
       if (hasBoots) {
         ctx.save();
         ctx.strokeStyle = '#00C2FF';
@@ -625,36 +891,63 @@ export function renderKitchenRush(ctx: CanvasRenderingContext2D, snap: KitchenRu
         ctx.stroke();
         ctx.restore();
       }
-      drawCharacterPod3D(ctx, p.x, p.y, 20, p.angle, p.colorHex, {
+      const chopBob = isChopping ? Math.sin(kTime * 32) * 2.5 : 0;
+      drawCharacterPod3D(ctx, p.x, p.y + chopBob, 20, p.angle, p.colorHex, {
         height: 12,
         rimColor: hasBoots ? '#00C2FF' : '#FFFFFF',
         hat: 'chef',
         showVisor: false,
         playerId: p.id,
       });
+
+      // Animated chopping knife swing when chopping at a board!
+      if (isChopping) {
+        ctx.save();
+        ctx.translate(p.x + Math.cos(p.angle) * 22, p.y - 12 + Math.sin(p.angle) * 18);
+        ctx.rotate(p.angle + Math.sin(kTime * 38) * 0.65);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(14, 0);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       if (p.holding) {
+        const hx = p.x + Math.cos(p.angle) * 24;
+        const hy = p.y - 12 + Math.sin(p.angle) * 20;
         drawDishIcon(
           ctx,
           p.holding.dish,
-          p.x + Math.cos(p.angle) * 24,
-          p.y - 12 + Math.sin(p.angle) * 20,
+          hx,
+          hy,
           p.holding.cooked,
-          0.95
+          0.95,
+          p.holding.stage,
+          p.holding.gourmet
         );
       }
-      const chefTag = (p.combo ?? 0) > 1 ? `x${p.combo}` : undefined;
+      const holdBadge = p.holding
+        ? p.holding.cooked
+          ? 'READY ★'
+          : p.holding.stage === 'chopped'
+            ? 'CHOPPED'
+            : 'RAW'
+        : undefined;
+      const chefTag = (p.combo ?? 0) > 1 ? `x${p.combo}` : holdBadge;
       drawNameplate(ctx, p.x, p.y - 46, p.slotIndex, p.name, p.colorHex, chefTag);
     }
   }
 
   // Arcing 3D Flying tossed plates with floor shadows & gentle spin
-  const kSpin = getMotionTime() * 8;
+  const kSpin = kTime * 8;
   for (const fp of snap.flyingPlates) {
     drawShadowOval(ctx, fp.x, fp.y + 18, 16, 8, 0.36);
     ctx.save();
     ctx.translate(fp.x, fp.y - 12);
     ctx.rotate(Math.sin(kSpin) * 0.25);
-    drawDishIcon(ctx, fp.dish, 0, 0, true, 1.15);
+    drawDishIcon(ctx, fp.dish, 0, 0, true, 1.15, 'plated', fp.gourmet);
     ctx.restore();
   }
 

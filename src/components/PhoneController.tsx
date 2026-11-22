@@ -23,6 +23,7 @@ import {
   Move,
   Paintbrush,
   Pause,
+  Power,
   RefreshCw,
   RotateCcw,
   Shield,
@@ -62,7 +63,12 @@ import {
   ServerMessage,
 } from '../shared/types';
 import { ManagedWebSocket } from '../lib/ws';
-import { controllerHaptics, HapticIntensity, HapticResult } from '../lib/haptics';
+import {
+  controllerHaptics,
+  HapticEventType,
+  HapticIntensity,
+  HapticResult,
+} from '../lib/haptics';
 import {
   getLocalizedDifficulty,
   getLocalizedFilterLabel,
@@ -87,44 +93,10 @@ export function vibrate(
     skipIosSwitch?: boolean;
   }
 ): HapticResult {
-  if (!controllerHaptics.isEnabled()) {
-    return {
-      vibrated: false,
-      iosTaptic: false,
-      audioThump: false,
-      blockedByIframe: controllerHaptics.isInIframe(),
-      platform: controllerHaptics.getPlatform(),
-      skippedByLock: false,
-    };
-  }
-
-  // Invoke window.navigator.vibrate directly when forcing a user-initiated test/confirm pattern,
-  // otherwise coordinate with priority lock & cross-platform fallbacks in controllerHaptics.
-  if (
-    options?.force &&
-    typeof window !== 'undefined' &&
-    window.navigator &&
-    typeof window.navigator.vibrate === 'function' &&
-    controllerHaptics.getPlatform() !== 'ios'
-  ) {
-    try {
-      const ok = window.navigator.vibrate(pattern);
-      if (ok) {
-        return {
-          vibrated: true,
-          iosTaptic: false,
-          audioThump: false,
-          blockedByIframe: controllerHaptics.isInIframe(),
-          platform: controllerHaptics.getPlatform(),
-          skippedByLock: false,
-        };
-      }
-    } catch {
-      // Fall through to controllerHaptics fallback
-    }
-  }
-
-  return controllerHaptics.trigger(pattern, options);
+  return controllerHaptics.trigger(pattern, {
+    ...options,
+    force: options?.force ?? true,
+  });
 }
 
 export interface PhoneControllerProps {
@@ -219,10 +191,12 @@ export function PhoneController({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [closedReason, setClosedReason] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [hapticsEnabled, setHapticsEnabled] = useState(true);
-  const [hapticNotice, setHapticNotice] = useState<string | null>(null);
-  const [impactPulse, setImpactPulse] = useState<'none' | 'light' | 'heavy'>('none');
+  const [impactPulse, setImpactPulse] = useState<'none' | 'subtle' | 'light' | 'heavy'>('none');
+  const [tactileCue, setTactileCue] = useState<{ label: string; event: HapticEventType } | null>(
+    null
+  );
   const [passHostOpen, setPassHostOpen] = useState(false);
+  const [closeRoomConfirmOpen, setCloseRoomConfirmOpen] = useState(false);
   const [hostToast, setHostToast] = useState<string | null>(null);
   const [controllerPrefs, setControllerPrefs] = useState<ControllerPrefs>(() => loadControllerPrefs());
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -234,6 +208,7 @@ export function PhoneController({
     y: 0,
   });
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tactileCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasDisconnectedRef = useRef<boolean>(false);
   const prevIsHostRef = useRef<boolean>(false);
   const prevCardDangerRef = useRef<boolean>(false);
@@ -487,6 +462,7 @@ export function PhoneController({
   useEffect(() => {
     resetControlsState();
     setPassHostOpen(false);
+    setCloseRoomConfirmOpen(false);
     setRepositionMode(false);
     if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN') {
       setCardState(null);
@@ -546,6 +522,34 @@ export function PhoneController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsConnected, joinedPlayerId, room, embedded]);
 
+  // Subscribe to global haptic service to synchronize visual tactile edge pulse & host event cues
+  useEffect(() => {
+    if (embedded) return;
+    const CUE_EVENTS = new Set<HapticEventType>([
+      'turn-start',
+      'action-required',
+      'timer-warning',
+      'host-alert',
+      'round-transition',
+      'chaos-wheel',
+      'frenzy-alert',
+    ]);
+    return controllerHaptics.subscribe((notif) => {
+      setImpactPulse(notif.visualPulse);
+      if (impactTimerRef.current) clearTimeout(impactTimerRef.current);
+      const duration =
+        notif.visualPulse === 'heavy' ? 180 : notif.visualPulse === 'light' ? 120 : 90;
+      impactTimerRef.current = setTimeout(() => setImpactPulse('none'), duration);
+
+      const cueText = notif.customLabel || (lang === 'zh' ? notif.labelZh : notif.labelEn);
+      if (cueText && CUE_EVENTS.has(notif.event)) {
+        setTactileCue({ label: cueText, event: notif.event });
+        if (tactileCueTimerRef.current) clearTimeout(tactileCueTimerRef.current);
+        tactileCueTimerRef.current = setTimeout(() => setTactileCue(null), 1550);
+      }
+    });
+  }, [embedded, lang]);
+
   // Notify the player if they inherit Host Remote Control mid-session
   useEffect(() => {
     const isHostNow = Boolean(room && joinedPlayerId && room.hostPlayerId === joinedPlayerId);
@@ -553,6 +557,11 @@ export function PhoneController({
     prevIsHostRef.current = isHostNow;
 
     if (!wasHost && isHostNow && room && room.status !== 'SETUP') {
+      if (!embedded) {
+        controllerHaptics.triggerEvent('host-alert', [28, 24, 38], {
+          fromUserGesture: false,
+        });
+      }
       setHostToast(
         lang === 'zh'
           ? '你已成为新房主！现在由你使用遥控器控制大屏。'
@@ -561,7 +570,7 @@ export function PhoneController({
       if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
       hostToastTimerRef.current = setTimeout(() => setHostToast(null), 4200);
     }
-  }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang]);
+  }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang, embedded]);
 
   // Keep container/session warm during long controller play sessions
   useEffect(() => {
@@ -657,26 +666,15 @@ export function PhoneController({
             break;
           case 'player:haptic':
             if (!embedded) {
-              const heavyReasons = new Set([
-                'ko',
-                'falloff',
-                'eliminated',
-                'knockback',
-                'goal',
-                'hit',
-                'win',
-                'finish',
-                'go',
-              ]);
-              const isHeavy =
-                Array.isArray(msg.pattern) || (msg.reason ? heavyReasons.has(msg.reason) : false);
-              vibrate(msg.pattern, {
-                fromUserGesture: false,
-                intensity: isHeavy ? 'heavy' : 'medium',
-              });
-              setImpactPulse(isHeavy ? 'heavy' : 'light');
-              if (impactTimerRef.current) clearTimeout(impactTimerRef.current);
-              impactTimerRef.current = setTimeout(() => setImpactPulse('none'), isHeavy ? 180 : 110);
+              controllerHaptics.triggerEvent(
+                msg.event || msg.reason || 'impact-medium',
+                msg.pattern,
+                {
+                  fromUserGesture: false,
+                  intensity: msg.intensity,
+                  label: msg.label,
+                }
+              );
             }
             break;
           case 'room:closed':
@@ -878,10 +876,13 @@ export function PhoneController({
 
   useEffect(() => {
     if (isCardRedWarning && !prevCardDangerRef.current && !embedded) {
-      vibrate([65, 35, 65], { fromUserGesture: false, intensity: 'medium' });
+      controllerHaptics.triggerEvent('timer-warning', [38, 28, 38], {
+        fromUserGesture: false,
+        label: lang === 'zh' ? '⏱ 回合即将超时！' : '⏱ 5s Left on Turn!',
+      });
     }
     prevCardDangerRef.current = isCardRedWarning;
-  }, [isCardRedWarning, embedded]);
+  }, [isCardRedWarning, embedded, lang]);
 
   const sendCardAction = (action: CardClientAction) => {
     if (!embedded) {
@@ -1134,6 +1135,21 @@ export function PhoneController({
           <div className="pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-[65] px-4 py-2 rounded-xl bg-[#FFB800] text-[#14120B] font-display font-extrabold text-xs sm:text-sm shadow-xl inline-flex items-center gap-1.5 whitespace-nowrap">
             <Crown className="w-4 h-4 shrink-0" />
             <span>{hostToast}</span>
+          </div>
+        )}
+
+        {!hostToast && !isConnectionLost && tactileCue && (
+          <div
+            className={`pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-[64] px-3.5 py-1.5 rounded-xl font-display font-extrabold text-[11px] sm:text-xs shadow-lg inline-flex items-center gap-1.5 whitespace-nowrap border backdrop-blur-md transition-opacity ${
+              tactileCue.event === 'turn-start' || tactileCue.event === 'action-required'
+                ? 'bg-[#10D98B]/95 border-[#A7F3D0] text-[#071A12]'
+                : tactileCue.event === 'timer-warning' || tactileCue.event === 'frenzy-alert'
+                ? 'bg-[#FF4D2E]/95 border-[#FFB4A6] text-white'
+                : 'bg-[#1A1E26]/95 border-[#00C2FF]/60 text-[#F4F6FA]'
+            }`}
+          >
+            <Vibrate className="w-3.5 h-3.5 shrink-0 animate-pulse" />
+            <span>{translateGameText(tactileCue.label, lang)}</span>
           </div>
         )}
 
@@ -1482,6 +1498,16 @@ export function PhoneController({
     setPassHostOpen(false);
   };
 
+  const handleConfirmCloseRoom = () => {
+    if (!isRoomHost) return;
+    if (!embedded) {
+      controllerHaptics.unlock();
+      vibrate([65, 35, 95], { fromUserGesture: true, intensity: 'heavy', force: true });
+    }
+    setCloseRoomConfirmOpen(false);
+    wsRef.current?.send({ type: 'room:close' });
+  };
+
   const activeMutatorSpec = getMutatorSpec(room.activeMutator);
   const activeTournament = room.tournament?.active ? room.tournament : null;
 
@@ -1590,12 +1616,51 @@ export function PhoneController({
     </div>
   );
 
+  const closeRoomOverlay = closeRoomConfirmOpen && isRoomHost && (
+    <div className="absolute inset-0 z-50 bg-[#121419]/95 backdrop-blur-sm p-4 flex flex-col items-center justify-center text-center">
+      <div className="max-w-sm w-full rounded-2xl bg-[#1A1E26] border-2 border-[#FF4D2E]/60 p-5 shadow-2xl space-y-3">
+        <div className="w-11 h-11 rounded-2xl bg-[#FF4D2E]/15 border border-[#FF4D2E]/40 text-[#FF4D2E] flex items-center justify-center mx-auto">
+          <Power className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="font-display text-lg font-extrabold text-white">
+            {t('Close Entire Game Room?', '确定彻底关闭游戏房间？')}
+          </h3>
+          <p className="mt-1 text-xs text-[#A5AEBD] leading-relaxed">
+            {t(
+              `This will permanently close Room ${room.code} on the TV and disconnect all players.`,
+              `大屏上的房间 ${room.code} 将立即永久关闭，所有玩家都会断开连接。`
+            )}
+          </p>
+        </div>
+        <div className="pt-1 flex items-center justify-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setCloseRoomConfirmOpen(false)}
+            className="h-10 px-4 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-white cursor-pointer flex-1"
+          >
+            {t('Cancel', '取消')}
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmCloseRoom}
+            className="tactile-btn h-10 px-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-xs font-extrabold text-white shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-1.5 cursor-pointer flex-1"
+          >
+            <Power className="w-3.5 h-3.5" />
+            <span>{t('Close Room', '关闭房间')}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // =====================================================================
   // STATE 3A: ROOM SETUP SCREEN (Waiting for players / bots / host setup)
   // =====================================================================
   if (room.status === 'SETUP') {
     return renderConnectedShell(
-      <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+      <div className="relative flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+        {closeRoomOverlay}
         <div className="flex items-center justify-between gap-3 h-11 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <span
@@ -1631,6 +1696,18 @@ export function PhoneController({
               >
                 {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                 <span>{isFullscreen ? t('Exit Full', '退出全屏') : t('Fullscreen', '全屏')}</span>
+              </button>
+            )}
+            {isRoomHost && (
+              <button
+                type="button"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                aria-label={t('Close Entire Room', '关闭整个房间')}
+                title={t('Close Entire Room', '关闭整个房间')}
+                className="h-9 px-2.5 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>{t('Close Room', '关闭房间')}</span>
               </button>
             )}
             <button
@@ -1726,37 +1803,6 @@ export function PhoneController({
                 </p>
               </div>
             )}
-
-            {!embedded && (
-              <div className="space-y-1.5">
-                <label
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    controllerHaptics.unlock();
-                    const res = vibrate([120, 60, 180], {
-                      fromUserGesture: true,
-                      intensity: 'heavy',
-                      force: true,
-                      skipIosSwitch: true,
-                    });
-                    setImpactPulse('heavy');
-                    setTimeout(() => setImpactPulse('none'), 220);
-                    setHapticNotice(controllerHaptics.describeResult(res));
-                  }}
-                  className="relative w-full h-10 rounded-xl bg-[#1A1E26] border border-[#2A303D] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
-                >
-                  <IosHapticSwitch enabled={hapticsEnabled} />
-                  <Vibrate className="w-3.5 h-3.5" />
-                  <span>{t('Test Vibration / Haptics', '测试震动反馈')}</span>
-                </label>
-                {hapticNotice && (
-                  <p className="text-[11px] text-center text-[#10D98B] leading-snug">
-                    {translateServerMessage(hapticNotice, lang)}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -1800,6 +1846,7 @@ export function PhoneController({
       return renderConnectedShell(
         <div className="relative flex flex-col justify-between h-full w-full max-w-4xl mx-auto">
           {passHostOverlay}
+          {closeRoomOverlay}
 
           {/* Slim Remote Top Bar */}
           <div className="flex items-center justify-between gap-2 h-10 shrink-0">
@@ -1865,6 +1912,16 @@ export function PhoneController({
                   )}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                aria-label={t('Close Entire Room', '关闭整个房间')}
+                title={t('Close Entire Room', '关闭整个房间')}
+                className="h-8 px-2.5 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>{t('Close Room', '关闭房间')}</span>
+              </button>
               <button
                 type="button"
                 onClick={handleLeave}
@@ -2012,7 +2069,7 @@ export function PhoneController({
                       }
                 }
               >
-                <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
+                <IosHapticSwitch enabled={!embedded} />
                 {me.ready && <Check className="w-5 h-5" />}
                 <span>
                   {me.ready
@@ -2029,16 +2086,26 @@ export function PhoneController({
                 </p>
               )}
 
-              {otherConnectedHumans.length > 0 && (
+              <div className="flex items-center gap-2">
+                {otherConnectedHumans.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPassHostOpen(true)}
+                    className="h-10 flex-1 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                    <span>{t('Pass Host', '移交房主')}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setPassHostOpen(true)}
-                  className="h-10 w-full rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  onClick={() => setCloseRoomConfirmOpen(true)}
+                  className="h-10 flex-1 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
-                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                  <span>{t('Pass Host Remote to Another Player', '把房主遥控权交给其他玩家')}</span>
+                  <Power className="w-3.5 h-3.5" />
+                  <span>{t('Close Room', '关闭房间')}</span>
                 </button>
-              )}
+              </div>
             </div>
           </div>
 
@@ -2216,7 +2283,7 @@ export function PhoneController({
                     }
               }
             >
-              <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
+              <IosHapticSwitch enabled={!embedded} />
               {me.ready && <Check className="w-5 h-5" />}
               <span>
                 {me.ready
@@ -2231,37 +2298,6 @@ export function PhoneController({
               <p className="text-[11px] text-center text-[#FF9B8A] leading-snug">
                 {translateServerMessage(errorMsg, lang)}
               </p>
-            )}
-
-            {!embedded && (
-              <div className="space-y-1.5">
-                <label
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    controllerHaptics.unlock();
-                    const res = vibrate([120, 60, 180], {
-                      fromUserGesture: true,
-                      intensity: 'heavy',
-                      force: true,
-                      skipIosSwitch: true,
-                    });
-                    setImpactPulse('heavy');
-                    setTimeout(() => setImpactPulse('none'), 220);
-                    setHapticNotice(controllerHaptics.describeResult(res));
-                  }}
-                  className="relative w-full h-10 rounded-xl bg-[#1A1E26] border border-[#2A303D] text-xs font-medium text-[#9CA3AF] hover:text-white inline-flex items-center justify-center gap-2 cursor-pointer select-none"
-                >
-                  <IosHapticSwitch enabled={hapticsEnabled} />
-                  <Vibrate className="w-3.5 h-3.5" />
-                  <span>{t('Test Vibration / Haptics', '测试震动反馈')}</span>
-                </label>
-                {hapticNotice && (
-                  <p className="text-[11px] text-center text-[#10D98B] leading-snug">
-                    {translateServerMessage(hapticNotice, lang)}
-                  </p>
-                )}
-              </div>
             )}
           </div>
         </div>
@@ -2321,6 +2357,7 @@ export function PhoneController({
     return renderConnectedShell(
       <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-2.5">
         {passHostOverlay}
+        {closeRoomOverlay}
         {!embedded && (
           <div className="absolute top-1 right-1">
             <LanguageToggle compact />
@@ -2403,16 +2440,26 @@ export function PhoneController({
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
-            {otherConnectedHumans.length > 0 && (
+            <div className="flex items-center justify-center gap-2">
+              {otherConnectedHumans.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPassHostOpen(true)}
+                  className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                  {t('Pass Host', '移交房主')}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setPassHostOpen(true)}
-                className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                className="h-9 px-4 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors"
               >
-                <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                {t('Pass Host', '移交房主')}
+                <Power className="w-3.5 h-3.5" />
+                {t('Close Room', '关闭房间')}
               </button>
-            )}
+            </div>
           </div>
         ) : (
           <p className="text-xs text-[#9CA3AF]">
@@ -2441,6 +2488,7 @@ export function PhoneController({
     return renderConnectedShell(
       <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3">
         {passHostOverlay}
+        {closeRoomOverlay}
         {!embedded && (
           <div className="absolute top-1 right-1">
             <LanguageToggle compact />
@@ -2479,6 +2527,16 @@ export function PhoneController({
                 className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
               >
                 <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="pt-1 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                className="h-9 px-4 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>{t('Close Room', '关闭房间')}</span>
               </button>
             </div>
           </div>
@@ -2618,7 +2676,7 @@ export function PhoneController({
                     }
               }
             >
-              <IosHapticSwitch enabled={!embedded && hapticsEnabled} />
+              <IosHapticSwitch enabled={!embedded} />
               {me.ready && <Check className="w-6 h-6" />}
               <span>
                 {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
@@ -2725,7 +2783,7 @@ export function PhoneController({
               : 1,
           }}
         >
-          <IosHapticSwitch enabled={!embedded && hapticsEnabled && !repositionMode} />
+          <IosHapticSwitch enabled={!embedded && !repositionMode} />
           <ActionIcon
             icon={spec.icon}
             className={`${isA ? 'w-5 h-5 sm:w-6 sm:h-6' : 'w-4 h-4 sm:w-5 sm:h-5'} mb-0.5 pointer-events-none`}
@@ -2754,7 +2812,7 @@ export function PhoneController({
           impactPulse === 'heavy'
             ? 'translate3d(4px, -2px, 0) scale(0.992)'
             : impactPulse === 'light'
-            ? 'translate3d(2px, 0, 0)'
+            ? 'translate3d(1.5px, 0, 0)'
             : 'translate3d(0, 0, 0)',
         boxShadow: isCardRedWarning
           ? 'inset 0 0 0 4px #FF3B30, inset 0 0 38px rgba(255, 59, 48, 0.72), 0 0 22px rgba(255, 59, 48, 0.55)'
@@ -2762,6 +2820,8 @@ export function PhoneController({
           ? 'inset 0 0 0 3px rgba(255, 77, 46, 0.75)'
           : impactPulse === 'light'
           ? `inset 0 0 0 2px ${me.color.hex}`
+          : impactPulse === 'subtle'
+          ? `inset 0 0 0 1.5px ${me.color.hex}99`
           : 'none',
         borderRadius: '14px',
       }}
@@ -2881,33 +2941,6 @@ export function PhoneController({
                 className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#00C2FF] flex items-center justify-center cursor-pointer"
               >
                 <SlidersHorizontal className="w-4 h-4" />
-              </button>
-            )}
-            {!embedded && (
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !hapticsEnabled;
-                  setHapticsEnabled(next);
-                  controllerHaptics.setEnabled(next);
-                  if (next) {
-                    controllerHaptics.unlock();
-                    vibrate([90, 45, 120], {
-                      fromUserGesture: true,
-                      intensity: 'heavy',
-                      force: true,
-                    });
-                  }
-                }}
-                aria-label={hapticsEnabled ? t('Disable haptics', '关闭震动') : t('Enable haptics', '开启震动')}
-                title={hapticsEnabled ? t('Haptics On', '震动已开启') : t('Haptics Off', '震动已关闭')}
-                className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer ${
-                  hapticsEnabled
-                    ? 'bg-[#1E232D] hover:bg-[#242A36] text-[#10D98B]'
-                    : 'bg-[#1E232D] hover:bg-[#242A36] text-[#6B7280]'
-                }`}
-              >
-                <Vibrate className="w-4 h-4" />
               </button>
             )}
             {!embedded && (

@@ -358,6 +358,40 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
           }
         }
 
+        // 4-Corner bevel deflection & anti-stall guards so pucks never get pinned in 90-degree corners
+        const corners = [
+          { x: COURT_LEFT, y: COURT_TOP },
+          { x: COURT_LEFT, y: COURT_BOTTOM },
+          { x: COURT_RIGHT, y: COURT_TOP },
+          { x: COURT_RIGHT, y: COURT_BOTTOM },
+        ];
+        for (const c of corners) {
+          const cdx = puck.x - c.x;
+          const cdy = puck.y - c.y;
+          const cDist = Math.hypot(cdx, cdy);
+          if (cDist < 72) {
+            const toCenterX = ARENA_WIDTH / 2 - puck.x;
+            const toCenterY = ARENA_HEIGHT / 2 - puck.y;
+            const toCenterLen = Math.hypot(toCenterX, toCenterY) || 1;
+            const nx = toCenterX / toCenterLen;
+            const ny = toCenterY / toCenterLen;
+            puck.x = c.x + (cdx / (cDist || 1)) * 72;
+            puck.y = c.y + (cdy / (cDist || 1)) * 72;
+            const curSpeed = Math.max(460, Math.hypot(puck.vx, puck.vy));
+            puck.vx = nx * curSpeed;
+            puck.vy = ny * curSpeed;
+            sounds.push({ type: 'bump', intensity: 0.45 });
+          }
+        }
+
+        // Prevent horizontal/vertical wall-hugging dead angles
+        if ((puck.x < COURT_LEFT + 70 || puck.x > COURT_RIGHT - 70) && Math.abs(puck.vx) < 150) {
+          puck.vx = puck.x < ARENA_WIDTH / 2 ? 260 : -260;
+        }
+        if ((puck.y < COURT_TOP + 65 || puck.y > COURT_BOTTOM - 65) && Math.abs(puck.vy) < 120) {
+          puck.vy = puck.y < ARENA_HEIGHT / 2 ? 220 : -220;
+        }
+
         // Bumpers
         for (const b of state.bumpers) {
           const dx = puck.x - b.x;
@@ -384,16 +418,38 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
           const dist = Math.hypot(dx, dy) || 1;
           const minD = puck.radius + pad.radius;
           if (dist < minD) {
-            const nx = dx / dist;
-            const ny = dy / dist;
-            puck.x = pad.x + nx * (minD + 2);
-            puck.y = pad.y + ny * (minD + 2);
+            let nx = dx / dist;
+            let ny = dy / dist;
+
+            // If paddle hits puck near its back wall or top/bottom corner, bias reflection forward toward center court
+            const nearBackWall =
+              (pad.side === 'left' && (puck.x < COURT_LEFT + 135 || pad.x < COURT_LEFT + 145)) ||
+              (pad.side === 'right' && (puck.x > COURT_RIGHT - 135 || pad.x > COURT_RIGHT - 145));
+            const nearTopBottom = puck.y < COURT_TOP + 92 || puck.y > COURT_BOTTOM - 92;
+
+            if (nearBackWall || nearTopBottom) {
+              nx = pad.side === 'left' ? Math.max(0.5, nx) : Math.min(-0.5, nx);
+              if (puck.y < COURT_TOP + 92) ny = Math.max(0.35, ny);
+              else if (puck.y > COURT_BOTTOM - 92) ny = Math.min(-0.35, ny);
+              const nLen = Math.hypot(nx, ny) || 1;
+              nx /= nLen;
+              ny /= nLen;
+            }
+
+            puck.x = Math.max(
+              COURT_LEFT + puck.radius + 2,
+              Math.min(COURT_RIGHT - puck.radius - 2, pad.x + nx * (minD + 3))
+            );
+            puck.y = Math.max(
+              COURT_TOP + puck.radius + 2,
+              Math.min(COURT_BOTTOM - puck.radius - 2, pad.y + ny * (minD + 3))
+            );
 
             const isSmash = pad.smashTimer > 0 || pad.fireTimer > 0;
             const baseSpeed = Math.max(520, Math.hypot(puck.vx, puck.vy) * 1.06);
             const launchSpeed = isSmash ? Math.min(960, baseSpeed + 280) : Math.min(780, baseSpeed);
-            puck.vx = nx * launchSpeed + pad.vx * 0.45;
-            puck.vy = ny * launchSpeed + pad.vy * 0.45;
+            puck.vx = nx * launchSpeed + (nearBackWall ? 0 : pad.vx * 0.45);
+            puck.vy = ny * launchSpeed + (nearTopBottom ? 0 : pad.vy * 0.45);
             puck.hot = isSmash;
             state.lastHitPadId = pad.id;
             sounds.push({ type: isSmash ? 'pulse' : 'bump', playerId: pad.id, intensity: isSmash ? 1 : 0.7 });

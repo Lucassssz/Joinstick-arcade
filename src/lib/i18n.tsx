@@ -1730,6 +1730,57 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^(\d+) pts$/i))) {
     return `${m[1]} 分`;
   }
+  if ((m = trimmed.match(/^ROUND (\d+)$/i))) {
+    return `第 ${m[1]} 回合`;
+  }
+  if ((m = trimmed.match(/^NEW BID \$(\d+)!$/i))) {
+    return `最新出价 $${m[1]}！`;
+  }
+  if (trimmed === 'Your Turn!' || trimmed === 'Card Turn!') {
+    return '⚡ 轮到你了！';
+  }
+  if (trimmed === 'Action Required!') {
+    return '🔔 请立即操作！';
+  }
+  if (trimmed === 'Choose a Color!') {
+    return '🎨 请选择颜色！';
+  }
+  if (trimmed === 'Bluff Window!') {
+    return '🕵️ 抓谎时机！';
+  }
+  if (trimmed === 'Buy or Pass!') {
+    return '🏠 买房或跳过！';
+  }
+  if (trimmed === 'YOU HAVE THE BOMB!') {
+    return '💣 炸弹在你手里！';
+  }
+  if (trimmed === 'YOU ARE THE TAGGER!') {
+    return '❄️ 你是追捕者！';
+  }
+  if (trimmed === 'RED LIGHT — FREEZE!') {
+    return '🛑 红灯 — 立即停下！';
+  }
+  if (trimmed === 'YELLOW LIGHT — SLOW!') {
+    return '⚠️ 黄灯 — 准备急停！';
+  }
+  if (trimmed === 'STOVE ON FIRE!') {
+    return '🔥 灶台着火啦！';
+  }
+  if (trimmed === 'FEVER TIME!') {
+    return '🍓 狂热水果雨！';
+  }
+  if (trimmed === 'CHEST REVEAL!') {
+    return '💎 宝箱揭晓！';
+  }
+  if (trimmed === 'CHAOS WHEEL!') {
+    return '🎲 混沌大转盘！';
+  }
+  if (trimmed === 'GAME PAUSED') {
+    return '⏸ 游戏已暂停';
+  }
+  if (trimmed === 'RESUMING') {
+    return '▶ 继续游戏';
+  }
 
   return text;
 }

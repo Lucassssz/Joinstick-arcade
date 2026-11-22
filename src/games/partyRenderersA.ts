@@ -795,8 +795,8 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
   const bladeTime = getMotionTime();
   const scBob = Math.sin(bladeTime * 6) * 3.5;
   for (const sc of snap.scrolls ?? []) {
-    const col = sc.kind === 'blade-wave' ? '#FF3B9A' : '#10D98B';
-    const label = sc.kind === 'blade-wave' ? 'WAVE' : 'WIND';
+    const col = sc.kind === 'blade-wave' ? '#FF3B9A' : sc.kind === 'heart' ? '#FF4D2E' : '#10D98B';
+    const label = sc.kind === 'blade-wave' ? 'WAVE' : sc.kind === 'heart' ? '♥ +1' : 'WIND';
     drawShadowOval(ctx, sc.x, sc.y + 8, 16, 10, 0.35);
     drawExtrudedCylinder3D(ctx, sc.x, sc.y + scBob * 0.5, 16, 8, shadeHex(col, -0.2), shadeHex(col, -0.5), col);
     ctx.save();
@@ -900,6 +900,15 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
         ctx.arc(p.x, p.y - 8, 30, 0, Math.PI * 2);
         ctx.stroke();
       }
+      if ((p.invulnTimer ?? 0) > 0) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 8, 35, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.restore();
 
       // Samurai pod
@@ -950,10 +959,30 @@ export function renderBladeDuel(ctx: CanvasRenderingContext2D, snap: BladeDuelSn
       ctx.fill();
       ctx.restore();
 
+      // 3-Heart Life Bar directly above the duelist
+      const maxHp = p.maxHp ?? 3;
+      const curHp = p.hp ?? 3;
+      ctx.save();
+      ctx.font = '900 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let hi = 0; hi < maxHp; hi++) {
+        const hx = p.x + (hi - (maxHp - 1) / 2) * 15;
+        const hy = p.y - 31;
+        const filled = hi < curHp;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.beginPath();
+        ctx.arc(hx, hy, 7.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = filled ? '#FF4D2E' : 'rgba(255, 255, 255, 0.22)';
+        ctx.fillText('♥', hx, hy + 0.5);
+      }
+      ctx.restore();
+
       drawNameplate(
         ctx,
         p.x,
-        p.y - 40,
+        p.y - 47,
         p.slotIndex,
         p.name,
         p.colorHex,
