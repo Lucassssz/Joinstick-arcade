@@ -204,6 +204,7 @@
   }
 
   .monitor-main {
+    grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
   }
 }
@@ -222,3 +223,4 @@
     display: none;
   }
 }
+
