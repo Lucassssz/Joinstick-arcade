@@ -1576,6 +1576,7 @@ export type ClientMessage =
   | { type: 'room:return-setup' }
   | { type: 'room:close' }
   | { type: 'lobby:filter'; filter: PlayerFilterMode }
+  | { type: 'room:layout'; gameCols: number; actionCols: number }
   | { type: 'remote:action'; action: RemoteDirection }
   | { type: 'player:ready'; ready: boolean }
   | { type: 'player:emote'; emoji: string }

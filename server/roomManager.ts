@@ -76,6 +76,8 @@ interface RoomRecord {
   selectedGameId: GameId;
   gameSettingValue: number;
   lobbyFilter: PlayerFilterMode;
+  lobbyGameCols: number;
+  lobbyActionCols: number;
   remoteFocus: RemoteFocusState;
   activeMutator: MutatorId;
   mutatorSpinSeq: number;
@@ -394,6 +396,8 @@ export class RoomManager {
           selectedGameId: gameId,
           gameSettingValue: meta.defaultSetting,
           lobbyFilter: 'all',
+          lobbyGameCols: 4,
+          lobbyActionCols: 7,
           remoteFocus: { zone: 'games', index: 0, modalIndex: 0 },
           activeMutator: 'normal',
           mutatorSpinSeq: 0,
@@ -401,7 +405,7 @@ export class RoomManager {
             active: false,
             freezing: false,
             freezeRemaining: 0,
-            freezeTotal: 2.6,
+            freezeTotal: 3.0,
             triggerCount: 0,
           },
           matchElapsedSec: 0,
@@ -729,6 +733,20 @@ export class RoomManager {
         room.lastActivityAt = Date.now();
         this.playHostSound(room, 'confirm');
         this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:layout': {
+        const binding = this.bindings.get(ws);
+        if (!binding || binding.role !== 'host') return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room) return;
+        if (Number.isFinite(msg.gameCols)) {
+          room.lobbyGameCols = Math.max(1, Math.min(8, Math.round(msg.gameCols)));
+        }
+        if (Number.isFinite(msg.actionCols)) {
+          room.lobbyActionCols = Math.max(1, Math.min(10, Math.round(msg.actionCols)));
+        }
         return;
       }
 
@@ -1100,7 +1118,7 @@ export class RoomManager {
       active: false,
       freezing: false,
       freezeRemaining: 0,
-      freezeTotal: 2.6,
+      freezeTotal: 3.0,
       triggerCount: 0,
     };
     room.gameState = null;
@@ -1138,7 +1156,7 @@ export class RoomManager {
       active: false,
       freezing: false,
       freezeRemaining: 0,
-      freezeTotal: 2.6,
+      freezeTotal: 3.0,
       triggerCount: 0,
     };
     room.gameState = null;
@@ -1253,7 +1271,8 @@ export class RoomManager {
     // --- FULLSCREEN GAME ROOM (LOBBY) TV REMOTE ---
     if (room.status !== 'LOBBY') return;
 
-    const COLS = 4;
+    const COLS = Math.max(1, room.lobbyGameCols || 4);
+    const ACTION_COLS = Math.max(1, room.lobbyActionCols || 7);
     const ACTION_COUNT = 7; // 0: Start Game, 1: 5-Game Tournament, 2: Chaos Wheel, 3: Match Setting, 4: Add Robot, 5: Bot Level, 6: Room Setup
     const filteredGames = filterGamesByPlayerMode(room.lobbyFilter);
     const focus = room.remoteFocus;
@@ -1276,10 +1295,12 @@ export class RoomManager {
         focus.index = Math.min(PLAYER_FILTER_OPTIONS.length - 1, focus.index + 1);
         this.playHostSound(room, 'nav');
       } else if (action === 'down') {
-        focus.zone = 'games';
-        const curIdx = filteredGames.findIndex((g) => g.id === room.selectedGameId);
-        selectGameAt(curIdx >= 0 ? curIdx : 0);
-        this.playHostSound(room, 'nav');
+        if (filteredGames.length > 0) {
+          focus.zone = 'games';
+          const targetCol = Math.min(COLS - 1, Math.max(0, focus.index));
+          selectGameAt(Math.min(filteredGames.length - 1, targetCol));
+          this.playHostSound(room, 'nav');
+        }
       } else if (action === 'ok') {
         const chosenOpt = PLAYER_FILTER_OPTIONS[focus.index];
         if (chosenOpt) {
@@ -1303,42 +1324,41 @@ export class RoomManager {
         this.broadcastRoom(room);
         return;
       }
+      const curIdx = Math.max(0, Math.min(filteredGames.length - 1, focus.index));
       if (action === 'left') {
-        if (focus.index > 0) {
-          selectGameAt(focus.index - 1);
+        if (curIdx > 0) {
+          selectGameAt(curIdx - 1);
           this.playHostSound(room, 'nav');
         }
       } else if (action === 'right') {
-        if (focus.index < filteredGames.length - 1) {
-          selectGameAt(focus.index + 1);
+        if (curIdx < filteredGames.length - 1) {
+          selectGameAt(curIdx + 1);
           this.playHostSound(room, 'nav');
         }
       } else if (action === 'up') {
-        if (focus.index >= COLS) {
-          selectGameAt(focus.index - COLS);
+        if (curIdx >= COLS) {
+          selectGameAt(curIdx - COLS);
         } else {
           focus.zone = 'filter';
-          focus.index = Math.max(
-            0,
-            PLAYER_FILTER_OPTIONS.findIndex((o) => o.id === room.lobbyFilter)
-          );
+          focus.index = Math.min(PLAYER_FILTER_OPTIONS.length - 1, curIdx);
         }
         this.playHostSound(room, 'nav');
       } else if (action === 'down') {
-        const currentRow = Math.floor(focus.index / COLS);
+        const currentRow = Math.floor(curIdx / COLS);
         const lastRow = Math.floor((filteredGames.length - 1) / COLS);
-        if (focus.index + COLS < filteredGames.length) {
-          selectGameAt(focus.index + COLS);
+        if (curIdx + COLS < filteredGames.length) {
+          selectGameAt(curIdx + COLS);
         } else if (currentRow < lastRow) {
           selectGameAt(filteredGames.length - 1);
         } else {
+          const col = curIdx % COLS;
           focus.zone = 'actions';
-          focus.index = 0;
+          focus.index = Math.min(ACTION_COUNT - 1, Math.min(ACTION_COLS - 1, col));
         }
         this.playHostSound(room, 'nav');
       } else if (action === 'ok') {
         // Ensure focused game is selected, then try to launch it (or move focus to Start bar with prompt)
-        selectGameAt(focus.index);
+        selectGameAt(curIdx);
         const started = this.attemptStartMatch(room, senderWs);
         if (!started) {
           focus.zone = 'actions';
@@ -1365,11 +1385,35 @@ export class RoomManager {
       return;
     }
     if (action === 'up') {
-      focus.zone = 'games';
-      const curIdx = filteredGames.findIndex((g) => g.id === room.selectedGameId);
-      selectGameAt(curIdx >= 0 ? curIdx : Math.max(0, filteredGames.length - 1));
+      if (focus.index >= ACTION_COLS) {
+        focus.index = focus.index - ACTION_COLS;
+      } else {
+        focus.zone = 'games';
+        if (filteredGames.length > 0) {
+          const lastRow = Math.floor((filteredGames.length - 1) / COLS);
+          const targetCol = Math.min(COLS - 1, focus.index % ACTION_COLS);
+          selectGameAt(Math.min(filteredGames.length - 1, lastRow * COLS + targetCol));
+        } else {
+          focus.zone = 'filter';
+          focus.index = 0;
+        }
+      }
       this.playHostSound(room, 'nav');
       this.broadcastRoom(room);
+      return;
+    }
+    if (action === 'down') {
+      const curActionRow = Math.floor(focus.index / ACTION_COLS);
+      const lastActionRow = Math.floor((ACTION_COUNT - 1) / ACTION_COLS);
+      if (focus.index + ACTION_COLS < ACTION_COUNT) {
+        focus.index = focus.index + ACTION_COLS;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      } else if (curActionRow < lastActionRow) {
+        focus.index = ACTION_COUNT - 1;
+        this.playHostSound(room, 'nav');
+        this.broadcastRoom(room);
+      }
       return;
     }
     if (action === 'ok') {
@@ -1621,7 +1665,7 @@ export class RoomManager {
       active: false,
       freezing: false,
       freezeRemaining: 0,
-      freezeTotal: 2.6,
+      freezeTotal: 3.0,
       triggerCount: 0,
     };
     room.matchElapsedSec = 0;
@@ -1718,7 +1762,7 @@ export class RoomManager {
 
       if (room.status !== 'PLAYING' || !room.gameState) return;
 
-      // --- 2.6-SECOND DRAMATIC FRENZY FREEZE TO DISPLAY THE FIRE BANNER ---
+      // --- 3.0-SECOND DRAMATIC FRENZY FREEZE TO DISPLAY SEQUENTIAL FIRE BANNERS ---
       if (room.frenzy.freezing) {
         room.frenzy.freezeRemaining = Math.max(0, room.frenzy.freezeRemaining - dt);
         freezeBroadcastCounter += 1;
@@ -1804,8 +1848,8 @@ export class RoomManager {
         room.frenzy = {
           active: true,
           freezing: true,
-          freezeRemaining: 2.6,
-          freezeTotal: 2.6,
+          freezeRemaining: 3.0,
+          freezeTotal: 3.0,
           triggerCount: 1,
         };
         freezeBroadcastCounter = 0;

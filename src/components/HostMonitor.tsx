@@ -131,6 +131,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const wheelAutoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedGameBtnRef = useRef<HTMLButtonElement | null>(null);
+  const gamesGridRef = useRef<HTMLDivElement | null>(null);
+  const actionsGridRef = useRef<HTMLDivElement | null>(null);
+  const lastSentLayoutRef = useRef<{ gameCols: number; actionCols: number }>({
+    gameCols: 0,
+    actionCols: 0,
+  });
 
   // Manage Host WebSocket Connection
   useEffect(() => {
@@ -443,6 +449,54 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       focusedGameBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [room?.status, room?.remoteFocus.zone, room?.remoteFocus.index, room?.lobbyFilter]);
+
+  // Report live responsive CSS Grid column counts so Host Remote Up/Down matches visual rows on every screen size
+  useEffect(() => {
+    if (!wsConnected || room?.status !== 'LOBBY') {
+      lastSentLayoutRef.current = { gameCols: 0, actionCols: 0 };
+      return;
+    }
+
+    const measureCols = (el: HTMLElement | null, fallback: number): number => {
+      if (!el) return fallback;
+      const tpl = window.getComputedStyle(el).gridTemplateColumns;
+      if (!tpl || tpl === 'none') return fallback;
+      const count = tpl.trim().split(/\s+/).filter(Boolean).length;
+      return count > 0 ? count : fallback;
+    };
+
+    const syncLayout = () => {
+      const w = window.innerWidth;
+      const fallbackGames = w >= 1280 ? 4 : w >= 1024 ? 3 : 2;
+      const fallbackActions = w >= 1280 ? 7 : w >= 640 ? 4 : 2;
+      const gameCols = measureCols(gamesGridRef.current, fallbackGames);
+      const actionCols = measureCols(actionsGridRef.current, fallbackActions);
+      if (
+        lastSentLayoutRef.current.gameCols !== gameCols ||
+        lastSentLayoutRef.current.actionCols !== actionCols
+      ) {
+        lastSentLayoutRef.current = { gameCols, actionCols };
+        wsRef.current?.send({ type: 'room:layout', gameCols, actionCols });
+      }
+    };
+
+    syncLayout();
+    const rafId = window.requestAnimationFrame(syncLayout);
+    window.addEventListener('resize', syncLayout);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(syncLayout);
+      if (gamesGridRef.current) observer.observe(gamesGridRef.current);
+      if (actionsGridRef.current) observer.observe(actionsGridRef.current);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', syncLayout);
+      observer?.disconnect();
+    };
+  }, [wsConnected, room?.status, room?.code]);
 
   const toggleMute = () => {
     const next = !muted;
@@ -1314,7 +1368,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
             {/* Row 1..N: Responsive Cartridge Grid (2 cols on tablet portrait, 3 on tablet landscape, 4 on wide desktop) */}
             <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar pr-2 py-1">
-              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-3.5">
+              <div
+                ref={gamesGridRef}
+                className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-3.5"
+              >
                 {visibleGames.map((game, idx) => {
                   const isSelected = room.selectedGameId === game.id;
                   const isRemoteFocused = focus.zone === 'games' && focus.index === idx;
@@ -1576,7 +1633,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
         {/* Bottom TV Remote Action Dock (zone === 'actions', indices 0..6) */}
         <footer className="border-t border-[#242934] bg-[#151820] px-3 sm:px-5 py-2.5 sm:py-3 shrink-0">
-          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
+          <div ref={actionsGridRef} className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
             {/* Action 0: Start / Open Game */}
             <button
               type="button"
@@ -1967,108 +2024,179 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             <div className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-[#FF5E1A]/75 shadow-[inset_0_0_65px_rgba(255,77,46,0.34)] z-10 animate-pulse" />
           )}
 
-          {/* Dramatic 2.6-Second Fire Frenzy Mode Pop-Up Banner Overlay */}
+          {/* Sequential 3.0-Second Fire Frenzy Fly-Through Overlay (Right -> Left) */}
           <AnimatePresence>
             {room.status === 'PLAYING' && room.frenzy.freezing && (
               <motion.div
+                key={`frenzy-overlay-${room.frenzy.triggerCount}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.16 }}
-                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_center,rgba(255,94,26,0.38)_0%,rgba(16,8,10,0.88)_74%)] backdrop-blur-[2px] border-4 border-[#FF5E1A]"
+                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center overflow-hidden rounded-2xl bg-[radial-gradient(ellipse_at_center,rgba(255,88,20,0.38)_0%,rgba(14,7,9,0.86)_75%)] backdrop-blur-[2px] border-4 border-[#FF5E1A] shadow-[inset_0_0_90px_rgba(255,77,46,0.5)]"
               >
-                {/* Animated Rising Fire Ember Particles */}
-                {Array.from({ length: 14 }).map((_, i) => (
+                {/* Blazing Horizontal Fire Streak Lines Sweeping Right -> Left */}
+                {[
+                  { top: '14%', h: 'h-1', color: 'from-transparent via-[#FF8A00] to-transparent', dur: 0.75, delay: 0 },
+                  { top: '27%', h: 'h-1.5', color: 'from-transparent via-[#FFE066] to-transparent', dur: 0.62, delay: 0.18 },
+                  { top: '48%', h: 'h-2', color: 'from-transparent via-[#FF4D2E] to-transparent', dur: 0.7, delay: 0.08 },
+                  { top: '69%', h: 'h-1.5', color: 'from-transparent via-[#FFB800] to-transparent', dur: 0.65, delay: 0.3 },
+                  { top: '84%', h: 'h-1', color: 'from-transparent via-[#FF5E1A] to-transparent', dur: 0.72, delay: 0.12 },
+                ].map((streak, idx) => (
+                  <motion.div
+                    key={idx}
+                    initial={{ x: '110%', opacity: 0 }}
+                    animate={{ x: ['110%', '-110%'], opacity: [0, 0.9, 0.9, 0] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: streak.dur,
+                      delay: streak.delay,
+                      ease: 'linear',
+                    }}
+                    style={{ top: streak.top }}
+                    className={`absolute left-0 w-2/3 ${streak.h} bg-gradient-to-r ${streak.color} blur-[1px]`}
+                  />
+                ))}
+
+                {/* Animated Rising & Wind-Swept Fire Ember Particles */}
+                {Array.from({ length: 16 }).map((_, i) => (
                   <motion.span
                     key={i}
                     initial={{
-                      y: 180,
-                      x: ((i % 7) - 3) * 140,
+                      y: 190 - (i % 3) * 45,
+                      x: 420 + (i % 4) * 90,
                       opacity: 0,
                       scale: 0.6,
                     }}
                     animate={{
-                      y: -210,
-                      x: ((i % 7) - 3) * 140 + (i % 2 === 0 ? 28 : -28),
-                      opacity: [0, 1, 0.9, 0],
-                      scale: [0.6, 1.35, 0.7],
+                      y: -200,
+                      x: -460 - (i % 3) * 80,
+                      opacity: [0, 1, 0.95, 0],
+                      scale: [0.6, 1.4, 0.65],
                     }}
                     transition={{
                       repeat: Infinity,
-                      duration: 1.05 + (i % 4) * 0.22,
-                      delay: (i % 5) * 0.14,
+                      duration: 0.95 + (i % 4) * 0.2,
+                      delay: (i % 6) * 0.12,
                       ease: 'easeOut',
                     }}
                     className={`absolute rounded-full ${
                       i % 3 === 0
-                        ? 'w-3.5 h-3.5 bg-[#FFB800] shadow-[0_0_14px_#FFB800]'
+                        ? 'w-3.5 h-3.5 bg-[#FFB800] shadow-[0_0_16px_#FFB800]'
                         : i % 3 === 1
-                        ? 'w-2.5 h-2.5 bg-[#FF4D2E] shadow-[0_0_12px_#FF4D2E]'
-                        : 'w-2 h-2 bg-[#FFF3B0] shadow-[0_0_10px_#FFF3B0]'
+                        ? 'w-2.5 h-2.5 bg-[#FF4D2E] shadow-[0_0_14px_#FF4D2E]'
+                        : 'w-2 h-2 bg-[#FFF3B0] shadow-[0_0_12px_#FFF3B0]'
                     }`}
                   />
                 ))}
 
-                {/* Central Blazing Banner Card */}
+                {/* STAGE 1 (First): FRENZY MODE! Sweeps in from Right -> Holds Center -> Exits Left */}
                 <motion.div
-                  initial={{ scale: 0.68, y: 24, opacity: 0 }}
-                  animate={{ scale: 1, y: 0, opacity: 1 }}
-                  exit={{ scale: 1.08, opacity: 0 }}
-                  transition={{ type: 'spring', stiffness: 360, damping: 22 }}
-                  className="relative max-w-xl w-[92%] rounded-3xl bg-gradient-to-b from-[#33110D]/96 via-[#1B0C0E]/96 to-[#12090C]/98 border-2 border-[#FF8A00] p-5 sm:p-7 text-center shadow-[0_0_70px_rgba(255,77,46,0.7)]"
+                  key={`frenzy-stage1-${room.frenzy.triggerCount}`}
+                  initial={{ x: '105%', opacity: 0, scale: 0.92 }}
+                  animate={{
+                    x: ['105%', '0%', '0%', '-105%'],
+                    opacity: [0, 1, 1, 0],
+                    scale: [0.92, 1.04, 1.0, 0.92],
+                  }}
+                  transition={{
+                    duration: 1.42,
+                    times: [0, 0.16, 0.78, 1],
+                    ease: ['easeOut', 'linear', 'easeIn'],
+                  }}
+                  className="absolute inset-0 flex items-center justify-center px-4"
                 >
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#FF4D2E]/25 border border-[#FF8A00]/65 text-[#FFD166] font-mono text-xs font-black tracking-widest uppercase">
-                    <Flame className="w-4 h-4 text-[#FF8A00]" />
-                    <span>{t('FINAL STRETCH · GAME PAUSED', '终局狂热时刻 · 全场高燃爆发')}</span>
-                    <Flame className="w-4 h-4 text-[#FF8A00]" />
-                  </div>
+                  <div className="relative max-w-2xl w-[92%] rounded-3xl bg-gradient-to-r from-[#2D0D09]/95 via-[#43140A]/96 to-[#1D0B0E]/95 border-2 border-[#FF8A00] px-6 py-7 sm:px-10 sm:py-9 text-center shadow-[0_0_80px_rgba(255,77,46,0.85)]">
+                    {/* Trailing Fire Tail on the Right Edge */}
+                    <div className="pointer-events-none absolute -right-14 inset-y-4 w-20 bg-gradient-to-l from-transparent via-[#FF5E1A]/45 to-[#FFB800]/65 blur-xl rounded-full" />
+                    <div className="pointer-events-none absolute -left-8 inset-y-6 w-14 bg-gradient-to-r from-transparent to-[#FF4D2E]/50 blur-lg rounded-full" />
 
-                  <h2 className="mt-3 font-display text-4xl sm:text-5xl font-black tracking-tight text-white drop-shadow-[0_4px_18px_rgba(255,77,46,0.9)]">
-                    {t('FRENZY MODE!', '烈焰狂热模式！')}
-                  </h2>
-
-                  {/* Simplified 2 Special Perks for Current Game */}
-                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-[#FF4D2E]/18 border-2 border-[#FF5E1A]/80 px-4 py-3.5 flex items-center justify-center gap-2.5 shadow-[inset_0_0_20px_rgba(255,77,46,0.2)]">
-                      <Flame className="w-6 h-6 text-[#FFB800] shrink-0" />
-                      <span className="font-display text-lg sm:text-xl font-black text-white">
-                        {lang === 'zh' ? frenzyPerks.perk1Zh : frenzyPerks.perk1En}
-                      </span>
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#FF4D2E]/30 border border-[#FFB800]/75 text-[#FFE066] font-mono text-xs sm:text-sm font-black tracking-widest uppercase shadow-[0_0_20px_rgba(255,138,0,0.45)]">
+                      <Flame className="w-4 h-4 text-[#FFB800] animate-pulse" />
+                      <span>{t('FINAL STRETCH · OVERDRIVE UNLOCKED', '终局高能时刻 · 全场沸腾')}</span>
+                      <Flame className="w-4 h-4 text-[#FFB800] animate-pulse" />
                     </div>
 
-                    <div className="rounded-2xl bg-[#FFB800]/16 border-2 border-[#FFB800]/80 px-4 py-3.5 flex items-center justify-center gap-2.5 shadow-[inset_0_0_20px_rgba(255,184,0,0.18)]">
-                      <Zap className="w-6 h-6 text-[#FFD166] shrink-0" />
-                      <span className="font-display text-lg sm:text-xl font-black text-white">
-                        {lang === 'zh' ? frenzyPerks.perk2Zh : frenzyPerks.perk2En}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Smooth Fiery Fuse Countdown Bar */}
-                  <div className="mt-5">
-                    <div className="h-3 w-full rounded-full bg-[#2A1414] border border-[#FF5E1A]/40 overflow-hidden p-0.5">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-[#FF4D2E] via-[#FF8A00] to-[#FFE066] transition-[width] duration-75"
-                        style={{
-                          width: `${Math.max(
-                            0,
-                            Math.min(
-                              100,
-                              (room.frenzy.freezeRemaining / Math.max(0.1, room.frenzy.freezeTotal)) *
-                                100
-                            )
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="mt-2 font-mono text-xs font-extrabold tracking-widest text-[#FFD166] uppercase tabular-nums">
-                      {t(
-                        `GET READY · RESUMING IN ${Math.max(1, Math.ceil(room.frenzy.freezeRemaining))}...`,
-                        `准备迎接狂暴加速 · ${Math.max(1, Math.ceil(room.frenzy.freezeRemaining))} 秒后继续！`
-                      )}
+                    <div className="mt-4 flex items-center justify-center gap-3 sm:gap-4">
+                      <Flame className="w-10 h-10 sm:w-12 sm:h-12 text-[#FFB800] drop-shadow-[0_0_18px_#FF5E1A] shrink-0 animate-pulse" />
+                      <h2 className="font-display text-4xl sm:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-[#FFF7CC] via-[#FFB800] to-[#FF4D2E] drop-shadow-[0_4px_24px_rgba(255,77,46,0.95)]">
+                        {t('FRENZY MODE!', '烈焰狂热模式！')}
+                      </h2>
+                      <Flame className="w-10 h-10 sm:w-12 sm:h-12 text-[#FFB800] drop-shadow-[0_0_18px_#FF5E1A] shrink-0 animate-pulse" />
                     </div>
                   </div>
                 </motion.div>
+
+                {/* STAGE 2 (Follows): SPECIAL FEATURES Sweeps in from Right -> Holds Center -> Exits Left */}
+                <motion.div
+                  key={`frenzy-stage2-${room.frenzy.triggerCount}`}
+                  initial={{ x: '105%', opacity: 0, scale: 0.92 }}
+                  animate={{
+                    x: ['105%', '0%', '0%', '-105%'],
+                    opacity: [0, 1, 1, 0],
+                    scale: [0.92, 1.03, 1.0, 0.92],
+                  }}
+                  transition={{
+                    delay: 1.24,
+                    duration: 1.72,
+                    times: [0, 0.14, 0.82, 1],
+                    ease: ['easeOut', 'linear', 'easeIn'],
+                  }}
+                  className="absolute inset-0 flex items-center justify-center px-4"
+                >
+                  <div className="relative max-w-2xl w-[92%] rounded-3xl bg-gradient-to-b from-[#33110D]/96 via-[#1B0C0E]/96 to-[#12090C]/98 border-2 border-[#FFB800] p-5 sm:p-7 text-center shadow-[0_0_80px_rgba(255,138,0,0.75)]">
+                    {/* Trailing Fire Tail on the Right Edge */}
+                    <div className="pointer-events-none absolute -right-14 inset-y-4 w-20 bg-gradient-to-l from-transparent via-[#FF4D2E]/45 to-[#FFB800]/65 blur-xl rounded-full" />
+                    <div className="pointer-events-none absolute -left-8 inset-y-6 w-14 bg-gradient-to-r from-transparent to-[#FF8A00]/50 blur-lg rounded-full" />
+
+                    <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-[#FF4D2E]/30 border border-[#FF8A00]/80 text-[#FFE066] font-mono text-xs font-black tracking-widest uppercase">
+                      <Flame className="w-4 h-4 text-[#FF8A00] animate-pulse" />
+                      <span>{t('SPECIAL FEATURES ACTIVE', '烈焰专属强化已激活')}</span>
+                      <Flame className="w-4 h-4 text-[#FF8A00] animate-pulse" />
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FF4D2E]/30 to-[#FF8A00]/15 border-2 border-[#FF5E1A] px-4 py-4 flex items-center justify-center gap-2.5 shadow-[0_0_28px_rgba(255,77,46,0.35),inset_0_0_20px_rgba(255,77,46,0.25)]">
+                        <Flame className="w-7 h-7 text-[#FFB800] drop-shadow-[0_0_10px_#FF5E1A] shrink-0 animate-pulse" />
+                        <span className="font-display text-lg sm:text-2xl font-black text-white drop-shadow">
+                          {lang === 'zh' ? frenzyPerks.perk1Zh : frenzyPerks.perk1En}
+                        </span>
+                      </div>
+
+                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FFB800]/28 to-[#FF5E1A]/15 border-2 border-[#FFB800] px-4 py-4 flex items-center justify-center gap-2.5 shadow-[0_0_28px_rgba(255,184,0,0.3),inset_0_0_20px_rgba(255,184,0,0.22)]">
+                        <Zap className="w-7 h-7 text-[#FFE066] drop-shadow-[0_0_10px_#FFB800] shrink-0 animate-pulse" />
+                        <span className="font-display text-lg sm:text-2xl font-black text-white drop-shadow">
+                          {lang === 'zh' ? frenzyPerks.perk2Zh : frenzyPerks.perk2En}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* Bottom Fiery Fuse Progress Bar */}
+                <div className="absolute bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 w-[82%] max-w-lg text-center">
+                  <div className="h-2.5 w-full rounded-full bg-[#2A1414]/90 border border-[#FF5E1A]/50 overflow-hidden p-0.5 shadow-[0_0_18px_rgba(255,77,46,0.45)]">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-[#FF4D2E] via-[#FF8A00] to-[#FFE066] transition-[width] duration-75"
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            (room.frenzy.freezeRemaining / Math.max(0.1, room.frenzy.freezeTotal)) *
+                              100
+                          )
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="mt-1.5 font-mono text-[11px] font-extrabold tracking-widest text-[#FFE066] uppercase tabular-nums drop-shadow">
+                    {t(
+                      `GET READY · RESUMING IN ${Math.max(1, Math.ceil(room.frenzy.freezeRemaining))}...`,
+                      `全速狂飙 · ${Math.max(1, Math.ceil(room.frenzy.freezeRemaining))} 秒后继续！`
+                    )}
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
