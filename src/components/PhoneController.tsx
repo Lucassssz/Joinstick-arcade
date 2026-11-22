@@ -228,6 +228,7 @@ export function PhoneController({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repositionMode, setRepositionMode] = useState(false);
   const [cardState, setCardState] = useState<CardPrivateState | null>(null);
+  const [manualReconnecting, setManualReconnecting] = useState(false);
   const [floatingOriginOffset, setFloatingOriginOffset] = useState<{ x: number; y: number }>({
     x: 0,
     y: 0,
@@ -237,6 +238,8 @@ export function PhoneController({
   const prevIsHostRef = useRef<boolean>(false);
   const prevCardDangerRef = useRef<boolean>(false);
   const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReconnectTapRef = useRef<number>(0);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
@@ -261,7 +264,8 @@ export function PhoneController({
 
   // Refs synced with latest state so WebSocket/pointer closures are never stale
   const wsRef = useRef<ManagedWebSocket | null>(null);
-  const joinedPlayerIdRef = useRef<string | null>(null);
+  const roomRef = useRef<RoomSnapshot | null>(room);
+  const joinedPlayerIdRef = useRef<string | null>(joinedPlayerId);
   const roomCodeRef = useRef<string>(roomCode);
   const playerNameRef = useRef<string>(playerName);
   const preferredColorRef = useRef<string>(preferredColor);
@@ -281,6 +285,9 @@ export function PhoneController({
   const isCssRotated = !embedded && viewport.w < viewport.h && viewport.w <= 960;
   const isCssRotatedRef = useRef<boolean>(isCssRotated);
 
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
   useEffect(() => {
     joinedPlayerIdRef.current = joinedPlayerId;
   }, [joinedPlayerId]);
@@ -403,15 +410,40 @@ export function PhoneController({
     () => (embedded ? `joinstick_sim_${defaultName || 'p1'}` : 'joinstick_player_id'),
     [embedded, defaultName]
   );
+  const roomCodeSessionKey = `${sessionKey}_room`;
 
-  // Persistent playerId for reconnects
+  const ensureWakeLock = () => {
+    if (embedded || wakeLockRef.current || typeof navigator === 'undefined') return;
+    try {
+      const nav = navigator as Navigator & {
+        wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
+      };
+      if (nav.wakeLock) {
+        nav.wakeLock
+          .request('screen')
+          .then((lock) => {
+            wakeLockRef.current = lock;
+          })
+          .catch(() => {});
+      }
+    } catch {
+      // Wake lock optional
+    }
+  };
+
+  // Persistent playerId & roomCode for instant reconnects
   const storedPlayerIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!embedded) {
       const saved = sessionStorage.getItem(sessionKey);
       if (saved) storedPlayerIdRef.current = saved;
+      const savedRoom = sessionStorage.getItem(roomCodeSessionKey);
+      if (savedRoom && savedRoom.length === 4 && !roomCodeRef.current) {
+        roomCodeRef.current = savedRoom;
+        setRoomCode(savedRoom);
+      }
     }
-  }, [embedded, sessionKey]);
+  }, [embedded, sessionKey, roomCodeSessionKey]);
 
   const sendCurrentInput = (force = false) => {
     const ws = wsRef.current;
@@ -531,12 +563,45 @@ export function PhoneController({
     }
   }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang]);
 
+  // Keep container/session warm during long controller play sessions
+  useEffect(() => {
+    if (embedded || !joinedPlayerId) return;
+    const id = window.setInterval(() => {
+      fetch('/api/health', { cache: 'no-store' }).catch(() => {});
+    }, 4 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [embedded, joinedPlayerId]);
+
+  // Safety net: if WebSocket is open while server snapshot still marks us disconnected, re-send room:join
+  useEffect(() => {
+    if (!wsConnected || !joinedPlayerId || !room) return;
+    const self = room.players.find((p) => p.id === joinedPlayerId);
+    if (!self || self.connected) {
+      setManualReconnecting(false);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const codeNow = (roomRef.current?.code || roomCodeRef.current || '').trim().toUpperCase();
+      if (wsRef.current?.isConnected() && storedPlayerIdRef.current && codeNow.length === 4) {
+        wsRef.current.send({
+          type: 'room:join',
+          code: codeNow,
+          name: playerNameRef.current.trim() || 'Player',
+          playerId: storedPlayerIdRef.current,
+          preferredColorId: preferredColorRef.current,
+        });
+      }
+    }, 1_400);
+    return () => window.clearInterval(timer);
+  }, [wsConnected, joinedPlayerId, room]);
+
   // Manage WebSocket connection
   useEffect(() => {
     const socket = new ManagedWebSocket({
       onOpen: () => {
         setWsConnected(true);
-        const codeNow = roomCodeRef.current.trim().toUpperCase();
+        const savedRoom = !embedded ? sessionStorage.getItem(roomCodeSessionKey) || '' : '';
+        const codeNow = (roomRef.current?.code || roomCodeRef.current || savedRoom).trim().toUpperCase();
         if (storedPlayerIdRef.current && codeNow.length === 4) {
           socket.send({
             type: 'room:join',
@@ -557,12 +622,26 @@ export function PhoneController({
       onClose: () => {
         setWsConnected(false);
       },
+      onStatusChange: (status) => {
+        setWsConnected(status === 'connected');
+      },
       onMessage: (msg: ServerMessage) => {
         switch (msg.type) {
           case 'room:joined':
             storedPlayerIdRef.current = msg.playerId;
             joinedPlayerIdRef.current = msg.playerId;
-            if (!embedded) sessionStorage.setItem(sessionKey, msg.playerId);
+            roomRef.current = msg.room;
+            roomCodeRef.current = msg.room.code;
+            setRoomCode(msg.room.code);
+            if (!embedded) {
+              sessionStorage.setItem(sessionKey, msg.playerId);
+              sessionStorage.setItem(roomCodeSessionKey, msg.room.code);
+            }
+            if (manualReconnectTimerRef.current) {
+              clearTimeout(manualReconnectTimerRef.current);
+              manualReconnectTimerRef.current = null;
+            }
+            setManualReconnecting(false);
             setJoinedPlayerId(msg.playerId);
             setRoom(msg.room);
             setCardState(null);
@@ -570,6 +649,7 @@ export function PhoneController({
             setClosedReason(null);
             break;
           case 'room:snapshot':
+            roomRef.current = msg.room;
             setRoom(msg.room);
             break;
           case 'player:card-state':
@@ -602,17 +682,27 @@ export function PhoneController({
           case 'room:closed':
             storedPlayerIdRef.current = undefined;
             joinedPlayerIdRef.current = null;
-            if (!embedded) sessionStorage.removeItem(sessionKey);
+            roomRef.current = null;
+            if (!embedded) {
+              sessionStorage.removeItem(sessionKey);
+              sessionStorage.removeItem(roomCodeSessionKey);
+            }
+            setManualReconnecting(false);
             setClosedReason(msg.reason);
             setRoom(null);
             setCardState(null);
             setJoinedPlayerId(null);
             break;
           case 'error':
+            setManualReconnecting(false);
             if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
               storedPlayerIdRef.current = undefined;
               joinedPlayerIdRef.current = null;
-              if (!embedded) sessionStorage.removeItem(sessionKey);
+              roomRef.current = null;
+              if (!embedded) {
+                sessionStorage.removeItem(sessionKey);
+                sessionStorage.removeItem(roomCodeSessionKey);
+              }
               setJoinedPlayerId(null);
               setRoom(null);
               setCardState(null);
@@ -628,6 +718,7 @@ export function PhoneController({
       socket.close();
       wsRef.current = null;
       if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
+      if (manualReconnectTimerRef.current) clearTimeout(manualReconnectTimerRef.current);
       if (wakeLockRef.current) {
         wakeLockRef.current.release().catch(() => {});
         wakeLockRef.current = null;
@@ -746,11 +837,16 @@ export function PhoneController({
   };
 
   const handleLeave = () => {
+    const now = Date.now();
+    if (now - lastReconnectTapRef.current < 280) return;
+    lastReconnectTapRef.current = now;
     wsRef.current?.send({ type: 'player:leave' });
     storedPlayerIdRef.current = undefined;
     joinedPlayerIdRef.current = null;
+    roomRef.current = null;
     if (!embedded) {
       sessionStorage.removeItem(sessionKey);
+      sessionStorage.removeItem(roomCodeSessionKey);
       try {
         const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
         orientation?.unlock?.();
@@ -831,6 +927,7 @@ export function PhoneController({
     // and keeping pointerdown non-cancelled allows Android Chrome & iOS Safari to grant sticky
     // User Activation for hardware vibration and audio unlock!
     if (!embedded) {
+      ensureWakeLock();
       controllerHaptics.unlock();
       vibrate(42, { fromUserGesture: true, intensity: 'light' });
     }
@@ -952,6 +1049,7 @@ export function PhoneController({
       setPressedB(true);
     }
     if (!embedded) {
+      ensureWakeLock();
       controllerHaptics.unlock();
       vibrate(65, { fromUserGesture: true, intensity: 'medium' });
     }
@@ -976,14 +1074,51 @@ export function PhoneController({
   };
 
   const handleManualReconnect = () => {
+    const now = Date.now();
+    // Prevent duplicate firing when pointerUp + synthesized click both fire on mobile
+    if (now - lastReconnectTapRef.current < 280) return;
+    lastReconnectTapRef.current = now;
+
     setErrorMsg(null);
+    setManualReconnecting(true);
+    if (manualReconnectTimerRef.current) clearTimeout(manualReconnectTimerRef.current);
+    manualReconnectTimerRef.current = setTimeout(() => {
+      setManualReconnecting(false);
+    }, 1_800);
+
     if (!embedded) {
+      ensureWakeLock();
       controllerHaptics.unlock();
       vibrate(45, { fromUserGesture: true, intensity: 'light', force: true });
+      fetch('/api/health', { cache: 'no-store' }).catch(() => {});
     }
-    if (wsRef.current) {
-      wsRef.current.reconnectNow();
+
+    const ws = wsRef.current;
+    if (!ws) return;
+
+    const savedRoom = !embedded ? sessionStorage.getItem(roomCodeSessionKey) || '' : '';
+    const codeNow = (roomRef.current?.code || roomCodeRef.current || savedRoom).trim().toUpperCase();
+
+    if (ws.isConnected() && codeNow.length === 4 && storedPlayerIdRef.current) {
+      // Socket is already open — immediately re-attach the player without dropping TCP first!
+      ws.send({
+        type: 'room:join',
+        code: codeNow,
+        name: playerNameRef.current.trim() || 'Player',
+        playerId: storedPlayerIdRef.current,
+        preferredColorId: preferredColorRef.current,
+      });
+      // If server doesn't confirm re-join within 900ms, force a clean WebSocket reset
+      window.setTimeout(() => {
+        const selfNow = roomRef.current?.players.find((p) => p.id === joinedPlayerIdRef.current);
+        if (!selfNow || !selfNow.connected) {
+          wsRef.current?.reconnectNow(true);
+        }
+      }, 900);
+      return;
     }
+
+    ws.reconnectNow(true);
   };
 
   // Wrapper that renders full-screen & landscape-rotated on connected phones
@@ -1006,9 +1141,13 @@ export function PhoneController({
           <div
             role="alert"
             aria-live="assertive"
-            className="absolute inset-0 z-[70] bg-[#0B0D12]/92 backdrop-blur-sm flex items-center justify-center p-4"
+            style={{ touchAction: 'manipulation' }}
+            className="pointer-events-auto absolute inset-0 z-[80] bg-[#0B0D12]/92 backdrop-blur-sm flex items-center justify-center p-4"
           >
-            <div className="max-w-sm w-full rounded-2xl bg-[#1A1E26] border-2 border-[#FF4D2E] p-5 text-center shadow-2xl">
+            <div
+              style={{ touchAction: 'manipulation' }}
+              className="max-w-sm w-full rounded-2xl bg-[#1A1E26] border-2 border-[#FF4D2E] p-5 text-center shadow-2xl"
+            >
               <div className="w-12 h-12 rounded-2xl bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF4D2E] flex items-center justify-center mx-auto animate-pulse">
                 <WifiOff className="w-6 h-6" />
               </div>
@@ -1016,24 +1155,43 @@ export function PhoneController({
                 {t('Controller Disconnected!', '手柄连接已断开！')}
               </h3>
               <p className="mt-1.5 text-xs text-[#D1D5DB] leading-relaxed">
-                {t(
-                  'Signal dropped — your button taps are paused while we reconnect.',
-                  '网络信号中断 — 正在自动重连，重连前按键暂不生效。'
-                )}
+                {manualReconnecting
+                  ? t(
+                      'Establishing fresh link to the game room...',
+                      '正在快速建立新连接并恢复您的座位...'
+                    )
+                  : t(
+                      'Signal dropped — your button taps are paused while we reconnect.',
+                      '网络信号中断 — 正在自动重连，重连前按键暂不生效。'
+                    )}
               </p>
               <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2.5">
                 <button
                   type="button"
+                  style={{ touchAction: 'manipulation' }}
+                  onPointerUp={(e) => {
+                    e.stopPropagation();
+                    handleManualReconnect();
+                  }}
                   onClick={handleManualReconnect}
-                  className="tactile-btn w-full sm:w-auto h-11 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
+                  className="tactile-btn pointer-events-auto w-full sm:w-auto h-11 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] active:scale-95 text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>{t('Reconnect Now', '立即重连')}</span>
+                  <span>
+                    {manualReconnecting
+                      ? t('Reconnecting...', '正在重连...')
+                      : t('Reconnect Now', '立即重连')}
+                  </span>
                 </button>
                 <button
                   type="button"
+                  style={{ touchAction: 'manipulation' }}
+                  onPointerUp={(e) => {
+                    e.stopPropagation();
+                    handleLeave();
+                  }}
                   onClick={handleLeave}
-                  className="h-11 px-4 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-[#D1D5DB] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="pointer-events-auto h-11 px-4 rounded-xl bg-[#242A36] hover:bg-[#2E3646] active:scale-95 text-xs font-bold text-[#D1D5DB] inline-flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>{t('Leave Room', '退出房间')}</span>
@@ -1252,10 +1410,12 @@ export function PhoneController({
                 </span>
                 <button
                   type="button"
+                  style={{ touchAction: 'manipulation' }}
+                  onPointerUp={handleManualReconnect}
                   onClick={handleManualReconnect}
-                  className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-bold shrink-0 cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-bold shrink-0 cursor-pointer active:scale-95"
                 >
-                  {t('Retry', '重试')}
+                  {manualReconnecting ? t('Retrying...', '重试中...') : t('Retry', '重试')}
                 </button>
               </div>
             )}

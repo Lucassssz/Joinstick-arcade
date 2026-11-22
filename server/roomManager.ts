@@ -117,11 +117,11 @@ const BOT_CALLSIGNS = [
 const VALID_DIFFICULTIES = new Set<BotDifficulty>(['chill', 'arcade', 'spicy']);
 const ALLOWED_EMOTES = new Set(['🔥', '😂', '⚡', '👑', '🎉', '🤖', '👏', '😎']);
 const TICK_MS = 33; // ~30Hz authoritative server tick
-const PLAYER_RECONNECT_GRACE_MS = 90_000;
-const HOST_RECONNECT_GRACE_MS = 120_000;
+const PLAYER_RECONNECT_GRACE_MS = 5 * 60_000;
+const HOST_RECONNECT_GRACE_MS = 5 * 60_000;
 const IDLE_ROOM_TTL_MS = 30 * 60_000;
-const WS_HEARTBEAT_INTERVAL_MS = 2_500;
-const WS_HEARTBEAT_TIMEOUT_MS = 4_800;
+const WS_HEARTBEAT_INTERVAL_MS = 5_000;
+const WS_HEARTBEAT_TIMEOUT_MS = 18_000;
 
 export class RoomManager {
   private rooms = new Map<string, RoomRecord>();

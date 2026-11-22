@@ -32,6 +32,9 @@ async function startServer() {
   });
 
   const server = http.createServer(app);
+  server.requestTimeout = 0;
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
 
   // Attach authoritative WebSocket server on /ws alongside HTTP
   const wss = new WebSocketServer({ server, path: '/ws' });

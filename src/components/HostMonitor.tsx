@@ -164,6 +164,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       onClose: () => {
         setWsConnected(false);
       },
+      onStatusChange: (status) => {
+        setWsConnected(status === 'connected');
+      },
       onMessage: (msg: ServerMessage) => {
         switch (msg.type) {
           case 'room:created':
