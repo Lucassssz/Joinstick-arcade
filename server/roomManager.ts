@@ -1897,7 +1897,13 @@ export class RoomManager {
           : ip
       );
 
-      const speedScale = mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
+      const isTurnPacedGame =
+        room.selectedGameId === 'rich-street' ||
+        room.selectedGameId === 'jungle-ladders' ||
+        room.selectedGameId === 'lucky-auction' ||
+        room.selectedGameId === 'color-clash' ||
+        room.selectedGameId === 'liars-deck';
+      const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);
       const scoreMult = mutator.scoreMult * (room.frenzy.active ? 2 : 1);
 

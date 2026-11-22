@@ -75,7 +75,7 @@ const MYSTERY_50 = [8, 17, 26, 39];
 const GOLDEN_100 = [16, 35, 58, 79, 91];
 const GOLDEN_50 = [12, 23, 35, 42];
 
-const TURN_TIMEOUT = 10;
+const TURN_TIMEOUT = 14;
 
 function rollFromPower(power: number): number {
   // Timing influence + playful randomness so higher meter nudges rolls higher
@@ -126,7 +126,7 @@ function resolveTile(
       state.eventText = `${active.name}'s Leaf Shield blocked a Banana slip!`;
       sounds.push({ type: 'confirm', playerId: active.id });
       state.phase = 'event';
-      state.phaseTimer = 0.95;
+      state.phaseTimer = 1.9;
       return;
     }
     const slipTo = Math.max(1, active.tile - 3);
@@ -165,7 +165,7 @@ function resolveTile(
       sounds.push({ type: 'pulse', playerId: active.id });
       haptics.push({ playerId: active.id, pattern: 26, reason: 'shield-save' });
       state.phase = 'event';
-      state.phaseTimer = 1.0;
+      state.phaseTimer = 1.9;
       return;
     }
     active.slideFrom = snake.from;
@@ -207,12 +207,12 @@ function resolveTile(
     sounds.push({ type: 'pickup', playerId: active.id });
     haptics.push({ playerId: active.id, pattern: 30, reason: 'mystery' });
     state.phase = 'event';
-    state.phaseTimer = 1.2;
+    state.phaseTimer = 2.1;
     return;
   }
 
   state.phase = 'event';
-  state.phaseTimer = 0.65;
+  state.phaseTimer = 1.25;
 }
 
 export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
@@ -279,7 +279,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
 
       if (state.phase === 'wait-roll') {
         state.turnTimeLeft = Math.max(0, state.turnTimeLeft - dt);
-        state.powerMeter += state.powerDir * dt * 1.45;
+        state.powerMeter += state.powerDir * dt * 0.88;
         if (state.powerMeter >= 1) {
           state.powerMeter = 1;
           state.powerDir = -1;
@@ -302,7 +302,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
 
         if (justA || state.turnTimeLeft <= 0) {
           state.phase = 'rolling';
-          state.phaseTimer = 0.65;
+          state.phaseTimer = 1.1;
           state.diceRolling = true;
           state.diceValue = rollFromPower(state.powerMeter);
           sounds.push({ type: 'confirm', playerId: active.id });
@@ -336,7 +336,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
           }
         }
       } else if (state.phase === 'moving') {
-        state.hopProgress += dt * 7.2;
+        state.hopProgress += dt * 3.8;
         if (state.hopProgress >= 1) {
           state.hopProgress = 0;
           active.tile = Math.min(state.targetTile, active.tile + 1);
@@ -350,7 +350,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
           active.visualTile = active.tile + state.hopProgress;
         }
       } else if (state.phase === 'sliding') {
-        active.slideProgress = Math.min(1, active.slideProgress + dt * 1.45);
+        active.slideProgress = Math.min(1, active.slideProgress + dt * 0.85);
         if (active.slideProgress >= 1) {
           active.tile = active.slideTo ?? active.tile;
           active.visualTile = active.tile;
@@ -358,7 +358,7 @@ export const jungleLaddersModule: ServerGameModule<JungleLaddersState> = {
           active.slideTo = null;
           active.slideProgress = 0;
           state.phase = 'event';
-          state.phaseTimer = 0.7;
+          state.phaseTimer = 1.35;
         }
       } else if (state.phase === 'event') {
         state.phaseTimer -= dt;

@@ -923,16 +923,16 @@ export function computeBotInput(
     case 'rich-street': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.bankrupt || snapshot.activePlayerId !== botId) break;
-      // Realistic board-game thinking delay via turnTimeLeft
-      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 8.8 && mem.actionCooldown <= 0) {
+      // Deliberate board-game thinking delay via turnTimeLeft (ROLL_TIMEOUT = 14, DECISION_TIMEOUT = 12)
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 11.6 && mem.actionCooldown <= 0) {
         if (me.luckyCharge >= 100 && !me.rentShield && Math.random() < tuning.abilityChance) {
           b = true;
-          mem.actionCooldown = 0.65;
+          mem.actionCooldown = 1.05;
         } else {
           a = true;
-          mem.actionCooldown = 0.75;
+          mem.actionCooldown = 1.15;
         }
-      } else if (snapshot.phase === 'decision' && snapshot.turnTimeLeft < 6.8 && mem.actionCooldown <= 0) {
+      } else if (snapshot.phase === 'decision' && snapshot.turnTimeLeft < 9.8 && mem.actionCooldown <= 0) {
         const keepBuffer = difficulty === 'chill' ? 360 : difficulty === 'arcade' ? 220 : 120;
         const canAffordComfortably = me.cash - snapshot.decisionCost >= keepBuffer;
         if (canAffordComfortably || (snapshot.decisionAction === 'buy' && me.propertiesOwned < 2 && me.cash >= snapshot.decisionCost)) {
@@ -940,7 +940,7 @@ export function computeBotInput(
         } else {
           b = true;
         }
-        mem.actionCooldown = 0.75;
+        mem.actionCooldown = 1.15;
       }
       break;
     }
@@ -948,10 +948,11 @@ export function computeBotInput(
     case 'jungle-ladders': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || snapshot.activePlayerId !== botId) break;
-      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 8.9 && mem.actionCooldown <= 0) {
+      // Deliberate board-game thinking delay via turnTimeLeft (TURN_TIMEOUT = 14)
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 11.6 && mem.actionCooldown <= 0) {
         if (me.trickReady && !me.boostQueued && Math.random() < tuning.abilityChance) {
           b = true;
-          mem.actionCooldown = 0.6;
+          mem.actionCooldown = 1.0;
         } else {
           const goodTiming =
             difficulty === 'spicy'
@@ -959,9 +960,9 @@ export function computeBotInput(
               : difficulty === 'arcade'
                 ? snapshot.powerMeter > 0.5
                 : true;
-          if (goodTiming || snapshot.turnTimeLeft < 7.2) {
+          if (goodTiming || snapshot.turnTimeLeft < 8.8) {
             a = true;
-            mem.actionCooldown = 0.75;
+            mem.actionCooldown = 1.15;
           }
         }
       }
@@ -1265,7 +1266,7 @@ export function computeBotInput(
     case 'lucky-auction': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.passed || snapshot.phase !== 'bidding') break;
-      if (snapshot.highestBidderId === botId || mem.actionCooldown > 0) break;
+      if (snapshot.highestBidderId === botId || mem.actionCooldown > 0 || snapshot.timer > 13.0) break;
       const soundsLikeDuck =
         snapshot.chestClue.toLowerCase().includes('squeak') ||
         snapshot.chestClue.toLowerCase().includes('hollow');
@@ -1279,12 +1280,12 @@ export function computeBotInput(
             ? 295
             : 245) * (mult > 1 ? 1.45 : 1);
       const nextBid = snapshot.highestBid + 50;
-      if (nextBid <= maxWilling && me.cash >= nextBid && Math.random() < 0.12) {
+      if (nextBid <= maxWilling && me.cash >= nextBid && Math.random() < 0.08) {
         a = true;
-        mem.actionCooldown = 1.2;
-      } else if ((nextBid > maxWilling || me.cash < nextBid) && snapshot.timer < 7.5 && Math.random() < 0.25) {
+        mem.actionCooldown = 2.3;
+      } else if ((nextBid > maxWilling || me.cash < nextBid) && snapshot.timer < 9.5 && Math.random() < 0.18) {
         b = true;
-        mem.actionCooldown = 0.85;
+        mem.actionCooldown = 1.5;
       }
       break;
     }

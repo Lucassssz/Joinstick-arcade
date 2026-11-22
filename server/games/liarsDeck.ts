@@ -13,8 +13,8 @@ import type {
 import type { HapticTrigger, PlayerHudUpdate, ServerGameModule, ServerPlayerInputState } from './engine.ts';
 
 const TURN_LIMIT_SEC = 15.0;
-const CHALLENGE_LIMIT_SEC = 6.5;
-const REVEAL_DURATION_SEC = 2.8;
+const CHALLENGE_LIMIT_SEC = 10.0;
+const REVEAL_DURATION_SEC = 4.2;
 
 const TARGET_RANKS: ('A' | 'K' | 'Q' | 'J' | '10')[] = ['A', 'K', 'Q', 'J', '10'];
 const SUITS: LiarSuit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
@@ -162,7 +162,7 @@ function advanceTurnToSelecting(state: LiarsDeckState, nextIdx?: number) {
   state.trustedPlayerIds.clear();
   state.revealedCards = [];
   state.revealVerdict = null;
-  state.botThinkTimer = 0.95 + Math.random() * 0.85;
+  state.botThinkTimer = 1.85 + Math.random() * 0.95;
 }
 
 function startChallengeWindow(state: LiarsDeckState, claimant: LiarPlayerInternal, played: LiarCard[]) {
@@ -183,14 +183,14 @@ function startChallengeWindow(state: LiarsDeckState, claimant: LiarPlayerInterna
     if (played.length >= 3) bluffProb = 0.48;
     if (claimant.hand.length === 0) bluffProb = Math.max(bluffProb, 0.58);
     p.botWantsChallenge = Math.random() < bluffProb;
-    p.botChallengeTimer = 1.0 + Math.random() * 1.6;
+    p.botChallengeTimer = 2.3 + Math.random() * 1.9;
   }
 
   setBanner(
     state,
     `${claimant.name} PLAYED ${played.length}× ${state.targetRank}!`,
     claimant.colorHex,
-    2.4
+    2.8
   );
 }
 
@@ -551,10 +551,10 @@ export const liarsDeckModule: ServerGameModule<LiarsDeckState> = {
       revealedCards: [],
       revealVerdict: null,
       pendingNextPlayerIndex: 0,
-      botThinkTimer: 1.55,
+      botThinkTimer: 2.4,
       banner: `TARGET: ${firstRank}`,
       bannerColor: '#FFB800',
-      bannerTimer: 2.2,
+      bannerTimer: 2.6,
       flyingCards: dealAnims,
       shockwaves: [],
       popups: [],
@@ -694,7 +694,7 @@ export const liarsDeckModule: ServerGameModule<LiarsDeckState> = {
     const haptics: HapticTrigger[] = state.pendingHaptics.splice(0, state.pendingHaptics.length);
 
     for (let i = state.flyingCards.length - 1; i >= 0; i--) {
-      state.flyingCards[i].progress += dt * (state.flyingCards[i].flipping ? 1.85 : 2.65);
+      state.flyingCards[i].progress += dt * (state.flyingCards[i].flipping ? 1.35 : 1.75);
       if (state.flyingCards[i].progress >= 1.15 && !state.flyingCards[i].flipping) {
         state.flyingCards.splice(i, 1);
       } else if (state.flyingCards[i].progress >= 2.25) {
@@ -703,8 +703,8 @@ export const liarsDeckModule: ServerGameModule<LiarsDeckState> = {
     }
     for (let i = state.shockwaves.length - 1; i >= 0; i--) {
       const sw = state.shockwaves[i];
-      sw.radius += dt * 360;
-      sw.alpha -= dt * 1.4;
+      sw.radius += dt * 310;
+      sw.alpha -= dt * 1.15;
       if (sw.alpha <= 0 || sw.radius >= sw.maxRadius) state.shockwaves.splice(i, 1);
     }
     for (let i = state.popups.length - 1; i >= 0; i--) {

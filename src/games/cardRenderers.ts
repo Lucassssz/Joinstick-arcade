@@ -886,7 +886,7 @@ function drawFlyingCardsAndFX(
       }
       tr.lastSeenMs = nowMs;
     }
-    const speed = fc.flipping ? 1.85 : 2.65;
+    const speed = fc.flipping ? 1.35 : 1.75;
     tr.localProgress += dt * speed;
   }
 

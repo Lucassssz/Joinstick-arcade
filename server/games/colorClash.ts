@@ -190,7 +190,7 @@ function advanceTurn(state: ColorClashState, steps = 1) {
   state.turnTimeLeft = TURN_LIMIT_SEC;
   state.turnTotal = TURN_LIMIT_SEC;
   state.turnCount += 1;
-  state.botThinkTimer = 0.85 + Math.random() * 0.75;
+  state.botThinkTimer = 1.85 + Math.random() * 0.95;
 }
 
 function finishMatchIfEmpty(state: ColorClashState, p: ClashPlayerInternal): boolean {
@@ -357,7 +357,7 @@ function executePlayCard(
   if (isAction) player.actionCardsPlayed += 1;
   player.score += isAction ? 75 : 40;
   player.lastAction = card.value;
-  player.lastActionTimer = 2.0;
+  player.lastActionTimer = 2.6;
 
   state.topCard = card;
   state.discardPile.push(card);
@@ -445,7 +445,7 @@ function executeDrawOrPenalty(state: ColorClashState, player: ClashPlayerInterna
   }
 
   player.lastAction = `DREW +${drawCount}!`;
-  player.lastActionTimer = 2.2;
+  player.lastActionTimer = 2.6;
   state.popups.push({
     x: seat.x,
     y: seat.y - 46,
@@ -581,10 +581,10 @@ export const colorClashModule: ServerGameModule<ColorClashState> = {
       turnTimeLeft: TURN_LIMIT_SEC,
       turnTotal: TURN_LIMIT_SEC,
       turnCount: 0,
-      botThinkTimer: 1.55,
+      botThinkTimer: 2.4,
       banner: `${internalPlayers[0]?.name ?? 'P1'}'s Turn!`,
       bannerColor: COLOR_HEX[activeColor],
-      bannerTimer: 2.0,
+      bannerTimer: 2.4,
       flyingCards: dealAnims,
       shockwaves: [],
       popups: [],
@@ -687,15 +687,15 @@ export const colorClashModule: ServerGameModule<ColorClashState> = {
 
     // Animate flying cards with smooth settle overlap
     for (let i = state.flyingCards.length - 1; i >= 0; i--) {
-      state.flyingCards[i].progress += dt * 2.65;
+      state.flyingCards[i].progress += dt * 1.75;
       if (state.flyingCards[i].progress >= 1.15) {
         state.flyingCards.splice(i, 1);
       }
     }
     for (let i = state.shockwaves.length - 1; i >= 0; i--) {
       const sw = state.shockwaves[i];
-      sw.radius += dt * 360;
-      sw.alpha -= dt * 1.45;
+      sw.radius += dt * 310;
+      sw.alpha -= dt * 1.15;
       if (sw.alpha <= 0 || sw.radius >= sw.maxRadius) state.shockwaves.splice(i, 1);
     }
     for (let i = state.popups.length - 1; i >= 0; i--) {

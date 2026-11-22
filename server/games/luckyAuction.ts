@@ -64,7 +64,7 @@ function startAuctionRound(state: LuckyAuctionState): void {
   state.multiplier = state.round === state.totalRounds || Math.random() < 0.32 ? 2 : 1;
   state.firstPassClaimed = false;
   state.phase = 'bidding';
-  state.timer = 10.5;
+  state.timer = 14.5;
   state.highestBid = 0;
   state.highestBidderId = null;
   state.banner =
@@ -103,7 +103,7 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
       round: 1,
       totalRounds,
       phase: 'bidding',
-      timer: 10.5,
+      timer: 14.5,
       currentChest: pickChest(),
       multiplier: 1,
       firstPassClaimed: false,
@@ -125,7 +125,7 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
       state.timer = Math.max(0, state.timer - dt);
 
       if (state.phase === 'bidding') {
-        if (state.timer < 9.3) state.banner = null;
+        if (state.timer < 12.6) state.banner = null;
 
         for (const p of state.players) {
           p.adjustCd = Math.max(0, p.adjustCd - dt);
@@ -151,7 +151,7 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
             if (p.cash >= bidAmt && state.highestBidderId !== p.id) {
               state.highestBid = bidAmt;
               state.highestBidderId = p.id;
-              if (state.timer < 3.6) state.timer = 3.6;
+              if (state.timer < 4.8) state.timer = 4.8;
               state.banner = `${p.name} BID $${bidAmt}!`;
               sounds.push({ type: 'confirm', playerId: p.id });
               haptics.push({ playerId: p.id, pattern: 22, reason: 'bid' });
@@ -179,7 +179,7 @@ export const luckyAuctionModule: ServerGameModule<LuckyAuctionState> = {
 
         if (state.timer <= 0 || allPassed || (state.highestBidderId && !canStillBeat)) {
           state.phase = 'reveal';
-          state.timer = 3.2;
+          state.timer = 4.5;
           const winner = state.players.find((p) => p.id === state.highestBidderId);
           const payout = state.currentChest.value * state.multiplier;
           if (winner) {
