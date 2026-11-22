@@ -40,6 +40,16 @@ import { luckyAuctionModule } from './luckyAuction.ts';
 import { pinballClashModule } from './pinballClash.ts';
 import { colorClashModule } from './colorClash.ts';
 import { liarsDeckModule } from './liarsDeck.ts';
+import { volleySmashModule } from './volleySmash.ts';
+import { lavaHopperModule } from './lavaHopper.ts';
+import { ludoRoyaleModule } from './ludoRoyale.ts';
+import { starPartyBoardModule } from './starPartyBoard.ts';
+import { reversiClashModule } from './reversiClash.ts';
+import { fourInARowModule } from './fourInARow.ts';
+import { navalSalvoModule } from './navalSalvo.ts';
+import { neonCheckersModule } from './neonCheckers.ts';
+import { carromArenaModule } from './carromArena.ts';
+import { dungeonCrawlBoardModule } from './dungeonCrawlBoard.ts';
 
 export interface ServerPlayerInputState {
   id: string;
@@ -126,4 +136,14 @@ export const SERVER_GAMES: Record<GameId, ServerGameModule<any>> = {
   'pinball-clash': pinballClashModule,
   'color-clash': colorClashModule,
   'liars-deck': liarsDeckModule,
+  'volley-smash': volleySmashModule,
+  'lava-hopper': lavaHopperModule,
+  'ludo-royale': ludoRoyaleModule,
+  'star-party-board': starPartyBoardModule,
+  'reversi-clash': reversiClashModule,
+  'four-in-a-row': fourInARowModule,
+  'naval-salvo': navalSalvoModule,
+  'neon-checkers': neonCheckersModule,
+  'carrom-arena': carromArenaModule,
+  'dungeon-crawl-board': dungeonCrawlBoardModule,
 };

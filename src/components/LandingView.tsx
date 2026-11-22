@@ -4,6 +4,7 @@ import { Gamepad2, Info, Monitor, Play, QrCode, Smartphone, Users, ArrowRight, X
 import {
   filterGamesByPlayerMode,
   GAME_CATALOG,
+  getGameGenre,
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
@@ -14,6 +15,7 @@ import {
   LanguageToggle,
   useLanguage,
 } from '../lib/i18n';
+import { preloadGameRenderer } from '../games/rendererRegistry';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
@@ -35,6 +37,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
 
   useEffect(() => {
     if (!previewGameId) return;
+    preloadGameRenderer(previewGameId);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setPreviewGameId(null);
@@ -252,6 +255,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
               {filteredGames.map((game) => (
                 <article
                   key={game.id}
+                  onMouseEnter={() => preloadGameRenderer(game.id)}
                   className="group rounded-2xl bg-[#1A1E26] border border-[#282E3B] overflow-hidden flex flex-col justify-between transition-colors hover:border-[#00C2FF]/55"
                 >
                   <div
@@ -275,6 +279,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                         <img
                           src={game.coverImage}
                           alt={t(`${game.name} arcade game preview`, `${game.name} 游戏预览`)}
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                           onError={() =>
                             setFailedImages((prev) => ({ ...prev, [game.id]: true }))
@@ -287,6 +293,17 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                           <span className="font-display font-bold text-white">{game.name}</span>
                         </div>
                       )}
+                      <span
+                        className={`absolute top-3 left-3 px-2 py-0.5 rounded-md font-mono text-[10px] font-extrabold uppercase tracking-wider shadow ${
+                          getGameGenre(game.id) === 'board'
+                            ? 'bg-[#A855F7]/90 text-white'
+                            : getGameGenre(game.id) === 'card'
+                            ? 'bg-[#10D98B]/90 text-[#071710]'
+                            : 'bg-[#101217]/85 text-[#00C2FF] border border-[#00C2FF]/35'
+                        }`}
+                      >
+                        {getLocalizedFilterLabel(getGameGenre(game.id), lang, true)}
+                      </span>
                       <div className="absolute inset-0 bg-gradient-to-t from-[#1A1E26] via-transparent to-transparent opacity-80" />
                     </div>
 

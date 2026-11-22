@@ -324,6 +324,66 @@ export const GAME_FRENZY_PERKS: Record<GameId, FrenzyGamePerk> = {
     perk2En: 'HIGH-STAKES REVEAL',
     perk2Zh: '极限开牌时刻',
   },
+  'volley-smash': {
+    perk1En: '2× SPIKE POINTS',
+    perk1Zh: '扣杀双倍得分',
+    perk2En: '1.18× TURBO VOLLEY',
+    perk2Zh: '1.18× 闪电排球',
+  },
+  'lava-hopper': {
+    perk1En: '2× GEM & KO PTS',
+    perk1Zh: '宝石与震飞双倍分',
+    perk2En: '1.18× MAGMA ERUPTION',
+    perk2Zh: '1.18× 火山狂暴喷发',
+  },
+  'ludo-royale': {
+    perk1En: '2× HOME & CAPTURE PTS',
+    perk1Zh: '归巢与吃子双倍分',
+    perk2En: 'FINAL SPRINT DICE',
+    perk2Zh: '终局冲刺回合',
+  },
+  'star-party-board': {
+    perk1En: '2× STAR & COIN BONUS',
+    perk1Zh: '星星与金币双倍分',
+    perk2En: 'GOLDEN SHRINE RUSH',
+    perk2Zh: '黄金星坛狂潮',
+  },
+  'reversi-clash': {
+    perk1En: '2× DISC FLIP SCORE',
+    perk1Zh: '翻转棋子双倍分',
+    perk2En: 'ENDGAME BOARD CLASH',
+    perk2Zh: '终盘翻转决战',
+  },
+  'four-in-a-row': {
+    perk1En: '2× CONNECT BONUS',
+    perk1Zh: '四子连珠双倍分',
+    perk2En: 'HIGH-STAKES DROP',
+    perk2Zh: '赛点连珠时刻',
+  },
+  'naval-salvo': {
+    perk1En: '2× FLEET SINK BOUNTY',
+    perk1Zh: '击沉舰队双倍赏金',
+    perk2En: 'FINAL SALVO STRIKE',
+    perk2Zh: '终极齐射轰炸',
+  },
+  'neon-checkers': {
+    perk1En: '2× JUMP & KING PTS',
+    perk1Zh: '跳吃与封王双倍分',
+    perk2En: 'ROYAL KING SHOWDOWN',
+    perk2Zh: '王者跳棋决战',
+  },
+  'carrom-arena': {
+    perk1En: '2× POCKET & QUEEN PTS',
+    perk1Zh: '进袋与红后双倍分',
+    perk2En: 'GOLDEN STRIKER HEAT',
+    perk2Zh: '黄金母球时刻',
+  },
+  'dungeon-crawl-board': {
+    perk1En: '2× BOSS & LOOT GOLD',
+    perk1Zh: '恶龙与宝箱双倍金',
+    perk2En: 'DRAGON LAIR FINALE',
+    perk2Zh: '巨龙巢穴决战',
+  },
 };
 
 export const TOURNAMENT_TOTAL_GAMES = 5;

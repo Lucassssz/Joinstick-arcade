@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import {
   filterGamesByPlayerMode,
+  getGameGenre,
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
@@ -67,6 +68,7 @@ import {
   useLanguage,
 } from '../lib/i18n';
 import { createRenderFxState, renderGameSnapshot } from '../games/renderers';
+import { preloadGameRenderer } from '../games/rendererRegistry';
 import { ChaosWheelModal } from './ChaosWheelModal';
 import { TestControllerDrawer } from './TestControllerDrawer';
 
@@ -680,8 +682,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     wsRef.current?.send({ type: 'room:set-mutator', mutatorId });
   };
 
+  useEffect(() => {
+    if (room?.selectedGameId) {
+      preloadGameRenderer(room.selectedGameId);
+    }
+  }, [room?.selectedGameId]);
+
   const handleSelectGame = (gameId: GameId, settingValue?: number) => {
     arcadeAudio.unlock();
+    preloadGameRenderer(gameId);
     setErrorMsg(null);
     wsRef.current?.send({ type: 'game:select', gameId, settingValue });
   };
@@ -1747,6 +1756,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           <img
                             src={game.coverImage}
                             alt={game.name}
+                            loading="lazy"
+                            decoding="async"
                             referrerPolicy="no-referrer"
                             onError={() =>
                               setFailedImages((prev) => ({ ...prev, [game.id]: true }))
@@ -1758,6 +1769,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                             <Gamepad2 className="w-6 h-6" style={{ color: game.accentHex }} />
                           </div>
                         )}
+                        <span
+                          className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded font-mono text-[9px] font-extrabold uppercase tracking-wider shadow ${
+                            getGameGenre(game.id) === 'board'
+                              ? 'bg-[#A855F7]/90 text-white'
+                              : getGameGenre(game.id) === 'card'
+                              ? 'bg-[#10D98B]/90 text-[#071710]'
+                              : 'bg-[#101217]/85 text-[#00C2FF] border border-[#00C2FF]/35'
+                          }`}
+                        >
+                          {getLocalizedFilterLabel(getGameGenre(game.id), lang, true)}
+                        </span>
                         {isRemoteFocused && (
                           <span className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-md bg-[#FFB800] text-[#14120B] font-mono text-[10px] font-black shadow">
                             OK

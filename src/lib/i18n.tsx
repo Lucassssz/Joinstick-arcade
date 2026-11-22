@@ -119,23 +119,35 @@ export function getLocalizedFilterLabel(
     switch (id) {
       case 'all':
         return short ? 'All' : 'All Games';
+      case 'arcade':
+        return short ? 'Arcade' : 'Arcade Games';
+      case 'board':
+        return short ? 'Board' : 'Board Games';
+      case 'card':
+        return short ? 'Cards' : 'Card Games';
       case 'solo':
-        return short ? 'Solo · 1P' : 'Solo (1P)';
+        return short ? '1P' : 'Solo (1P)';
       case 'double':
-        return short ? '2 Players' : 'Double (2P)';
+        return short ? '2P' : 'Double (2P)';
       case 'multiplayer':
-        return short ? '3+ Players' : 'Multiplayer (3+)';
+        return short ? '3+P' : 'Multiplayer (3+)';
     }
   }
   switch (id) {
     case 'all':
       return short ? '全部' : '全部游戏';
+    case 'arcade':
+      return short ? '街机' : '街机竞技';
+    case 'board':
+      return short ? '桌游' : '棋盘桌游';
+    case 'card':
+      return short ? '卡牌' : '派对卡牌';
     case 'solo':
-      return short ? '单人 · 1P' : '单人 (1P)';
+      return short ? '1P' : '单人 (1P)';
     case 'double':
-      return short ? '双人 · 2P' : '双人对战 (2P)';
+      return short ? '2P' : '双人对战 (2P)';
     case 'multiplayer':
-      return short ? '多人 3+' : '多人派对 (3+)';
+      return short ? '3+P' : '多人派对 (3+)';
   }
 }
 
@@ -843,6 +855,216 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     controlTip: '守住表情！你可以一口气扣出最多 3 张牌冒充桌面目标牌。',
     settingLabel: '初始手牌',
     settingOptions: { 4: '4 张（快局）', 5: '5 张（标准）', 6: '6 张（高赌注）' },
+  },
+  'volley-smash': {
+    name: '霓虹排球',
+    category: '沙滩排球',
+    tagline: '垫球传球配合，跃起轰出烈焰扣杀！',
+    description: '红蓝两队沙滩排球激战！紧盯沙地落点光圈，高抛垫球助攻队友，跃至网前轰出势不可挡的烈焰暴扣！',
+    playerModeLabel: '2人 · 3–8人团队',
+    rules: [
+      '红队镇守左侧球场，蓝队镇守右侧球场。',
+      '移动到发光落点光圈下方，在排球落地前将球救起！',
+      '按「垫球 (A)」将排球高高托过球网或传给队友。',
+      '贴近排球按「暴扣 (B)」腾空跃起，朝对方半场轰出烈焰重扣！',
+    ],
+    joystickLabel: '移动与瞄准',
+    actionALabel: '垫球',
+    actionASublabel: '高吊过网',
+    actionBLabel: '暴扣',
+    actionBSublabel: '腾空重扣',
+    controlTip: '盯紧沙地上的脉冲光圈，提前站位即可稳稳接住来球！',
+    settingLabel: '获胜分数',
+    settingOptions: { 5: '先得 5 分', 7: '先得 7 分', 9: '先得 9 分' },
+  },
+  'lava-hopper': {
+    name: '熔岩跳台',
+    category: '火山求生',
+    tagline: '在不断下沉的火山石柱间飞跃，震波把对手震入岩浆！',
+    description: '玄武岩石柱随时会闪烁警报并沉入滚烫岩浆！飞跃岩浆裂隙、抢夺火焰宝石，落地释放震波把对手震落石台！',
+    playerModeLabel: '单人 · 2人 · 3–8人',
+    rules: [
+      '留在稳固的石柱上——闪烁红光的石柱即将沉入岩浆！',
+      '推摇杆瞄准并按「飞跃 (A)」跨过岩浆跳上安全石柱。',
+      '拾取石柱上的火焰宝石可获 +60 额外积分。',
+      '按「震地 (B)」释放强力冲击波，把身旁的对手震向岩浆边缘！',
+    ],
+    joystickLabel: '移动与起跳方向',
+    actionALabel: '飞跃',
+    actionASublabel: '跨跳岩浆',
+    actionBLabel: '震地',
+    actionBSublabel: '冲击推人',
+    controlTip: '脚下石柱一旦闪红立刻按飞跃跳走，抢吃金色宝石拿高分！',
+    settingLabel: '比赛时长',
+    settingOptions: { 45: '45 秒', 60: '60 秒', 90: '90 秒' },
+  },
+  'ludo-royale': {
+    name: '皇家飞行棋',
+    category: '飞行棋盘',
+    tagline: '率领三枚棋子环游星光赛道，踩回对手冲向终点！',
+    description: '经典飞行棋派对加强版！掷骰率领 3 枚棋子沿 28 格星光环道冲向本方终点，踩中普通格上的对手将其遣返基地，停在金星安全格稳步推进！',
+    playerModeLabel: '2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，按「掷骰 (A)」投出骰子并推进当前选中的棋子。',
+      '掷骰前按「换子/+2 (B)」可切换要移动的棋子（或激活 +2 星光加速！）。',
+      '精准落在普通格上的对手棋子上，可将其踩回起点并赢取 +80 分！',
+      '金星格为安全区——率先将 3 枚棋子送达终点（或总分最高）获胜！',
+    ],
+    joystickLabel: '选择棋子',
+    actionALabel: '掷骰',
+    actionASublabel: '掷骰前进',
+    actionBLabel: '换子/+2',
+    actionBSublabel: '切换棋子 · 加速',
+    controlTip: '掷骰前按 B 可在你的 3 枚棋子间切换，或开启 +2 步冲刺！',
+    settingLabel: '对局轮数',
+    settingOptions: { 6: '6 回合', 8: '8 回合', 12: '12 回合' },
+  },
+  'star-party-board': {
+    name: '星光派对岛',
+    category: '海岛星盘',
+    tagline: '环游热带海岛收集金币，抢先前往星坛兑换金星！',
+    description: '马里奥派对风海岛桌游！跳跃金币格、幸运宝箱与决斗格积累金币；路过闪耀的黄金星坛时，花费 20 金币即可夺取金星！',
+    playerModeLabel: '单人 · 2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，按「敲击骰子 (A)」沿 20 格海岛环道前进。',
+      '携带 20+ 金币路过或停在黄金星坛时，将自动购买一颗金星！',
+      '每颗金星被买走后，黄金星坛会随机传送到海岛的新位置。',
+      '拥有 10+ 金币时，掷骰前按「双倍糖果 (B)」可在本回合投出双倍步数！',
+    ],
+    joystickLabel: '海岛视野',
+    actionALabel: '敲击骰子',
+    actionASublabel: '掷骰前进',
+    actionBLabel: '双倍糖果',
+    actionBSublabel: '双倍步数 (10币)',
+    controlTip: '存够 20 金币直奔黄金星坛——离星坛很近时按 B 开启双倍步数抢星！',
+    settingLabel: '回合数',
+    settingOptions: { 6: '6 回合', 8: '8 回合', 10: '10 回合' },
+  },
+  'reversi-clash': {
+    name: '翻转黑白棋',
+    category: '策略翻转棋',
+    tagline: '夹击对手棋子，一招翻转整排能量圆盘！',
+    description: '支持 2 至 8 人的 8×8 战术翻转棋！落子夹住横、竖、斜线上的对手棋子，瞬间将整条连线翻转为你的颜色。',
+    playerModeLabel: '2人 · 3–8人桌游',
+    rules: [
+      '用摇杆在 8×8 棋盘上移动你的发光准星。',
+      '高亮格子会显示可翻转的棋子数——按「落子 (A)」放下棋子并翻转！',
+      '按「新星翻转 (B)」可在准星周围释放 3×3 十字强制翻转炸弹（每局 1 次）！',
+      '占领四个角落格可获额外高额加分——最终棋子与积分最高者获胜！',
+    ],
+    joystickLabel: '移动准星',
+    actionALabel: '落子',
+    actionASublabel: '落子翻转',
+    actionBLabel: '新星翻转',
+    actionBSublabel: '3×3 十字翻转',
+    controlTip: '棋盘四角永远不会被夹击翻转——一旦角落亮起请立刻抢占！',
+    settingLabel: '总手数',
+    settingOptions: { 16: '16 手（快局）', 24: '24 手（标准）', 32: '32 手（持久）' },
+  },
+  'four-in-a-row': {
+    name: '四子连珠',
+    category: '重力连珠棋',
+    tagline: '左右滑动悬浮投币器，达成横竖斜四子连线！',
+    description: '巨型 7×6 垂直霓虹重力棋架！将彩色圆盘投入立柱，率先连成横、竖或斜向 4 子即可斩获高分并触发消除连击！',
+    playerModeLabel: '2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，左右推摇杆将悬浮投币器对准第 1–7 列。',
+      '按「投子 (A)」释放圆盘，圆盘会落入该列最底部的空位。',
+      '在横、竖或斜向连成 4 枚同色棋子即可斩获 +150 连珠高分！',
+      '按「重锤 (B)」投下粉碎铁砧，直接砸碎该列最上方的一枚对手棋子！',
+    ],
+    joystickLabel: '左右选列',
+    actionALabel: '投子',
+    actionASublabel: '落下棋子',
+    actionBLabel: '重锤',
+    actionBSublabel: '砸碎对手棋子',
+    controlTip: '留意对手的 3 连线，果断投子或用重锤砸碎他们的决胜位！',
+    settingLabel: '获胜连珠数',
+    settingOptions: { 2: '先达成 2 次连珠', 3: '先达成 3 次连珠', 5: '先达成 5 次连珠' },
+  },
+  'naval-salvo': {
+    name: '深海战舰',
+    category: '雷达海战棋',
+    tagline: '锁定神秘海域坐标，声呐探测击沉敌方黄金旗舰！',
+    description: '8×6 战术雷达海战棋盘！移动准星锁定未知海域，发射鱼雷齐射揭开隐藏战列舰与黄金旗舰，小心避开深海鱼雷水雷！',
+    playerModeLabel: '单人 · 2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，用摇杆在 8×6 海洋雷达网格上移动瞄准准星。',
+      '对准任何未揭开的海域按「开火 (A)」发射鱼雷轰击！',
+      '命中战舰得 +90 分（命中黄金旗舰 +180 分）——误中深海水雷扣 35 分。',
+      '按「声呐 (B)」扫描 3×3 海域，直接显示周围隐藏的舰船格数量！',
+    ],
+    joystickLabel: '瞄准雷达网格',
+    actionALabel: '开火',
+    actionASublabel: '鱼雷轰击',
+    actionBLabel: '声呐',
+    actionBSublabel: '扫描 3×3 海域',
+    controlTip: '一旦命中战舰，立刻轰击它上下左右的相邻格——战舰都是连续排列的！',
+    settingLabel: '齐射轮数',
+    settingOptions: { 6: '6 回合', 8: '8 回合', 10: '10 回合' },
+  },
+  'neon-checkers': {
+    name: '霓虹跳王棋',
+    category: '跳棋桌游',
+    tagline: '斜向飞跳过对手棋子，冲抵底线加冕无敌王棋！',
+    description: '8×8 霓虹西洋跳棋！选择高亮跳跃路线越过并吃掉对手棋子，抵达对岸底线即可加冕黄金王棋，纵横四方无限跳吃！',
+    playerModeLabel: '2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，左右推摇杆在棋盘高亮显示的可行路线间切换。',
+      '金色箭头代表可跳吃对手棋子——按「走子/跳吃 (A)」立即执行该路线！',
+      '冲到对面底线即可加冕为「王棋 KING」，可向四个斜角方向自由进退跳吃！',
+      '按「即时封王 (B)」可直接将当前棋子晋升为黄金王棋（每局 1 次）！',
+    ],
+    joystickLabel: '切换走子路线',
+    actionALabel: '走子/跳吃',
+    actionASublabel: '执行高亮路线',
+    actionBLabel: '即时封王',
+    actionBSublabel: '晋升黄金王棋',
+    controlTip: '左右推摇杆预览棋盘上的发光箭头，优先选择金色跳吃路线拿高分！',
+    settingLabel: '对局手数',
+    settingOptions: { 16: '16 手（快局）', 24: '24 手（经典）', 32: '32 手（持久）' },
+  },
+  'carrom-arena': {
+    name: '卡罗姆弹盘',
+    category: '桌面弹指棋',
+    tagline: '激光瞄准母球角度，一指弹射将红后打入四角球袋！',
+    description: '经典实木卡罗姆桌面弹球棋！沿底线滑动母球并调节激光瞄准线，将银币、金币与高分红后撞入四个角落球袋！',
+    playerModeLabel: '单人 · 2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，左右推摇杆调整母球的激光瞄准角度。',
+      '上下推摇杆可沿底线平移母球的发球位置。',
+      '按「弹射 (A)」击出母球——打进银币 (+50)、金币 (+90) 或中心红后 (+180)！',
+      '按「旋风重击 (B)」轰出超高速旋转母球，撞散中圈球堆！',
+    ],
+    joystickLabel: '平移与瞄准激光',
+    actionALabel: '弹射',
+    actionASublabel: '发射母球',
+    actionBLabel: '旋风重击',
+    actionBSublabel: '超强冲力球',
+    controlTip: '瞄准中央红后周围的球堆大力弹射，一杆将多枚棋子撞入四角球袋！',
+    settingLabel: '回合数',
+    settingOptions: { 5: '5 回合', 6: '6 回合', 7: '7 回合', 10: '10 回合' },
+  },
+  'dungeon-crawl-board': {
+    name: '地城勇者棋',
+    category: '冒险棋盘',
+    tagline: '掷骰探索螺旋地城，击败怪物挑战中央巨龙领主！',
+    description: '桌面 RPG 冒险棋盘！掷骰穿梭怪物房间、黄金宝箱与营火，积攒攻击力与战利品，投出战斗骰子讨伐中央巨龙 Boss！',
+    playerModeLabel: '单人 · 2人 · 3–8人桌游',
+    rules: [
+      '轮到你时，按「掷骰/出击 (A)」投出移动骰子沿螺旋地城前进。',
+      '踏上怪物或巨龙 Boss 格时，按 A 投出战斗骰（骰点 + 攻击加成 vs 怪物战力）！',
+      '宝箱格奖励金币与武器升级（+1 攻击）；营火格恢复全部生命红心。',
+      '按「勇者药水 (B)」立即恢复 +2 红心，并在本回合获得 +3 战斗爆发力！',
+    ],
+    joystickLabel: '地城地图',
+    actionALabel: '掷骰/出击',
+    actionASublabel: '前进与战斗',
+    actionBLabel: '勇者药水',
+    actionBSublabel: '回血 +3 战力',
+    controlTip: '把勇者药水 (B) 留到挑战高级怪物或中央巨龙领主时使用，一击赢取巨额赏金！',
+    settingLabel: '冒险轮数',
+    settingOptions: { 6: '6 回合', 8: '8 回合', 10: '10 回合' },
   },
 };
 

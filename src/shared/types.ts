@@ -32,14 +32,25 @@ export type GameId =
   | 'lucky-auction'
   | 'pinball-clash'
   | 'color-clash'
-  | 'liars-deck';
+  | 'liars-deck'
+  | 'volley-smash'
+  | 'lava-hopper'
+  | 'ludo-royale'
+  | 'star-party-board'
+  | 'reversi-clash'
+  | 'four-in-a-row'
+  | 'naval-salvo'
+  | 'neon-checkers'
+  | 'carrom-arena'
+  | 'dungeon-crawl-board';
 
 export type RoomStatus = 'SETUP' | 'LOBBY' | 'BRIEFING' | 'COUNTDOWN' | 'PLAYING' | 'PAUSED' | 'RESULTS';
 
 export type BotDifficulty = 'chill' | 'arcade' | 'spicy';
 
+export type GameGenre = 'arcade' | 'board' | 'card';
 export type GameSuitability = 'solo' | 'double' | 'multiplayer';
-export type PlayerFilterMode = 'all' | GameSuitability;
+export type PlayerFilterMode = 'all' | GameGenre | GameSuitability;
 export type RemoteDirection = 'up' | 'down' | 'left' | 'right' | 'ok';
 export type LobbyFocusZone = 'filter' | 'games' | 'actions';
 
@@ -104,6 +115,7 @@ export interface ControllerSchema {
 export interface GameMetadata {
   id: GameId;
   name: string;
+  genre?: GameGenre;
   category: string;
   tagline: string;
   description: string;
@@ -1530,7 +1542,443 @@ export type GameSnapshot =
   | LuckyAuctionSnapshot
   | PinballClashSnapshot
   | ColorClashSnapshot
-  | LiarsDeckSnapshot;
+  | LiarsDeckSnapshot
+  | VolleySmashSnapshot
+  | LavaHopperSnapshot
+  | LudoRoyaleSnapshot
+  | StarPartyBoardSnapshot
+  | ReversiClashSnapshot
+  | FourInARowSnapshot
+  | NavalSalvoSnapshot
+  | NeonCheckersSnapshot
+  | CarromArenaSnapshot
+  | DungeonCrawlBoardSnapshot;
+
+// --- 33. Volley Smash (Arcade Beach Volleyball) ---
+export interface VolleyPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  team: 'red' | 'blue';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  z: number;
+  vz: number;
+  spikeTimer: number;
+  setTimer: number;
+  pointsScored: number;
+  saves: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface VolleySmashSnapshot {
+  gameId: 'volley-smash';
+  targetPoints: number;
+  scoreRed: number;
+  scoreBlue: number;
+  servingTeam: 'red' | 'blue';
+  goalBanner: string | null;
+  goalBannerColor: string | null;
+  ball: {
+    x: number;
+    y: number;
+    z: number;
+    vx: number;
+    vy: number;
+    vz: number;
+    targetX: number;
+    targetY: number;
+    hot: boolean;
+    lastTouchColor: string | null;
+  };
+  shockwaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: VolleyPlayerState[];
+}
+
+// --- 34. Lava Hopper (Magma Pillar Survival) ---
+export interface LavaPillarState {
+  id: number;
+  x: number;
+  y: number;
+  r: number;
+  state: 'safe' | 'warning' | 'sunk';
+  timer: number;
+  hasGem?: boolean;
+}
+
+export interface LavaHopperPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  z: number;
+  angle: number;
+  alive: boolean;
+  leapTimer: number;
+  leapDuration: number;
+  stompTimer: number;
+  respawnTimer: number;
+  gems: number;
+  kos: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface LavaHopperSnapshot {
+  gameId: 'lava-hopper';
+  timeLeft: number;
+  totalTime: number;
+  wave: number;
+  pillars: LavaPillarState[];
+  fireballs: { id: string; x: number; y: number; vx: number; vy: number; r: number }[];
+  stompWaves: { x: number; y: number; radius: number; maxRadius: number; colorHex: string; alpha: number }[];
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: LavaHopperPlayerState[];
+}
+
+// --- 35. Ludo Royale (Cross-Board Token Race) ---
+export interface LudoPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  startTrackIndex: number;
+  selectedToken: number; // 0..2
+  tokens: number[]; // -1 in base, 0..27 main loop steps taken, 28..30 home stretch, 31 finished
+  visualSteps: number[];
+  finishedCount: number;
+  captures: number;
+  boostReady: boolean;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface LudoRoyaleSnapshot {
+  gameId: 'ludo-royale';
+  round: number;
+  totalRounds: number;
+  activePlayerId: string;
+  phase: 'wait-roll' | 'rolling' | 'moving' | 'event';
+  turnTimeLeft: number;
+  diceValue: number;
+  diceRolling: boolean;
+  starIndices: number[];
+  banner: string | null;
+  eventText: string | null;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: LudoPlayerState[];
+}
+
+// --- 36. Star Party Island (Mario-Party-Style Star Hunt Board) ---
+export interface StarPartyTileState {
+  index: number;
+  x: number;
+  y: number;
+  kind: 'coin' | 'lucky' | 'trap' | 'boost' | 'duel';
+  label: string;
+}
+
+export interface StarPartyPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  tileIndex: number;
+  visualTile: number;
+  stars: number;
+  coins: number;
+  candyActive: boolean;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface StarPartyBoardSnapshot {
+  gameId: 'star-party-board';
+  round: number;
+  totalRounds: number;
+  activePlayerId: string;
+  phase: 'wait-roll' | 'rolling' | 'moving' | 'event';
+  turnTimeLeft: number;
+  diceValue: number;
+  diceRolling: boolean;
+  starTileIndex: number;
+  starCost: number;
+  tiles: StarPartyTileState[];
+  banner: string | null;
+  eventText: string | null;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: StarPartyPlayerState[];
+}
+
+// --- 37. Reversi Clash (8x8 Tactical Disc Flip Board) ---
+export interface ReversiPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cursorCol: number;
+  cursorRow: number;
+  discCount: number;
+  flipsTotal: number;
+  novaCharges: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface ReversiClashSnapshot {
+  gameId: 'reversi-clash';
+  turnCount: number;
+  maxTurns: number;
+  activePlayerId: string;
+  turnTimeLeft: number;
+  cols: number;
+  rows: number;
+  grid: (string | null)[]; // playerId or null (64 cells)
+  colorGrid: (string | null)[]; // colorHex or null
+  validMoves: { col: number; row: number; flips: number }[];
+  lastPlaced: { col: number; row: number } | null;
+  flippedCells: { col: number; row: number; colorHex: string; alpha: number }[];
+  banner: string | null;
+  eventText: string | null;
+  players: ReversiPlayerState[];
+}
+
+// --- 38. Connect 4 Drop (Four-in-a-Row Gravity Rack) ---
+export interface FourInARowPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  hoverCol: number;
+  connects: number;
+  tokensPlaced: number;
+  anvilCharges: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface FourInARowSnapshot {
+  gameId: 'four-in-a-row';
+  targetConnects: number;
+  activePlayerId: string;
+  turnTimeLeft: number;
+  cols: number;
+  rows: number;
+  grid: (string | null)[]; // playerId or null (cols * rows)
+  colorGrid: (string | null)[];
+  winningCells: { col: number; row: number; colorHex: string }[];
+  fallingToken: { col: number; row: number; currentY: number; colorHex: string } | null;
+  banner: string | null;
+  eventText: string | null;
+  players: FourInARowPlayerState[];
+}
+
+// --- 39. Battleship Salvo (Radar Grid Sea Warfare) ---
+export interface NavalCellState {
+  col: number;
+  row: number;
+  revealed: boolean;
+  content: 'water' | 'ship' | 'flagship' | 'mine';
+  hitByColor: string | null;
+  sonarHint: number | null; // nearby ships count when pinged
+}
+
+export interface NavalPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  cursorCol: number;
+  cursorRow: number;
+  hits: number;
+  sunkShips: number;
+  sonarCharges: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface NavalSalvoSnapshot {
+  gameId: 'naval-salvo';
+  round: number;
+  totalRounds: number;
+  activePlayerId: string;
+  turnTimeLeft: number;
+  cols: number;
+  rows: number;
+  shipsRemaining: number;
+  cells: NavalCellState[];
+  explosions: { col: number; row: number; colorHex: string; alpha: number }[];
+  banner: string | null;
+  eventText: string | null;
+  players: NavalPlayerState[];
+}
+
+// --- 40. King Jump Checkers (Arcade Chain-Jump Draughts) ---
+export interface CheckersPieceState {
+  id: string;
+  ownerId: string;
+  colorHex: string;
+  slotIndex: number;
+  col: number;
+  row: number;
+  king: boolean;
+  shielded: boolean;
+}
+
+export interface CheckersMoveOption {
+  pieceId: string;
+  fromCol: number;
+  fromRow: number;
+  toCol: number;
+  toRow: number;
+  capturedId: string | null;
+  isJump: boolean;
+}
+
+export interface NeonCheckersPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  selectedMoveIndex: number;
+  piecesCount: number;
+  kingsCount: number;
+  captures: number;
+  boostCharges: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface NeonCheckersSnapshot {
+  gameId: 'neon-checkers';
+  turnCount: number;
+  maxTurns: number;
+  activePlayerId: string;
+  turnTimeLeft: number;
+  pieces: CheckersPieceState[];
+  availableMoves: CheckersMoveOption[];
+  selectedMoveIndex: number;
+  lastMove: { fromCol: number; fromRow: number; toCol: number; toRow: number; colorHex: string } | null;
+  banner: string | null;
+  eventText: string | null;
+  players: NeonCheckersPlayerState[];
+}
+
+// --- 41. Carrom Striker (Tabletop Flick & Pocket Board) ---
+export interface CarromPuckState {
+  id: string;
+  kind: 'gold' | 'silver' | 'queen';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  value: number;
+}
+
+export interface CarromPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  aimAngle: number;
+  strikerOffset: number; // -1..1 along baseline
+  pocketed: number;
+  queensPocketed: number;
+  spinCharges: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface CarromArenaSnapshot {
+  gameId: 'carrom-arena';
+  round: number;
+  totalRounds: number;
+  activePlayerId: string;
+  phase: 'aiming' | 'sliding';
+  turnTimeLeft: number;
+  striker: { x: number; y: number; vx: number; vy: number; r: number; colorHex: string; spin: boolean };
+  pucks: CarromPuckState[];
+  pockets: { x: number; y: number; r: number }[];
+  banner: string | null;
+  eventText: string | null;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: CarromPlayerState[];
+}
+
+// --- 42. Dungeon Quest Board (Roll-and-Battle Spiral Adventure) ---
+export interface DungeonTileState {
+  index: number;
+  x: number;
+  y: number;
+  kind: 'start' | 'monster' | 'chest' | 'camp' | 'trap' | 'boss';
+  name: string;
+  power: number;
+  reward: number;
+}
+
+export interface DungeonPlayerState {
+  id: string;
+  slotIndex: number;
+  name: string;
+  colorHex: string;
+  isBot?: boolean;
+  tileIndex: number;
+  visualTile: number;
+  hp: number;
+  maxHp: number;
+  attackBonus: number;
+  potions: number;
+  monstersSlain: number;
+  gold: number;
+  score: number;
+  cooldownA: number;
+  cooldownB: number;
+}
+
+export interface DungeonCrawlBoardSnapshot {
+  gameId: 'dungeon-crawl-board';
+  round: number;
+  totalRounds: number;
+  activePlayerId: string;
+  phase: 'wait-roll' | 'rolling' | 'moving' | 'combat' | 'event';
+  turnTimeLeft: number;
+  diceValue: number;
+  combatRoll: number | null;
+  diceRolling: boolean;
+  bossHp: number;
+  bossMaxHp: number;
+  tiles: DungeonTileState[];
+  banner: string | null;
+  eventText: string | null;
+  popups?: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
+  players: DungeonPlayerState[];
+}
 
 // --- 31 & 32. Card Games (Color Clash & Liar's Deck) ---
 export type CardColor = 'red' | 'blue' | 'gold' | 'green' | 'wild';

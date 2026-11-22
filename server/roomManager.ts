@@ -1932,6 +1932,26 @@ export class RoomManager {
           snap.players.some((p) => p.cardCount <= 2) ||
           snap.round >= (earlyFrenzy ? 2 : 3)
         );
+      case 'volley-smash':
+        return (
+          Math.max(snap.scoreRed, snap.scoreBlue) >=
+          Math.max(2, snap.targetPoints - (earlyFrenzy ? 2 : 1))
+        );
+      case 'lava-hopper':
+        return snap.timeLeft <= snap.totalTime * (earlyFrenzy ? 0.55 : 0.35);
+      case 'ludo-royale':
+      case 'star-party-board':
+      case 'naval-salvo':
+      case 'carrom-arena':
+      case 'dungeon-crawl-board':
+        return snap.round >= Math.max(2, Math.floor(snap.totalRounds * (earlyFrenzy ? 0.5 : 0.72)));
+      case 'reversi-clash':
+      case 'neon-checkers':
+        return snap.turnCount >= Math.max(4, Math.floor(snap.maxTurns * (earlyFrenzy ? 0.5 : 0.7)));
+      case 'four-in-a-row':
+        return snap.players.some((p) => p.connects >= Math.max(1, snap.targetConnects - 1));
+      default:
+        return false;
     }
   }
 
@@ -2209,6 +2229,14 @@ export class RoomManager {
       const isTurnPacedGame =
         room.selectedGameId === 'rich-street' ||
         room.selectedGameId === 'jungle-ladders' ||
+        room.selectedGameId === 'ludo-royale' ||
+        room.selectedGameId === 'star-party-board' ||
+        room.selectedGameId === 'reversi-clash' ||
+        room.selectedGameId === 'four-in-a-row' ||
+        room.selectedGameId === 'naval-salvo' ||
+        room.selectedGameId === 'neon-checkers' ||
+        room.selectedGameId === 'carrom-arena' ||
+        room.selectedGameId === 'dungeon-crawl-board' ||
         room.selectedGameId === 'lucky-auction' ||
         room.selectedGameId === 'color-clash' ||
         room.selectedGameId === 'liars-deck';

@@ -1,4 +1,4 @@
-import type { GameId, GameMetadata, PlayerFilterMode } from './types.ts';
+import type { GameGenre, GameId, GameMetadata, PlayerFilterMode } from './types.ts';
 
 export const PLAYER_FILTER_OPTIONS: {
   id: PlayerFilterMode;
@@ -6,10 +6,34 @@ export const PLAYER_FILTER_OPTIONS: {
   shortLabel: string;
 }[] = [
   { id: 'all', label: 'All Games', shortLabel: 'All' },
-  { id: 'solo', label: 'Solo (1P)', shortLabel: 'Solo · 1P' },
-  { id: 'double', label: 'Double (2P)', shortLabel: '2 Players' },
-  { id: 'multiplayer', label: 'Multiplayer (3+)', shortLabel: '3+ Players' },
+  { id: 'arcade', label: 'Arcade Games', shortLabel: 'Arcade' },
+  { id: 'board', label: 'Board Games', shortLabel: 'Board' },
+  { id: 'card', label: 'Card Games', shortLabel: 'Cards' },
+  { id: 'solo', label: 'Solo (1P)', shortLabel: '1P' },
+  { id: 'double', label: 'Double (2P)', shortLabel: '2P' },
+  { id: 'multiplayer', label: 'Multiplayer (3+)', shortLabel: '3+P' },
 ];
+
+export const BOARD_GAME_IDS = new Set<GameId>([
+  'rich-street',
+  'jungle-ladders',
+  'ludo-royale',
+  'star-party-board',
+  'reversi-clash',
+  'four-in-a-row',
+  'naval-salvo',
+  'neon-checkers',
+  'carrom-arena',
+  'dungeon-crawl-board',
+]);
+
+export const CARD_GAME_IDS = new Set<GameId>(['color-clash', 'liars-deck']);
+
+export function getGameGenre(id: GameId): GameGenre {
+  if (BOARD_GAME_IDS.has(id)) return 'board';
+  if (CARD_GAME_IDS.has(id)) return 'card';
+  return 'arcade';
+}
 
 /**
  * Modular Game Catalog Registry.
@@ -1551,11 +1575,507 @@ export const GAME_CATALOG: GameMetadata[] = [
     ],
     defaultSetting: 5,
   },
+  // =========================================================================
+  // +2 NEW NORMAL ARCADE GAMES (Total 30 Normal Games)
+  // =========================================================================
+  {
+    id: 'volley-smash',
+    name: 'Volley Smash',
+    genre: 'arcade',
+    category: 'Beach Volleyball',
+    tagline: 'Bump, set, and slam flaming spikes over the laser net!',
+    description:
+      'Red vs. Blue arcade beach volleyball! Follow the landing shadow ring, pop high sets for your team, and leap at the net to unleash unstoppable turbo spikes.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['double', 'multiplayer'],
+    playerModeLabel: '2P · 3–8P Teams',
+    coverImage: '/src/assets/images/game_volley_smash.svg',
+    accentHex: '#00C2FF',
+    rules: [
+      'Red Team defends the Left court; Blue Team defends the Right court.',
+      'Stand under the glowing target ring to return the volleyball before it touches the sand!',
+      'Press BUMP / SET (A) to pop the ball high across the net or set up a teammate.',
+      'Press SPIKE (B) near the ball to leap and smash a fast fiery shot into rival sand!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Move & Aim',
+      actionA: {
+        label: 'BUMP / SET',
+        sublabel: 'High Lob',
+        colorHex: '#00C2FF',
+        darkHex: '#007FA8',
+        textColor: '#0B1219',
+        icon: 'arrow-up',
+      },
+      actionB: {
+        label: 'SPIKE',
+        sublabel: 'Jump Smash',
+        colorHex: '#FF4D2E',
+        darkHex: '#B82E17',
+        textColor: '#FFFFFF',
+        icon: 'flame',
+      },
+      controlTip: 'Watch the pulsing target ring on the sand to see exactly where the ball will land!',
+    },
+    settingLabel: 'Points to Win',
+    settingOptions: [
+      { label: 'First to 5', value: 5 },
+      { label: 'First to 7', value: 7 },
+      { label: 'First to 9', value: 9 },
+    ],
+    defaultSetting: 5,
+  },
+  {
+    id: 'lava-hopper',
+    name: 'Lava Hopper',
+    genre: 'arcade',
+    category: 'Magma Survival',
+    tagline: 'Leap across sinking volcano pillars and stomp rivals into the lava!',
+    description:
+      'Basalt pillars rumble and sink into bubbling magma on warning timers! Jump across lava gaps, grab Fire Gems, and slam shockwave stomps to knock rivals off safe stones.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['solo', 'double', 'multiplayer'],
+    playerModeLabel: 'Solo · 2P · 3–8P',
+    coverImage: '/src/assets/images/game_lava_hopper.svg',
+    accentHex: '#FF7A1A',
+    rules: [
+      'Stay on solid stone pillars — flashing red pillars are about to sink into lava!',
+      'Point the joystick and press LEAP (A) to jump high across lava gaps.',
+      'Grab glowing Fire Gems on pillars for +60 bonus points.',
+      'Press STOMP (B) to slam a shockwave that pushes nearby rivals toward the magma!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Walk & Aim Jump',
+      actionA: {
+        label: 'LEAP',
+        sublabel: 'Jump Gap',
+        colorHex: '#10D98B',
+        darkHex: '#0A915D',
+        textColor: '#0A1913',
+        icon: 'arrow-up',
+      },
+      actionB: {
+        label: 'STOMP',
+        sublabel: 'Shock Push',
+        colorHex: '#FF7A1A',
+        darkHex: '#B54F06',
+        textColor: '#140F0A',
+        icon: 'waves',
+      },
+      controlTip: 'Jump off shaking red pillars right away and collect Golden Gems for huge points!',
+    },
+    settingLabel: 'Match Time',
+    settingOptions: [
+      { label: '45 sec', value: 45 },
+      { label: '60 sec', value: 60 },
+      { label: '90 sec', value: 90 },
+    ],
+    defaultSetting: 60,
+  },
+  // =========================================================================
+  // +8 NEW BOARD GAMES (Total 10 Board Games)
+  // =========================================================================
+  {
+    id: 'ludo-royale',
+    name: 'Ludo Royale',
+    genre: 'board',
+    category: 'Ludo Board',
+    tagline: 'Race your tokens around the star cross-track and send rivals home!',
+    description:
+      'Classic Ludo adapted for fast couch party play! Roll the die to march your 3 tokens around the 28-tile star loop into your Home Goal, capture rival pawns on open tiles, and rest safely on Golden Stars.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['double', 'multiplayer'],
+    playerModeLabel: '2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_ludo_royale.svg',
+    accentHex: '#FFB800',
+    rules: [
+      'On your turn, press ROLL (A) to roll the die and advance your selected token.',
+      'Press SWAP / BOOST (B) before rolling to switch which token moves (or trigger a +2 Star Boost!).',
+      'Land on an opponent token on a normal tile to capture it back to base for +80 pts!',
+      'Star tiles are Safe Zones — first player to bring all 3 tokens home (or highest score) wins!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Select Token',
+      actionA: {
+        label: 'ROLL',
+        sublabel: 'Roll & March',
+        colorHex: '#FFB800',
+        darkHex: '#B58100',
+        textColor: '#14120B',
+        icon: 'zap',
+      },
+      actionB: {
+        label: 'SWAP / +2',
+        sublabel: 'Pick Pawn · Boost',
+        colorHex: '#00C2FF',
+        darkHex: '#007FA8',
+        textColor: '#0B1219',
+        icon: 'arrow-up',
+      },
+      controlTip: 'Use B before rolling to cycle between your 3 tokens or activate your +2 Star Boost!',
+    },
+    settingLabel: 'Game Length',
+    settingOptions: [
+      { label: '6 Rounds', value: 6 },
+      { label: '8 Rounds', value: 8 },
+      { label: '12 Rounds', value: 12 },
+    ],
+    defaultSetting: 8,
+  },
+  {
+    id: 'star-party-board',
+    name: 'Star Party Island',
+    genre: 'board',
+    category: 'Party Island Board',
+    tagline: 'Collect coins around the tropical island and buy Golden Stars!',
+    description:
+      'Mario-Party-style island board game! Hop across Blue Coin tiles, Lucky Chests, and Duel spaces to build your coin stash. Whenever you pass the glowing Star Shrine, trade 20 Coins for a Golden Star!',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['solo', 'double', 'multiplayer'],
+    playerModeLabel: 'Solo · 2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_star_party_board.svg',
+    accentHex: '#10D98B',
+    rules: [
+      'On your turn, press DICE BLOCK (A) to roll and hop around the 20 island spaces.',
+      'Pass or land on the Golden Star Shrine with 20+ Coins to buy a Star automatically!',
+      'After every Star is bought, the Star Shrine teleports to a new spot on the island.',
+      'Have 10+ Coins? Press CANDY (B) before rolling to activate Double Dice for your turn!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Island View',
+      actionA: {
+        label: 'DICE BLOCK',
+        sublabel: 'Hit Dice',
+        colorHex: '#10D98B',
+        darkHex: '#0A915D',
+        textColor: '#0A1913',
+        icon: 'zap',
+      },
+      actionB: {
+        label: '2X CANDY',
+        sublabel: 'Double Roll (10c)',
+        colorHex: '#FFB800',
+        darkHex: '#B58100',
+        textColor: '#14120B',
+        icon: 'flame',
+      },
+      controlTip: 'Save 20 Coins for the Star Shrine — if you are close, pop a 2X Candy (B) to reach it first!',
+    },
+    settingLabel: 'Rounds',
+    settingOptions: [
+      { label: '6 Rounds', value: 6 },
+      { label: '8 Rounds', value: 8 },
+      { label: '10 Rounds', value: 10 },
+    ],
+    defaultSetting: 8,
+  },
+  {
+    id: 'reversi-clash',
+    name: 'Reversi Clash',
+    genre: 'board',
+    category: 'Disc Flip Strategy',
+    tagline: 'Sandwich rival energy discs to flip whole rows into your color!',
+    description:
+      'Tactical 8×8 disc-flipping strategy board for 2 to 8 players! Place your colored disc to trap enemy lines horizontally, vertically, or diagonally and watch them flip in a chain reaction.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['double', 'multiplayer'],
+    playerModeLabel: '2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_reversi_clash.svg',
+    accentHex: '#10D98B',
+    rules: [
+      'Move your glowing cursor across the 8×8 board using the joystick.',
+      'Highlighted tiles show how many rival discs you will flip — press PLACE (A) to drop!',
+      'Press NOVA (B) to unleash a 3×3 Cross-Flip Bomb around your cursor (1 charge per game)!',
+      'Capture the 4 corner tiles for extra bonus points — most discs & points wins!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Move Cursor',
+      actionA: {
+        label: 'PLACE',
+        sublabel: 'Drop & Flip',
+        colorHex: '#10D98B',
+        darkHex: '#0A915D',
+        textColor: '#0A1913',
+        icon: 'target',
+      },
+      actionB: {
+        label: 'NOVA FLIP',
+        sublabel: '3×3 Cross Bomb',
+        colorHex: '#FFB800',
+        darkHex: '#B58100',
+        textColor: '#14120B',
+        icon: 'zap',
+      },
+      controlTip: 'Corner tiles can never be flanked — grab corners whenever they light up!',
+    },
+    settingLabel: 'Total Turns',
+    settingOptions: [
+      { label: '16 Turns (Fast)', value: 16 },
+      { label: '24 Turns (Standard)', value: 24 },
+      { label: '32 Turns (Full)', value: 32 },
+    ],
+    defaultSetting: 24,
+  },
+  {
+    id: 'four-in-a-row',
+    name: 'Connect 4 Drop',
+    genre: 'board',
+    category: 'Gravity Grid Board',
+    tagline: 'Slide the hover-dropper and connect 4 glowing tokens in a row!',
+    description:
+      'Giant vertical 7×6 neon gravity rack! Drop colored discs down columns to connect 4 horizontally, vertically, or diagonally. In party mode, every 4-in-a-row scores huge points and blasts clear for non-stop chains!',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['double', 'multiplayer'],
+    playerModeLabel: '2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_four_in_a_row.svg',
+    accentHex: '#528BFF',
+    rules: [
+      'On your turn, push the joystick Left or Right to aim above a column (1–7).',
+      'Press DROP (A) to release your token into the lowest open slot in that column.',
+      'Connect 4 of your color in any line (horizontal, vertical, or diagonal) for +150 pts!',
+      'Press ANVIL (B) to drop a heavy crusher token that smashes the top rival disc below it!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Slide Column',
+      actionA: {
+        label: 'DROP',
+        sublabel: 'Release Disc',
+        colorHex: '#FF4D2E',
+        darkHex: '#B82E17',
+        textColor: '#FFFFFF',
+        icon: 'arrow-up',
+      },
+      actionB: {
+        label: 'ANVIL',
+        sublabel: 'Crush Rival Disc',
+        colorHex: '#FFB800',
+        darkHex: '#B58100',
+        textColor: '#14120B',
+        icon: 'bomb',
+      },
+      controlTip: 'Watch rival 3-in-a-rows and drop your disc or Anvil to block their winning slot!',
+    },
+    settingLabel: 'Connect Target',
+    settingOptions: [
+      { label: 'First to 2 Connects', value: 2 },
+      { label: 'First to 3 Connects', value: 3 },
+      { label: 'First to 5 Connects', value: 5 },
+    ],
+    defaultSetting: 3,
+  },
+  {
+    id: 'naval-salvo',
+    name: 'Battleship Salvo',
+    genre: 'board',
+    category: 'Radar Grid Board',
+    tagline: 'Lock onto hidden ocean coordinates, ping sonar, and sink the fleet!',
+    description:
+      'Tactical 8×6 radar sea-warfare board! Aim your crosshairs across unrevealed ocean sectors, fire torpedo salvos to uncover hidden dreadnoughts and Golden Flagships, and dodge sea mines.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['solo', 'double', 'multiplayer'],
+    playerModeLabel: 'Solo · 2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_naval_salvo.svg',
+    accentHex: '#00C2FF',
+    rules: [
+      'On your turn, steer your targeting crosshairs across the 8×6 ocean grid with the joystick.',
+      'Press FIRE (A) on any unrevealed sector to launch a torpedo strike!',
+      'Hitting a Ship scores +90 pts (Golden Flagship +180 pts) — hitting a Sea Mine costs -35 pts.',
+      'Press SONAR (B) to scan a 3×3 area and reveal how many ship segments are hiding nearby!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Aim Radar Grid',
+      actionA: {
+        label: 'FIRE',
+        sublabel: 'Torpedo Strike',
+        colorHex: '#FF4D2E',
+        darkHex: '#B82E17',
+        textColor: '#FFFFFF',
+        icon: 'crosshair',
+      },
+      actionB: {
+        label: 'SONAR',
+        sublabel: 'Scan 3×3 Zone',
+        colorHex: '#00C2FF',
+        darkHex: '#007FA8',
+        textColor: '#0B1219',
+        icon: 'waves',
+      },
+      controlTip: 'When you score a Hit, check the tiles right next to it — ships span 2 to 4 connected cells!',
+    },
+    settingLabel: 'Salvo Rounds',
+    settingOptions: [
+      { label: '6 Rounds', value: 6 },
+      { label: '8 Rounds', value: 8 },
+      { label: '10 Rounds', value: 10 },
+    ],
+    defaultSetting: 8,
+  },
+  {
+    id: 'neon-checkers',
+    name: 'King Jump Checkers',
+    genre: 'board',
+    category: 'Checkers Board',
+    tagline: 'Leap over rival pieces in chain jumps and crown unstoppable Kings!',
+    description:
+      'Arcade Draughts / Checkers on a glowing 8×8 board! Select highlighted jump paths to hop over rival pieces, reach the far edge to crown a golden King, and rack up capture combos.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['double', 'multiplayer'],
+    playerModeLabel: '2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_neon_checkers.svg',
+    accentHex: '#FF4D2E',
+    rules: [
+      'On your turn, push the joystick Left/Right to cycle through your highlighted valid moves.',
+      'Capture jumps are prioritized in gold — press JUMP / MOVE (A) to execute the highlighted path!',
+      'Reach the opposite end of the board to crown a KING that can move & jump in all 4 diagonal directions!',
+      'Press KING BOOST (B) to instantly promote your active piece to a King (1 charge per match)!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Pick Move Path',
+      actionA: {
+        label: 'MOVE / JUMP',
+        sublabel: 'Execute Path',
+        colorHex: '#10D98B',
+        darkHex: '#0A915D',
+        textColor: '#0A1913',
+        icon: 'arrow-up',
+      },
+      actionB: {
+        label: 'CROWN KING',
+        sublabel: 'Instant King',
+        colorHex: '#FFB800',
+        darkHex: '#B58100',
+        textColor: '#14120B',
+        icon: 'zap',
+      },
+      controlTip: 'Use Joystick Left/Right to preview each glowing arrow on the board, then tap A!',
+    },
+    settingLabel: 'Match Turns',
+    settingOptions: [
+      { label: '16 Turns (Fast)', value: 16 },
+      { label: '24 Turns (Classic)', value: 24 },
+      { label: '32 Turns (Extended)', value: 32 },
+    ],
+    defaultSetting: 24,
+  },
+  {
+    id: 'carrom-arena',
+    name: 'Carrom Striker',
+    genre: 'board',
+    category: 'Tabletop Flick Board',
+    tagline: 'Aim your laser guide, flick the Striker, and pocket the Red Queen!',
+    description:
+      'Classic wooden Carrom tabletop board with 4 corner pockets! Slide your Striker along the baseline, line up bank shots on Gold, Silver, and the high-value Red Queen puck, and flick to score.',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['solo', 'double', 'multiplayer'],
+    playerModeLabel: 'Solo · 2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_carrom_arena.svg',
+    accentHex: '#FFB800',
+    rules: [
+      'On your turn, push the joystick Left/Right to aim your Striker laser guide across the table.',
+      'Push Up/Down on the joystick to slide your Striker position along the baseline.',
+      'Press FLICK (A) to shoot the Striker — pocketing Silver (+50), Gold (+90), or Red Queen (+180)!',
+      'Press POWER SPIN (B) to launch a high-velocity curving shot that transfers extra bounce energy!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Slide & Aim Laser',
+      actionA: {
+        label: 'FLICK',
+        sublabel: 'Shoot Striker',
+        colorHex: '#00C2FF',
+        darkHex: '#007FA8',
+        textColor: '#0B1219',
+        icon: 'target',
+      },
+      actionB: {
+        label: 'POWER SHOT',
+        sublabel: 'Turbo Flick',
+        colorHex: '#FFB800',
+        darkHex: '#B58100',
+        textColor: '#14120B',
+        icon: 'zap',
+      },
+      controlTip: 'Aim at the cluster around the Red Queen in the center to scatter pucks toward the 4 corner pockets!',
+    },
+    settingLabel: 'Rounds',
+    settingOptions: [
+      { label: '5 Rounds', value: 5 },
+      { label: '7 Rounds', value: 7 },
+      { label: '10 Rounds', value: 10 },
+    ],
+    defaultSetting: 6,
+  },
+  {
+    id: 'dungeon-crawl-board',
+    name: 'Dungeon Quest Board',
+    genre: 'board',
+    category: 'Adventure Board',
+    tagline: 'Roll movement dice, battle dungeon monsters, and slay the Dragon Boss!',
+    description:
+      'Spiral tabletop RPG board game! Roll dice to travel through Monster Rooms, Treasure Chests, and Campfires toward the Dragon Boss lair. Roll Battle Dice to defeat monsters and collect Gold Trophies!',
+    minPlayers: 1,
+    maxPlayers: 8,
+    suitableFor: ['solo', 'double', 'multiplayer'],
+    playerModeLabel: 'Solo · 2P · 3–8P Board',
+    coverImage: '/src/assets/images/game_dungeon_crawl_board.svg',
+    accentHex: '#A855F7',
+    rules: [
+      'On your turn, press ROLL / ATTACK (A) to roll the die and move along the spiral dungeon path.',
+      'Land on a Monster or Dragon Boss tile? Press A to roll Battle Dice (Roll + Attack Bonus vs. Monster Power)!',
+      'Treasure Chests grant Gold & Weapon Upgrades (+1 Attack); Campfires restore full Hearts.',
+      'Press POTION (B) before rolling or fighting to heal +2 Hearts and add +3 Battle Power!',
+    ],
+    controllerSchema: {
+      joystickMode: 'analog-360',
+      joystickLabel: 'Dungeon Map',
+      actionA: {
+        label: 'ROLL / FIGHT',
+        sublabel: 'Move & Battle',
+        colorHex: '#10D98B',
+        darkHex: '#0A915D',
+        textColor: '#0A1913',
+        icon: 'zap',
+      },
+      actionB: {
+        label: 'HERO POTION',
+        sublabel: 'Heal & +3 ATK',
+        colorHex: '#FF3B9A',
+        darkHex: '#B31C67',
+        textColor: '#FFFFFF',
+        icon: 'shield',
+      },
+      controlTip: 'Save your Hero Potion (B) for high-level Monsters or the center Dragon Boss for a massive gold bounty!',
+    },
+    settingLabel: 'Quest Rounds',
+    settingOptions: [
+      { label: '6 Rounds', value: 6 },
+      { label: '8 Rounds', value: 8 },
+      { label: '10 Rounds', value: 10 },
+    ],
+    defaultSetting: 8,
+  },
 ];
 
 export const GAME_BY_ID: Record<GameId, GameMetadata> = GAME_CATALOG.reduce(
   (acc, game) => {
-    acc[game.id] = game;
+    acc[game.id] = { ...game, genre: game.genre ?? getGameGenre(game.id) };
     return acc;
   },
   {} as Record<GameId, GameMetadata>
@@ -1567,5 +2087,8 @@ export function getGameMeta(id: GameId): GameMetadata {
 
 export function filterGamesByPlayerMode(mode: PlayerFilterMode): GameMetadata[] {
   if (mode === 'all') return GAME_CATALOG;
+  if (mode === 'arcade' || mode === 'board' || mode === 'card') {
+    return GAME_CATALOG.filter((game) => getGameGenre(game.id) === mode);
+  }
   return GAME_CATALOG.filter((game) => game.suitableFor.includes(mode));
 }

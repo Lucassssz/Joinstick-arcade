@@ -54,6 +54,7 @@ import {
   renderRedLightDash,
 } from './partyRenderersC';
 import { renderColorClash, renderLiarsDeck } from './cardRenderers';
+import { renderModularGame } from './rendererRegistry';
 import {
   ArcadeMotionState,
   createArcadeMotionState,

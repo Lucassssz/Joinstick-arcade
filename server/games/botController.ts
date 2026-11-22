@@ -1374,6 +1374,226 @@ export function computeBotInput(
       break;
     }
 
+    case 'volley-smash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me) break;
+      const myHalf =
+        (me.team === 'red' && snapshot.ball.targetX < ARENA_WIDTH / 2 + 30) ||
+        (me.team === 'blue' && snapshot.ball.targetX > ARENA_WIDTH / 2 - 30);
+      const homeX = me.team === 'red' ? ARENA_WIDTH / 2 - 190 : ARENA_WIDTH / 2 + 190;
+      const homeY = ARENA_HEIGHT / 2 + (me.slotIndex % 2 === 0 ? -90 : 90);
+      const tx = myHalf ? snapshot.ball.targetX : homeX;
+      const ty = myHalf ? snapshot.ball.targetY : homeY;
+      const s = steerToward(me.x, me.y, tx, ty, tuning);
+      if (s.dist > 18) {
+        dx = s.dx;
+        dy = s.dy;
+      }
+      const ballDist = Math.hypot(snapshot.ball.x - me.x, snapshot.ball.y - me.y);
+      if (ballDist < 88 && snapshot.ball.z < 140 && canAct()) {
+        if (me.cooldownB <= 0 && Math.random() < tuning.reflexFactor * 0.65) {
+          b = true;
+          markActed();
+        } else if (me.cooldownA <= 0) {
+          a = true;
+          markActed();
+        }
+      }
+      break;
+    }
+
+    case 'lava-hopper': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || !me.alive) break;
+      const safePillars = snapshot.pillars.filter((pl) => pl.state === 'safe');
+      const warnPillars = snapshot.pillars.filter((pl) => pl.state === 'warning');
+      const pool = safePillars.length > 0 ? safePillars : warnPillars;
+      let bestPillar = pool[0];
+      let bestScore = Infinity;
+      for (const pl of pool) {
+        const d = Math.hypot(pl.x - me.x, pl.y - me.y) - (pl.hasGem ? 95 : 0);
+        if (d < bestScore) {
+          bestScore = d;
+          bestPillar = pl;
+        }
+      }
+      if (bestPillar) {
+        const s = steerToward(me.x, me.y, bestPillar.x, bestPillar.y, tuning);
+        if (s.dist > 16) {
+          dx = s.dx;
+          dy = s.dy;
+        }
+        if (s.dist > 75 && s.dist < 185 && me.cooldownA <= 0 && canAct()) {
+          a = true;
+          markActed();
+        }
+      }
+      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+      const { item: nearRival, dist: rDist } = nearestOf(me.x, me.y, rivals);
+      if (nearRival && rDist < 85 && me.cooldownB <= 0 && canAct() && Math.random() < tuning.reflexFactor * 0.5) {
+        b = true;
+        markActed();
+      }
+      break;
+    }
+
+    case 'ludo-royale': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 11.8 && mem.actionCooldown <= 0) {
+        a = true;
+        mem.actionCooldown = 1.1;
+      }
+      break;
+    }
+
+    case 'star-party-board': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.phase === 'wait-roll' && snapshot.turnTimeLeft < 11.8 && mem.actionCooldown <= 0) {
+        if (!me.candyActive && me.coins >= 25 && Math.random() < tuning.abilityChance) {
+          b = true;
+          mem.actionCooldown = 0.9;
+        } else {
+          a = true;
+          mem.actionCooldown = 1.1;
+        }
+      }
+      break;
+    }
+
+    case 'reversi-clash': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.turnTimeLeft < 12.2 && mem.actionCooldown <= 0) {
+        const bestMove = [...snapshot.validMoves].sort((m1, m2) => m2.flips - m1.flips)[0];
+        if (bestMove) {
+          if (me.cursorCol !== bestMove.col) {
+            dx = Math.sign(bestMove.col - me.cursorCol);
+            mem.actionCooldown = 0.25;
+          } else if (me.cursorRow !== bestMove.row) {
+            dy = Math.sign(bestMove.row - me.cursorRow);
+            mem.actionCooldown = 0.25;
+          } else {
+            if (me.novaCharges > 0 && snapshot.turnCount > 8 && Math.random() < 0.25) {
+              b = true;
+            } else {
+              a = true;
+            }
+            mem.actionCooldown = 1.0;
+          }
+        } else {
+          a = true;
+          mem.actionCooldown = 1.0;
+        }
+      }
+      break;
+    }
+
+    case 'four-in-a-row': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.turnTimeLeft < 11.4 && mem.actionCooldown <= 0) {
+        const targetCol = Math.max(0, Math.min(snapshot.cols - 1, Math.round(3 + Math.sin(mem.wanderAngle) * 2)));
+        if (me.hoverCol !== targetCol && snapshot.turnTimeLeft > 8.5) {
+          dx = Math.sign(targetCol - me.hoverCol);
+          mem.actionCooldown = 0.28;
+        } else {
+          if (me.anvilCharges > 0 && Math.random() < 0.2) {
+            b = true;
+          } else {
+            a = true;
+          }
+          mem.actionCooldown = 1.0;
+        }
+      }
+      break;
+    }
+
+    case 'naval-salvo': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.turnTimeLeft < 11.5 && mem.actionCooldown <= 0) {
+        const unrevealed = snapshot.cells.filter((c) => !c.revealed);
+        if (unrevealed.length > 0) {
+          const target = unrevealed[(me.slotIndex * 7 + snapshot.round * 3) % unrevealed.length];
+          if (me.cursorCol !== target.col) {
+            dx = Math.sign(target.col - me.cursorCol);
+            mem.actionCooldown = 0.24;
+          } else if (me.cursorRow !== target.row) {
+            dy = Math.sign(target.row - me.cursorRow);
+            mem.actionCooldown = 0.24;
+          } else {
+            if (me.sonarCharges > 0 && Math.random() < 0.25) {
+              b = true;
+            } else {
+              a = true;
+            }
+            mem.actionCooldown = 0.95;
+          }
+        } else {
+          a = true;
+          mem.actionCooldown = 0.95;
+        }
+      }
+      break;
+    }
+
+    case 'neon-checkers': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (snapshot.turnTimeLeft < 11.4 && mem.actionCooldown <= 0) {
+        if (me.boostCharges > 0 && Math.random() < 0.25) {
+          b = true;
+          mem.actionCooldown = 0.85;
+        } else {
+          a = true;
+          mem.actionCooldown = 1.0;
+        }
+      }
+      break;
+    }
+
+    case 'carrom-arena': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId || snapshot.phase !== 'aiming') break;
+      const targetPuck = snapshot.pucks.find((pk) => pk.kind === 'queen') || snapshot.pucks[0];
+      if (targetPuck) {
+        const desiredAngle = Math.atan2(targetPuck.y - snapshot.striker.y, targetPuck.x - snapshot.striker.x);
+        const diff = desiredAngle - me.aimAngle;
+        if (Math.abs(diff) > 0.08 && snapshot.turnTimeLeft > 8.0) {
+          dx = Math.sign(diff) * 0.7;
+        } else if (snapshot.turnTimeLeft < 11.2 && mem.actionCooldown <= 0) {
+          if (me.spinCharges > 0 && Math.random() < 0.35) {
+            b = true;
+          } else {
+            a = true;
+          }
+          mem.actionCooldown = 1.1;
+        }
+      }
+      break;
+    }
+
+    case 'dungeon-crawl-board': {
+      const me = snapshot.players.find((p) => p.id === botId);
+      if (!me || snapshot.activePlayerId !== botId) break;
+      if (
+        (snapshot.phase === 'wait-roll' || snapshot.phase === 'combat') &&
+        snapshot.turnTimeLeft < 11.6 &&
+        mem.actionCooldown <= 0
+      ) {
+        if (me.potions > 0 && (me.hp <= 5 || snapshot.phase === 'combat') && Math.random() < 0.45) {
+          b = true;
+          mem.actionCooldown = 0.85;
+        } else {
+          a = true;
+          mem.actionCooldown = 1.05;
+        }
+      }
+      break;
+    }
+
     default: {
       // Universal fallback AI for any newly added future game without a custom tactic block:
       // Inspects generic player positions when present, stays away from arena edges, chases rivals
