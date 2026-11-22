@@ -67,6 +67,7 @@ import {
   controllerHaptics,
   HapticEventType,
   HapticIntensity,
+  HapticMode,
   HapticResult,
 } from '../lib/haptics';
 import {
@@ -191,6 +192,7 @@ export function PhoneController({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [closedReason, setClosedReason] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hapticMode, setHapticMode] = useState<HapticMode>(() => controllerHaptics.getMode());
   const [impactPulse, setImpactPulse] = useState<'none' | 'subtle' | 'light' | 'heavy'>('none');
   const [tactileCue, setTactileCue] = useState<{ label: string; event: HapticEventType } | null>(
     null
@@ -216,6 +218,9 @@ export function PhoneController({
   const manualReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastReconnectTapRef = useRef<number>(0);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
+  const userExitedPhoneFsRef = useRef<boolean>(false);
+  const stickAtRimRef = useRef<boolean>(false);
+  const lastRimHapticAtRef = useRef<number>(0);
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
     pointerId: number;
@@ -289,6 +294,70 @@ export function PhoneController({
     saveControllerPrefs(clamped);
   };
 
+  const handleSetHapticMode = (nextMode: HapticMode) => {
+    controllerHaptics.setMode(nextMode);
+    setHapticMode(nextMode);
+    const labelText =
+      nextMode === 'forceful'
+        ? t('Haptic Intensity: Forceful', '震动强度：强力 (Forceful)')
+        : nextMode === 'default'
+        ? t('Haptic Intensity: Default', '震动强度：标准 (Default)')
+        : t('Haptic Intensity: Off', '震动强度：已关闭 (Off)');
+    setTactileCue({
+      label: labelText,
+      event: nextMode === 'forceful' ? 'turn-start' : 'host-alert',
+    });
+    if (tactileCueTimerRef.current) clearTimeout(tactileCueTimerRef.current);
+    tactileCueTimerRef.current = setTimeout(() => setTactileCue(null), 1650);
+
+    if (!embedded && nextMode !== 'off') {
+      controllerHaptics.unlock(true);
+      vibrate(nextMode === 'forceful' ? [120, 42, 180] : [42, 28, 60], {
+        fromUserGesture: true,
+        intensity: nextMode === 'forceful' ? 'heavy' : 'medium',
+        force: true,
+      });
+    }
+  };
+
+  const handleCycleHapticMode = () => {
+    const next: HapticMode =
+      hapticMode === 'default' ? 'forceful' : hapticMode === 'forceful' ? 'off' : 'default';
+    handleSetHapticMode(next);
+  };
+
+  const renderHapticModeButton = (compact = false) => {
+    if (embedded) return null;
+    const modeLabel =
+      hapticMode === 'forceful'
+        ? t('Forceful', '强力')
+        : hapticMode === 'default'
+        ? t('Default', '标准')
+        : t('Off', '关');
+    const colorClass =
+      hapticMode === 'forceful'
+        ? 'bg-[#10D98B]/20 border-[#10D98B]/70 text-[#10D98B]'
+        : hapticMode === 'default'
+        ? 'bg-[#00C2FF]/15 border-[#00C2FF]/60 text-[#00C2FF]'
+        : 'bg-[#1E232D] border-[#2F3747] text-[#6B7280]';
+    return (
+      <label
+        role="button"
+        tabIndex={0}
+        onClick={handleCycleHapticMode}
+        aria-label={`${t('Haptic Intensity', '震动强度')}: ${modeLabel}`}
+        title={`${t('Haptic Intensity (Tap to switch Default / Forceful / Off)', '震动强度（点击切换 标准 / 强力 / 关闭）')}: ${modeLabel}`}
+        className={`relative ${
+          compact ? 'min-h-[34px] px-2' : 'h-8 sm:h-9 px-2.5'
+        } rounded-lg border text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer select-none transition-colors ${colorClass}`}
+      >
+        <IosHapticSwitch enabled={hapticMode !== 'off'} />
+        <Vibrate className="w-3.5 h-3.5 shrink-0" />
+        <span className="font-mono text-[10px] font-extrabold">{modeLabel}</span>
+      </label>
+    );
+  };
+
   const handleResetControllerPrefs = () => {
     updateControllerPrefs(DEFAULT_CONTROLLER_PREFS);
     if (!embedded) {
@@ -322,14 +391,18 @@ export function PhoneController({
   const enterFullscreenAndLandscape = () => {
     if (embedded || typeof document === 'undefined') return;
     try {
+      const doc = document as Document & { webkitFullscreenElement?: Element };
       const el = document.documentElement as HTMLElement & {
         webkitRequestFullscreen?: () => Promise<void> | void;
+        msRequestFullscreen?: () => Promise<void> | void;
       };
-      if (!document.fullscreenElement) {
+      if (!document.fullscreenElement && !doc.webkitFullscreenElement) {
         if (typeof el.requestFullscreen === 'function') {
-          el.requestFullscreen().catch(() => {});
+          el.requestFullscreen({ navigationUI: 'hide' } as FullscreenOptions).catch(() => {});
         } else if (typeof el.webkitRequestFullscreen === 'function') {
           el.webkitRequestFullscreen();
+        } else if (typeof el.msRequestFullscreen === 'function') {
+          el.msRequestFullscreen();
         }
       }
     } catch {
@@ -371,15 +444,40 @@ export function PhoneController({
       webkitExitFullscreen?: () => Promise<void> | void;
     };
     if (document.fullscreenElement || doc.webkitFullscreenElement) {
+      userExitedPhoneFsRef.current = true;
       if (typeof document.exitFullscreen === 'function') {
         document.exitFullscreen().catch(() => {});
       } else if (typeof doc.webkitExitFullscreen === 'function') {
         doc.webkitExitFullscreen();
       }
     } else {
+      userExitedPhoneFsRef.current = false;
       enterFullscreenAndLandscape();
     }
   };
+
+  // Automatically force Fullscreen on the phone browser on mount and on the first touch gesture
+  useEffect(() => {
+    if (embedded) return;
+    enterFullscreenAndLandscape();
+    const onGesture = () => {
+      if (userExitedPhoneFsRef.current) return;
+      const doc = document as Document & { webkitFullscreenElement?: Element };
+      if (!document.fullscreenElement && !doc.webkitFullscreenElement) {
+        enterFullscreenAndLandscape();
+      }
+    };
+    const opts: AddEventListenerOptions = { passive: true, capture: true };
+    window.addEventListener('pointerdown', onGesture, opts);
+    window.addEventListener('touchend', onGesture, opts);
+    window.addEventListener('click', onGesture, opts);
+    return () => {
+      window.removeEventListener('pointerdown', onGesture, opts);
+      window.removeEventListener('touchend', onGesture, opts);
+      window.removeEventListener('click', onGesture, opts);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded]);
 
   const sessionKey = useMemo(
     () => (embedded ? `joinstick_sim_${defaultName || 'p1'}` : 'joinstick_player_id'),
@@ -645,6 +743,12 @@ export function PhoneController({
             if (!embedded) {
               sessionStorage.setItem(sessionKey, msg.playerId);
               sessionStorage.setItem(roomCodeSessionKey, msg.room.code);
+              if (!userExitedPhoneFsRef.current) {
+                enterFullscreenAndLandscape();
+              }
+              controllerHaptics.triggerEvent('player-ready', [85, 35, 115], {
+                fromUserGesture: false,
+              });
             }
             if (manualReconnectTimerRef.current) {
               clearTimeout(manualReconnectTimerRef.current);
@@ -915,6 +1019,20 @@ export function PhoneController({
     const deadzone = embedded ? 0.08 : activePrefs.deadzone;
     const adjMag = normMag < deadzone ? 0 : (normMag - deadzone) / (1 - deadzone);
 
+    // Physical rim-detent haptic feedback when slamming the joystick against the outer gate
+    if (!embedded) {
+      if (normMag >= 0.94 && !stickAtRimRef.current) {
+        stickAtRimRef.current = true;
+        const now = Date.now();
+        if (now - lastRimHapticAtRef.current > 140) {
+          lastRimHapticAtRef.current = now;
+          vibrate(65, { fromUserGesture: true, intensity: 'light' });
+        }
+      } else if (normMag < 0.78) {
+        stickAtRimRef.current = false;
+      }
+    }
+
     inputRef.current.dx = Math.cos(angle) * adjMag;
     inputRef.current.dy = Math.sin(angle) * adjMag;
     setKnobOffset({ x: ox, y: oy });
@@ -1131,6 +1249,21 @@ export function PhoneController({
 
     const statusOverlays = (
       <>
+        {!embedded && impactPulse !== 'none' && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-[63] rounded-none transition-opacity duration-75"
+            style={{
+              boxShadow:
+                impactPulse === 'heavy'
+                  ? `inset 0 0 0 4px #FF4D2E, inset 0 0 44px rgba(255, 77, 46, 0.75)`
+                  : impactPulse === 'light'
+                  ? `inset 0 0 0 3px ${selfPlayer?.color.hex ?? '#00C2FF'}, inset 0 0 28px ${selfPlayer?.color.hex ?? '#00C2FF'}88`
+                  : `inset 0 0 0 2px ${selfPlayer?.color.hex ?? '#00C2FF'}99, inset 0 0 18px ${selfPlayer?.color.hex ?? '#00C2FF'}55`,
+            }}
+          />
+        )}
+
         {hostToast && !isConnectionLost && (
           <div className="pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-[65] px-4 py-2 rounded-xl bg-[#FFB800] text-[#14120B] font-display font-extrabold text-xs sm:text-sm shadow-xl inline-flex items-center gap-1.5 whitespace-nowrap">
             <Crown className="w-4 h-4 shrink-0" />
@@ -1231,6 +1364,8 @@ export function PhoneController({
               : undefined
           }
           onClose={() => setSettingsOpen(false)}
+          hapticMode={hapticMode}
+          onHapticModeChange={handleSetHapticMode}
           accentHex={selfPlayer?.color.hex ?? '#00C2FF'}
           actionALabel={gameMeta?.controllerSchema.actionA.label ?? 'A'}
           actionBLabel={gameMeta?.controllerSchema.actionB.label ?? 'B'}
@@ -1687,6 +1822,7 @@ export function PhoneController({
 
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact className="h-9" />}
+            {renderHapticModeButton(false)}
             {!embedded && (
               <button
                 type="button"
@@ -1698,18 +1834,6 @@ export function PhoneController({
                 <span>{isFullscreen ? t('Exit Full', '退出全屏') : t('Fullscreen', '全屏')}</span>
               </button>
             )}
-            {isRoomHost && (
-              <button
-                type="button"
-                onClick={() => setCloseRoomConfirmOpen(true)}
-                aria-label={t('Close Entire Room', '关闭整个房间')}
-                title={t('Close Entire Room', '关闭整个房间')}
-                className="h-9 px-2.5 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <Power className="w-3.5 h-3.5" />
-                <span>{t('Close Room', '关闭房间')}</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={handleLeave}
@@ -1718,6 +1842,17 @@ export function PhoneController({
               <LogOut className="w-3.5 h-3.5" />
               {t('Leave', '退出')}
             </button>
+            {isRoomHost && (
+              <button
+                type="button"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                aria-label={t('Close Entire Room', '关闭整个房间')}
+                title={t('Close Entire Room', '关闭整个房间')}
+                className="h-9 w-9 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
+              >
+                <Power className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1874,6 +2009,7 @@ export function PhoneController({
 
             <div className="flex items-center gap-1.5 shrink-0">
               {!embedded && <LanguageToggle compact />}
+              {renderHapticModeButton(true)}
               {!embedded && (
                 <button
                   type="button"
@@ -1914,22 +2050,21 @@ export function PhoneController({
               )}
               <button
                 type="button"
-                onClick={() => setCloseRoomConfirmOpen(true)}
-                aria-label={t('Close Entire Room', '关闭整个房间')}
-                title={t('Close Entire Room', '关闭整个房间')}
-                className="h-8 px-2.5 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
-              >
-                <Power className="w-3.5 h-3.5" />
-                <span>{t('Close Room', '关闭房间')}</span>
-              </button>
-              <button
-                type="button"
                 onClick={handleLeave}
                 aria-label={t('Leave room', '退出房间')}
                 className="h-8 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-xs font-semibold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">{t('Leave', '退出')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                aria-label={t('Close Entire Room', '关闭整个房间')}
+                title={t('Close Entire Room', '关闭整个房间')}
+                className="h-8 w-8 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
+              >
+                <Power className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -2069,7 +2204,7 @@ export function PhoneController({
                       }
                 }
               >
-                <IosHapticSwitch enabled={!embedded} />
+                <IosHapticSwitch enabled={!embedded && hapticMode !== 'off'} />
                 {me.ready && <Check className="w-5 h-5" />}
                 <span>
                   {me.ready
@@ -2086,26 +2221,16 @@ export function PhoneController({
                 </p>
               )}
 
-              <div className="flex items-center gap-2">
-                {otherConnectedHumans.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setPassHostOpen(true)}
-                    className="h-10 flex-1 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                    <span>{t('Pass Host', '移交房主')}</span>
-                  </button>
-                )}
+              {otherConnectedHumans.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setCloseRoomConfirmOpen(true)}
-                  className="h-10 flex-1 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  onClick={() => setPassHostOpen(true)}
+                  className="h-10 w-full rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <Power className="w-3.5 h-3.5" />
-                  <span>{t('Close Room', '关闭房间')}</span>
+                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                  <span>{t('Pass Host', '移交房主')}</span>
                 </button>
-              </div>
+              )}
             </div>
           </div>
 
@@ -2160,6 +2285,7 @@ export function PhoneController({
 
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact className="h-9" />}
+            {renderHapticModeButton(false)}
             {!embedded && (
               <button
                 type="button"
@@ -2283,7 +2409,7 @@ export function PhoneController({
                     }
               }
             >
-              <IosHapticSwitch enabled={!embedded} />
+              <IosHapticSwitch enabled={!embedded && hapticMode !== 'off'} />
               {me.ready && <Check className="w-5 h-5" />}
               <span>
                 {me.ready
@@ -2358,11 +2484,20 @@ export function PhoneController({
       <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-2.5">
         {passHostOverlay}
         {closeRoomOverlay}
-        {!embedded && (
-          <div className="absolute top-1 right-1">
-            <LanguageToggle compact />
-          </div>
-        )}
+        <div className="absolute top-1 right-1 flex items-center gap-1.5">
+          {!embedded && <LanguageToggle compact />}
+          {isRoomHost && (
+            <button
+              type="button"
+              onClick={() => setCloseRoomConfirmOpen(true)}
+              aria-label={t('Close Entire Room', '关闭整个房间')}
+              title={t('Close Entire Room', '关闭整个房间')}
+              className="h-8 w-8 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
+            >
+              <Power className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
         {activeTournament && (
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FFB800]/18 border border-[#FFB800]/50 text-[#FFB800] font-mono text-[11px] font-black">
             <Trophy className="w-3.5 h-3.5" />
@@ -2440,8 +2575,8 @@ export function PhoneController({
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
-            <div className="flex items-center justify-center gap-2">
-              {otherConnectedHumans.length > 0 && (
+            {otherConnectedHumans.length > 0 && (
+              <div className="flex items-center justify-center">
                 <button
                   type="button"
                   onClick={() => setPassHostOpen(true)}
@@ -2450,16 +2585,8 @@ export function PhoneController({
                   <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
                   {t('Pass Host', '移交房主')}
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setCloseRoomConfirmOpen(true)}
-                className="h-9 px-4 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <Power className="w-3.5 h-3.5" />
-                {t('Close Room', '关闭房间')}
-              </button>
-            </div>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-xs text-[#9CA3AF]">
@@ -2489,11 +2616,20 @@ export function PhoneController({
       <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3">
         {passHostOverlay}
         {closeRoomOverlay}
-        {!embedded && (
-          <div className="absolute top-1 right-1">
-            <LanguageToggle compact />
-          </div>
-        )}
+        <div className="absolute top-1 right-1 flex items-center gap-1.5">
+          {!embedded && <LanguageToggle compact />}
+          {isRoomHost && (
+            <button
+              type="button"
+              onClick={() => setCloseRoomConfirmOpen(true)}
+              aria-label={t('Close Entire Room', '关闭整个房间')}
+              title={t('Close Entire Room', '关闭整个房间')}
+              className="h-8 w-8 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
+            >
+              <Power className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
         <Pause className="w-10 h-10 text-[#FFB800]" />
         <h2 className="font-display text-2xl font-extrabold text-white">
           {t('Game Paused', '游戏已暂停')}
@@ -2527,16 +2663,6 @@ export function PhoneController({
                 className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
               >
                 <ChevronRight className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="pt-1 flex items-center justify-center">
-              <button
-                type="button"
-                onClick={() => setCloseRoomConfirmOpen(true)}
-                className="h-9 px-4 rounded-xl bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-xs font-bold text-[#FF9B8A] hover:text-white inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <Power className="w-3.5 h-3.5" />
-                <span>{t('Close Room', '关闭房间')}</span>
               </button>
             </div>
           </div>
@@ -2579,6 +2705,7 @@ export function PhoneController({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {!embedded && <LanguageToggle compact />}
+            {renderHapticModeButton(true)}
             {!embedded && (
               <button
                 type="button"
@@ -2676,7 +2803,7 @@ export function PhoneController({
                     }
               }
             >
-              <IosHapticSwitch enabled={!embedded} />
+              <IosHapticSwitch enabled={!embedded && hapticMode !== 'off'} />
               {me.ready && <Check className="w-6 h-6" />}
               <span>
                 {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
@@ -2783,7 +2910,7 @@ export function PhoneController({
               : 1,
           }}
         >
-          <IosHapticSwitch enabled={!embedded && !repositionMode} />
+          <IosHapticSwitch enabled={!embedded && !repositionMode && hapticMode !== 'off'} />
           <ActionIcon
             icon={spec.icon}
             className={`${isA ? 'w-5 h-5 sm:w-6 sm:h-6' : 'w-4 h-4 sm:w-5 sm:h-5'} mb-0.5 pointer-events-none`}
@@ -2929,6 +3056,7 @@ export function PhoneController({
                 {t('Reconnecting...', '正在重连...')}
               </span>
             )}
+            {renderHapticModeButton(true)}
             {!embedded && !isCardGame && (
               <button
                 type="button"

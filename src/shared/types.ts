@@ -127,6 +127,19 @@ export interface ControllerInput {
   b: boolean;
 }
 
+export interface PlayerMatchStats {
+  wins: number;
+  cardWins: number;
+  matchesPlayed: number;
+  totalActions: number;
+  cardActions: number;
+  cardResponses: number;
+  totalCardResponseMs: number;
+  avgCardResponseMs: number | null;
+  lastCardResponseMs: number | null;
+  fastestCardResponseMs: number | null;
+}
+
 export interface PlayerSummary {
   id: string;
   slotIndex: number;
@@ -141,6 +154,7 @@ export interface PlayerSummary {
   statText: string;
   cooldownA: number; // 0 (ready) to 1 (cooling)
   cooldownB: number; // 0 (ready) to 1 (cooling)
+  matchStats?: PlayerMatchStats;
 }
 
 export interface RankingEntry {

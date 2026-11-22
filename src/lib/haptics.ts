@@ -1,20 +1,17 @@
 /**
- * Global Mobile Haptic & Tactile Feedback Service.
+ * Global Mobile Haptic & HD Rumble Tactile Feedback Service.
  *
- * Bridges authoritative Host UI events (turn transitions, action prompts, round banners,
- * countdowns, Chaos Wheel spins, hazard alerts) and direct controller interactions to
- * player smartphones using a 3-tier cross-platform pipeline:
- *
- * 1. Android Chrome / Edge / Firefox / Samsung Internet:
- *    - W3C `navigator.vibrate()` with priority-aware motor lock windows (`activeUntil`)
- *      so rapid ticks never cancel an in-progress vibration pulse.
- * 2. iOS 17.4+ / 18+ Safari & WebKit:
- *    - Native in-viewport `<input type="checkbox" switch>` Taptic Engine trigger on user gestures.
- * 3. Multi-Profile WebAudio Tactile Synthesizer (Universal Fallback):
- *    - When hardware vibration is unavailable for async WebSocket host events (e.g., iOS background
- *      turn transitions or game alerts), synthesizes a subtle low-frequency resonant tactile pulse
- *      tailored to the semantic event type (`turn-start`, `host-alert`, `timer-warning`, `thump`).
+ * Supports 3 user-selectable Haptic Intensity modes (`HapticMode`):
+ * - `'default'`: Balanced W3C `navigator.vibrate()` pulses (32ms–85ms), single iOS Taptic
+ *   switch tap on user gestures, and subtle WebAudio tactile fallback when hardware vibrate
+ *   is unavailable.
+ * - `'forceful'`: Maximum overdrive using high-torque multi-pulse `navigator.vibrate()` bursts
+ *   (85ms–240ms) with `touchend`/`click` re-assertion, multi-burst iOS 18 Taptic switch pulses,
+ *   and a co-firing compressed HD Rumble Speaker-Chassis Resonator (sub-bass + mechanical click).
+ * - `'off'`: Completely disables all vibrations, Taptic switches, and tactile audio pulses.
  */
+
+export type HapticMode = 'default' | 'forceful' | 'off';
 
 export type HapticIntensity = 'light' | 'medium' | 'heavy';
 
@@ -42,7 +39,8 @@ export type HapticEventType =
 export type TactileToneProfile = 'turn' | 'tick' | 'alert' | 'warning' | 'fanfare' | 'thump';
 
 export interface HapticPresetSpec {
-  pattern: number | number[];
+  defaultPattern: number | number[];
+  forcefulPattern: number | number[];
   intensity: HapticIntensity;
   visualPulse: Exclude<HapticVisualPulse, 'none'>;
   toneProfile: TactileToneProfile;
@@ -57,6 +55,7 @@ export interface HapticResult {
   blockedByIframe: boolean;
   platform: 'ios' | 'android' | 'other';
   skippedByLock: boolean;
+  mode: HapticMode;
   event?: HapticEventType;
 }
 
@@ -72,6 +71,9 @@ export interface HapticNotification {
 }
 
 type HapticSubscriber = (notification: HapticNotification) => void;
+type HapticModeSubscriber = (mode: HapticMode) => void;
+
+const HAPTIC_MODE_STORAGE_KEY = 'joinstick_haptic_mode_v1';
 
 const PRIORITY_BY_INTENSITY: Record<HapticIntensity, number> = {
   light: 1,
@@ -81,15 +83,17 @@ const PRIORITY_BY_INTENSITY: Record<HapticIntensity, number> = {
 
 export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
   'turn-start': {
-    pattern: [26, 36, 46],
-    intensity: 'medium',
-    visualPulse: 'light',
+    defaultPattern: [36, 32, 58],
+    forcefulPattern: [115, 45, 175],
+    intensity: 'heavy',
+    visualPulse: 'heavy',
     toneProfile: 'turn',
     defaultLabelEn: 'YOUR TURN!',
     defaultLabelZh: '轮到你了！',
   },
   'turn-change': {
-    pattern: 18,
+    defaultPattern: 24,
+    forcefulPattern: [80],
     intensity: 'light',
     visualPulse: 'subtle',
     toneProfile: 'tick',
@@ -97,31 +101,35 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '回合切换',
   },
   'action-required': {
-    pattern: [34, 28, 54],
-    intensity: 'medium',
-    visualPulse: 'light',
+    defaultPattern: [42, 30, 68],
+    forcefulPattern: [110, 40, 130, 40, 175],
+    intensity: 'heavy',
+    visualPulse: 'heavy',
     toneProfile: 'alert',
     defaultLabelEn: 'ACTION REQUIRED!',
     defaultLabelZh: '请立即操作！',
   },
   'timer-warning': {
-    pattern: [38, 28, 38],
-    intensity: 'medium',
-    visualPulse: 'light',
+    defaultPattern: [45, 30, 45],
+    forcefulPattern: [100, 35, 100, 35, 150],
+    intensity: 'heavy',
+    visualPulse: 'heavy',
     toneProfile: 'warning',
     defaultLabelEn: 'TIME RUNNING OUT!',
     defaultLabelZh: '倒计时警告！',
   },
   'host-alert': {
-    pattern: [26, 26, 40],
+    defaultPattern: [34, 28, 52],
+    forcefulPattern: [100, 40, 150],
     intensity: 'medium',
-    visualPulse: 'subtle',
+    visualPulse: 'light',
     toneProfile: 'alert',
     defaultLabelEn: 'GAME ALERT',
     defaultLabelZh: '赛况提醒',
   },
   'round-transition': {
-    pattern: [28, 32, 44],
+    defaultPattern: [36, 32, 56],
+    forcefulPattern: [105, 45, 160],
     intensity: 'medium',
     visualPulse: 'light',
     toneProfile: 'turn',
@@ -129,23 +137,26 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '新一轮开始',
   },
   'phase-transition': {
-    pattern: [22, 28, 34],
-    intensity: 'light',
-    visualPulse: 'subtle',
+    defaultPattern: [28, 28, 44],
+    forcefulPattern: [90, 40, 125],
+    intensity: 'medium',
+    visualPulse: 'light',
     toneProfile: 'tick',
     defaultLabelEn: 'SCREEN UPDATED',
     defaultLabelZh: '大屏状态切换',
   },
   'chaos-wheel': {
-    pattern: [24, 24, 42],
-    intensity: 'medium',
-    visualPulse: 'light',
+    defaultPattern: [32, 26, 54],
+    forcefulPattern: [85, 35, 105, 35, 155],
+    intensity: 'heavy',
+    visualPulse: 'heavy',
     toneProfile: 'alert',
     defaultLabelEn: 'CHAOS WHEEL!',
     defaultLabelZh: '混沌转盘！',
   },
   'frenzy-alert': {
-    pattern: [60, 35, 95, 35, 120],
+    defaultPattern: [65, 35, 95, 35, 130],
+    forcefulPattern: [145, 45, 170, 45, 230],
     intensity: 'heavy',
     visualPulse: 'heavy',
     toneProfile: 'fanfare',
@@ -153,15 +164,17 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '双倍狂热时刻！',
   },
   countdown: {
-    pattern: 32,
-    intensity: 'light',
-    visualPulse: 'subtle',
+    defaultPattern: 34,
+    forcefulPattern: [85],
+    intensity: 'medium',
+    visualPulse: 'light',
     toneProfile: 'tick',
     defaultLabelEn: 'GET READY...',
     defaultLabelZh: '准备开始...',
   },
   go: {
-    pattern: [55, 35, 95],
+    defaultPattern: [60, 35, 105],
+    forcefulPattern: [135, 45, 215],
     intensity: 'heavy',
     visualPulse: 'heavy',
     toneProfile: 'fanfare',
@@ -169,7 +182,8 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '正式开始！',
   },
   'podium-reveal': {
-    pattern: [70, 40, 120],
+    defaultPattern: [75, 40, 125],
+    forcefulPattern: [145, 50, 185, 50, 245],
     intensity: 'heavy',
     visualPulse: 'heavy',
     toneProfile: 'fanfare',
@@ -177,23 +191,26 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '比赛结束！',
   },
   'player-ready': {
-    pattern: 20,
-    intensity: 'light',
-    visualPulse: 'subtle',
+    defaultPattern: 30,
+    forcefulPattern: [85],
+    intensity: 'medium',
+    visualPulse: 'light',
     toneProfile: 'tick',
     defaultLabelEn: 'READY!',
     defaultLabelZh: '已准备！',
   },
   'host-transfer': {
-    pattern: [45, 30, 85],
-    intensity: 'medium',
-    visualPulse: 'light',
+    defaultPattern: [50, 30, 90],
+    forcefulPattern: [115, 45, 180],
+    intensity: 'heavy',
+    visualPulse: 'heavy',
     toneProfile: 'turn',
     defaultLabelEn: 'HOST REMOTE ACTIVE',
     defaultLabelZh: '已获得房主遥控器',
   },
   'impact-light': {
-    pattern: 24,
+    defaultPattern: 28,
+    forcefulPattern: [80],
     intensity: 'light',
     visualPulse: 'subtle',
     toneProfile: 'thump',
@@ -201,7 +218,8 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '触感',
   },
   'impact-medium': {
-    pattern: 45,
+    defaultPattern: 50,
+    forcefulPattern: [115],
     intensity: 'medium',
     visualPulse: 'light',
     toneProfile: 'thump',
@@ -209,7 +227,8 @@ export const HAPTIC_PRESETS: Record<HapticEventType, HapticPresetSpec> = {
     defaultLabelZh: '碰撞',
   },
   'impact-heavy': {
-    pattern: [65, 35, 85],
+    defaultPattern: [70, 35, 95],
+    forcefulPattern: [145, 45, 200],
     intensity: 'heavy',
     visualPulse: 'heavy',
     toneProfile: 'thump',
@@ -293,10 +312,24 @@ export function resolveHapticEventType(
   return 'impact-light';
 }
 
+function loadInitialHapticMode(): HapticMode {
+  if (typeof window === 'undefined') return 'forceful';
+  try {
+    const raw = window.localStorage.getItem(HAPTIC_MODE_STORAGE_KEY);
+    if (raw === 'default' || raw === 'forceful' || raw === 'off') {
+      return raw;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return 'forceful';
+}
+
 class ControllerHapticsEngine {
-  private readonly enabled = true;
+  private mode: HapticMode = loadInitialHapticMode();
   private switchLabel: HTMLLabelElement | null = null;
   private audioCtx: AudioContext | null = null;
+  private masterCompressor: DynamicsCompressorNode | null = null;
   private audioPrimed = false;
   private vibratePrimed = false;
   private isIOS = false;
@@ -305,8 +338,13 @@ class ControllerHapticsEngine {
   private activePriority = 0;
   private lastTapticAt = 0;
   private lastAudioAt = 0;
+  private pendingPatternForTouchEnd: {
+    pattern: number | number[];
+    expiresAt: number;
+  } | null = null;
   private listenersAttached = false;
   private subscribers = new Set<HapticSubscriber>();
+  private modeSubscribers = new Set<HapticModeSubscriber>();
 
   constructor() {
     if (typeof navigator !== 'undefined') {
@@ -322,23 +360,62 @@ class ControllerHapticsEngine {
   private attachGlobalUnlockListeners(): void {
     if (typeof window === 'undefined' || this.listenersAttached) return;
     this.listenersAttached = true;
-    const onGesture = () => {
-      this.unlock(true);
+
+    const onStartGesture = () => {
+      if (this.mode !== 'off') {
+        this.unlock(true);
+      }
     };
+
+    const onEndGesture = () => {
+      if (this.mode === 'off') return;
+      this.unlock(true);
+      const pending = this.pendingPatternForTouchEnd;
+      if (pending && Date.now() <= pending.expiresAt) {
+        this.pendingPatternForTouchEnd = null;
+        this.tryRawNavigatorVibrate(pending.pattern);
+        if (this.isIOS && this.mode === 'forceful') {
+          this.fireIosTapticSwitch(1);
+        }
+      }
+    };
+
     const opts: AddEventListenerOptions = { passive: true, capture: true };
-    window.addEventListener('pointerdown', onGesture, opts);
-    window.addEventListener('pointerup', onGesture, opts);
-    window.addEventListener('touchstart', onGesture, opts);
-    window.addEventListener('touchend', onGesture, opts);
-    window.addEventListener('mousedown', onGesture, opts);
-    window.addEventListener('keydown', onGesture, opts);
-    window.addEventListener('click', onGesture, opts);
+    window.addEventListener('pointerdown', onStartGesture, opts);
+    window.addEventListener('touchstart', onStartGesture, opts);
+    window.addEventListener('mousedown', onStartGesture, opts);
+    window.addEventListener('keydown', onStartGesture, opts);
+    window.addEventListener('pointerup', onEndGesture, opts);
+    window.addEventListener('touchend', onEndGesture, opts);
+    window.addEventListener('click', onEndGesture, opts);
+  }
+
+  private tryRawNavigatorVibrate(value: number | number[]): boolean {
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
+      return false;
+    }
+    try {
+      let ok = navigator.vibrate(value);
+      if (!ok && typeof value === 'number') {
+        ok = navigator.vibrate([value]);
+      }
+      return Boolean(ok);
+    } catch {
+      return false;
+    }
   }
 
   public subscribe(listener: HapticSubscriber): () => void {
     this.subscribers.add(listener);
     return () => {
       this.subscribers.delete(listener);
+    };
+  }
+
+  public subscribeMode(listener: HapticModeSubscriber): () => void {
+    this.modeSubscribers.add(listener);
+    return () => {
+      this.modeSubscribers.delete(listener);
     };
   }
 
@@ -350,6 +427,52 @@ class ControllerHapticsEngine {
         // Ignore subscriber errors
       }
     }
+  }
+
+  private notifyModeSubscribers(): void {
+    for (const sub of this.modeSubscribers) {
+      try {
+        sub(this.mode);
+      } catch {
+        // Ignore subscriber errors
+      }
+    }
+  }
+
+  public getMode(): HapticMode {
+    return this.mode;
+  }
+
+  public setMode(nextMode: HapticMode): void {
+    if (nextMode !== 'default' && nextMode !== 'forceful' && nextMode !== 'off') return;
+    this.mode = nextMode;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(HAPTIC_MODE_STORAGE_KEY, nextMode);
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    if (nextMode === 'off') {
+      this.pendingPatternForTouchEnd = null;
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate(0);
+        } catch {
+          // Ignore stop errors
+        }
+      }
+    } else {
+      this.unlock(true);
+    }
+    this.notifyModeSubscribers();
+  }
+
+  public cycleMode(): HapticMode {
+    const next: HapticMode =
+      this.mode === 'default' ? 'forceful' : this.mode === 'forceful' ? 'off' : 'default';
+    this.setMode(next);
+    return next;
   }
 
   public getPlatform(): 'ios' | 'android' | 'other' {
@@ -367,13 +490,12 @@ class ControllerHapticsEngine {
     }
   }
 
-  public setEnabled(_enabled: boolean): void {
-    // Force Haptic mode: haptics remain permanently enabled for all players
-    this.unlock();
+  public setEnabled(enabled: boolean): void {
+    this.setMode(enabled ? 'forceful' : 'off');
   }
 
   public isEnabled(): boolean {
-    return this.enabled;
+    return this.mode !== 'off';
   }
 
   public supportsNativeVibrate(): boolean {
@@ -384,8 +506,27 @@ class ControllerHapticsEngine {
     );
   }
 
+  private getMasterOutput(ctx: AudioContext): AudioNode {
+    if (this.masterCompressor && this.masterCompressor.context === ctx) {
+      return this.masterCompressor;
+    }
+    try {
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-18, ctx.currentTime);
+      comp.knee.setValueAtTime(10, ctx.currentTime);
+      comp.ratio.setValueAtTime(8, ctx.currentTime);
+      comp.attack.setValueAtTime(0.001, ctx.currentTime);
+      comp.release.setValueAtTime(0.08, ctx.currentTime);
+      comp.connect(ctx.destination);
+      this.masterCompressor = comp;
+      return comp;
+    } catch {
+      return ctx.destination;
+    }
+  }
+
   public unlock(fromGesture = false): void {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || this.mode === 'off') return;
     if (!this.audioCtx) {
       const Ctx =
         window.AudioContext ||
@@ -402,7 +543,6 @@ class ControllerHapticsEngine {
       if (this.audioCtx.state === 'suspended') {
         this.audioCtx.resume().catch(() => {});
       }
-      // Play a 1-sample silent buffer on first user gesture so iOS/Android permanently unlock audio
       if (fromGesture && !this.audioPrimed) {
         try {
           const buffer = this.audioCtx.createBuffer(1, 1, 22050);
@@ -416,7 +556,6 @@ class ControllerHapticsEngine {
         }
       }
     }
-    // Prime navigator.vibrate on the very first touch so mobile browsers grant sticky activation
     if (
       fromGesture &&
       !this.vibratePrimed &&
@@ -424,11 +563,8 @@ class ControllerHapticsEngine {
       typeof navigator.vibrate === 'function' &&
       !this.isIOS
     ) {
-      try {
-        navigator.vibrate(12);
+      if (this.tryRawNavigatorVibrate(this.mode === 'forceful' ? 50 : 22)) {
         this.vibratePrimed = true;
-      } catch {
-        // Ignore prime errors
       }
     }
     if (this.isIOS) {
@@ -438,10 +574,8 @@ class ControllerHapticsEngine {
 
   /**
    * Mounts an in-viewport native `<label><input type="checkbox" switch /></label>`.
-   * CRITICAL for iOS 18 WebKit:
-   * - Must stay inside viewport (`top: 0; left: 0`), NOT `-9999px`
-   * - Must keep native `appearance` (NOT `appearance: none`)
-   * - Must NOT use `display: none` or `visibility: hidden`
+   * Kept in top-level viewport (`top: 2px; left: 2px; z-index: 9999; opacity: 0.01`)
+   * so iOS 17.4+ / 18+ WebKit always treats `.click()` as an active on-screen switch toggle.
    */
   private ensureIosSwitchElement(): void {
     if (typeof document === 'undefined' || this.switchLabel) return;
@@ -456,13 +590,13 @@ class ControllerHapticsEngine {
     label.htmlFor = id;
     label.setAttribute('aria-hidden', 'true');
     label.style.position = 'fixed';
-    label.style.top = '0px';
-    label.style.left = '0px';
-    label.style.width = '52px';
-    label.style.height = '32px';
-    label.style.opacity = '0.001';
+    label.style.top = '2px';
+    label.style.left = '2px';
+    label.style.width = '28px';
+    label.style.height = '18px';
+    label.style.opacity = '0.01';
     label.style.pointerEvents = 'none';
-    label.style.zIndex = '-1';
+    label.style.zIndex = '9999';
     label.style.margin = '0';
     label.style.padding = '0';
 
@@ -471,8 +605,8 @@ class ControllerHapticsEngine {
     input.type = 'checkbox';
     input.setAttribute('switch', '');
     input.tabIndex = -1;
-    input.style.width = '52px';
-    input.style.height = '32px';
+    input.style.width = '28px';
+    input.style.height = '18px';
     input.style.margin = '0';
 
     label.appendChild(input);
@@ -480,15 +614,33 @@ class ControllerHapticsEngine {
     this.switchLabel = label;
   }
 
-  public fireIosTapticSwitch(): boolean {
-    if (!this.isIOS) return false;
+  public fireIosTapticSwitch(burstCount = 1): boolean {
+    if (!this.isIOS || this.mode === 'off') return false;
     const now = Date.now();
-    if (now - this.lastTapticAt < 40) return false;
+    if (now - this.lastTapticAt < 30) return false;
     this.lastTapticAt = now;
     try {
       this.ensureIosSwitchElement();
       if (this.switchLabel) {
         this.switchLabel.click();
+        if (burstCount >= 2) {
+          window.setTimeout(() => {
+            try {
+              this.switchLabel?.click();
+            } catch {
+              // Ignore
+            }
+          }, 80);
+        }
+        if (burstCount >= 3) {
+          window.setTimeout(() => {
+            try {
+              this.switchLabel?.click();
+            } catch {
+              // Ignore
+            }
+          }, 160);
+        }
         return true;
       }
     } catch {
@@ -497,91 +649,178 @@ class ControllerHapticsEngine {
     return false;
   }
 
+  private playSingleResonantPulse(
+    ctx: AudioContext,
+    dest: AudioNode,
+    startTime: number,
+    startFreq: number,
+    endFreq: number,
+    durationSec: number,
+    gainPeak: number,
+    clickFreq = 1050,
+    includeTransient = true
+  ): void {
+    // 1. Sub-bass fundamental driver
+    const subOsc = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(startFreq, startTime);
+    subOsc.frequency.exponentialRampToValueAtTime(Math.max(32, endFreq), startTime + durationSec);
+
+    subGain.gain.setValueAtTime(0.0001, startTime);
+    subGain.gain.linearRampToValueAtTime(gainPeak, startTime + 0.004);
+    subGain.gain.setValueAtTime(gainPeak * 0.92, startTime + durationSec * 0.45);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSec);
+
+    subOsc.connect(subGain);
+    subGain.connect(dest);
+    subOsc.start(startTime);
+    subOsc.stop(startTime + durationSec + 0.015);
+
+    // 2. Warm 2nd-harmonic punch body
+    const punchOsc = ctx.createOscillator();
+    const punchGain = ctx.createGain();
+    punchOsc.type = 'triangle';
+    punchOsc.frequency.setValueAtTime(startFreq * 1.65, startTime);
+    punchOsc.frequency.exponentialRampToValueAtTime(
+      Math.max(48, endFreq * 1.35),
+      startTime + durationSec * 0.85
+    );
+
+    punchGain.gain.setValueAtTime(0.0001, startTime);
+    punchGain.gain.linearRampToValueAtTime(gainPeak * 0.72, startTime + 0.003);
+    punchGain.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSec * 0.88);
+
+    punchOsc.connect(punchGain);
+    punchGain.connect(dest);
+    punchOsc.start(startTime);
+    punchOsc.stop(startTime + durationSec);
+
+    // 3. 5ms Taptic actuator transient snap (active in Forceful mode)
+    if (includeTransient) {
+      const snapOsc = ctx.createOscillator();
+      const snapGain = ctx.createGain();
+      snapOsc.type = 'square';
+      snapOsc.frequency.setValueAtTime(clickFreq, startTime);
+      snapOsc.frequency.exponentialRampToValueAtTime(140, startTime + 0.008);
+
+      snapGain.gain.setValueAtTime(0.0001, startTime);
+      snapGain.gain.linearRampToValueAtTime(gainPeak * 0.45, startTime + 0.001);
+      snapGain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.009);
+
+      snapOsc.connect(snapGain);
+      snapGain.connect(dest);
+      snapOsc.start(startTime);
+      snapOsc.stop(startTime + 0.011);
+    }
+  }
+
   private playThumpNow(
     ctx: AudioContext,
     intensity: HapticIntensity,
-    toneProfile: TactileToneProfile = 'thump'
+    toneProfile: TactileToneProfile = 'thump',
+    isForceful = true
   ): void {
     const now = ctx.currentTime;
+    const dest = isForceful ? this.getMasterOutput(ctx) : ctx.destination;
+    const gainScale = isForceful ? 1.0 : 0.35;
 
     if (toneProfile === 'turn') {
-      // Rising two-pulse tactile cue for turn transitions
-      const freqs = [115, 165];
-      freqs.forEach((f, idx) => {
-        const start = now + idx * 0.055;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(f, start);
-        osc.frequency.exponentialRampToValueAtTime(f * 0.55, start + 0.048);
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.linearRampToValueAtTime(0.22, start + 0.005);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.048);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(start);
-        osc.stop(start + 0.055);
-      });
+      this.playSingleResonantPulse(
+        ctx,
+        dest,
+        now,
+        95,
+        52,
+        0.085,
+        0.82 * gainScale,
+        1100,
+        isForceful
+      );
+      this.playSingleResonantPulse(
+        ctx,
+        dest,
+        now + 0.11,
+        130,
+        62,
+        0.115,
+        0.95 * gainScale,
+        1350,
+        isForceful
+      );
       return;
     }
 
     if (toneProfile === 'alert' || toneProfile === 'warning') {
-      // Subtle double tactile pulse for host alerts & timer warnings
-      const baseFreq = toneProfile === 'warning' ? 148 : 132;
-      for (let i = 0; i < 2; i++) {
-        const start = now + i * 0.06;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(baseFreq, start);
-        osc.frequency.exponentialRampToValueAtTime(62, start + 0.05);
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.linearRampToValueAtTime(0.2, start + 0.004);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.05);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(start);
-        osc.stop(start + 0.055);
+      const count = toneProfile === 'warning' && isForceful ? 3 : 2;
+      for (let i = 0; i < count; i++) {
+        this.playSingleResonantPulse(
+          ctx,
+          dest,
+          now + i * 0.095,
+          toneProfile === 'warning' ? 135 : 115,
+          54,
+          0.075,
+          0.88 * gainScale,
+          1280,
+          isForceful
+        );
       }
       return;
     }
 
-    // Standard low-end sub-bass body thump
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'triangle';
+    if (toneProfile === 'fanfare') {
+      this.playSingleResonantPulse(
+        ctx,
+        dest,
+        now,
+        90,
+        44,
+        0.095,
+        0.92 * gainScale,
+        1150,
+        isForceful
+      );
+      this.playSingleResonantPulse(
+        ctx,
+        dest,
+        now + 0.115,
+        120,
+        48,
+        0.145,
+        0.98 * gainScale,
+        1400,
+        isForceful
+      );
+      return;
+    }
 
-    const startFreq = intensity === 'heavy' ? 128 : intensity === 'medium' ? 155 : 185;
-    const endFreq = intensity === 'heavy' ? 38 : intensity === 'medium' ? 52 : 68;
-    const dur = intensity === 'heavy' ? 0.14 : intensity === 'medium' ? 0.08 : 0.045;
-    const peak = intensity === 'heavy' ? 0.36 : intensity === 'medium' ? 0.22 : 0.12;
+    const startFreq = intensity === 'heavy' ? 105 : intensity === 'medium' ? 118 : 132;
+    const endFreq = intensity === 'heavy' ? 40 : intensity === 'medium' ? 48 : 56;
+    const dur = intensity === 'heavy' ? 0.145 : intensity === 'medium' ? 0.095 : 0.068;
+    const peak =
+      (intensity === 'heavy' ? 0.96 : intensity === 'medium' ? 0.82 : 0.65) * gainScale;
 
-    osc.frequency.setValueAtTime(startFreq, now);
-    osc.frequency.exponentialRampToValueAtTime(endFreq, now + dur);
-
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(peak, now + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + dur + 0.02);
+    this.playSingleResonantPulse(ctx, dest, now, startFreq, endFreq, dur, peak, 1100, isForceful);
+    if (intensity === 'heavy' && isForceful) {
+      this.playSingleResonantPulse(ctx, dest, now + 0.125, 92, 38, 0.135, 0.95, 1250, true);
+    }
   }
 
   private fireTactileAudioThump(
     intensity: HapticIntensity,
-    toneProfile: TactileToneProfile = 'thump'
+    toneProfile: TactileToneProfile = 'thump',
+    isForceful = true
   ): boolean {
     const nowMs = Date.now();
-    if (nowMs - this.lastAudioAt < 35) return false;
+    if (nowMs - this.lastAudioAt < 28) return false;
     this.lastAudioAt = nowMs;
 
     this.unlock();
     if (!this.audioCtx) return false;
     try {
       if (this.audioCtx.state === 'running') {
-        this.playThumpNow(this.audioCtx, intensity, toneProfile);
+        this.playThumpNow(this.audioCtx, intensity, toneProfile, isForceful);
         return true;
       }
       if (this.audioCtx.state === 'suspended') {
@@ -590,7 +829,7 @@ class ControllerHapticsEngine {
           .resume()
           .then(() => {
             if (ctx.state === 'running') {
-              this.playThumpNow(ctx, intensity, toneProfile);
+              this.playThumpNow(ctx, intensity, toneProfile, isForceful);
             }
           })
           .catch(() => {});
@@ -605,18 +844,40 @@ class ControllerHapticsEngine {
   private normalizePattern(
     pattern: number | number[],
     intensity: HapticIntensity,
-    subtle = false
+    isForceful: boolean
   ): { value: number | number[]; totalMs: number } {
-    const minPulse = subtle ? 26 : intensity === 'heavy' ? 85 : intensity === 'medium' ? 50 : 35;
-    const scaleFactor = subtle ? 1.15 : 1.3;
+    if (!isForceful) {
+      // Default Mode: Balanced, subtle-to-medium W3C vibration pulses
+      const minPulse = intensity === 'heavy' ? 70 : intensity === 'medium' ? 44 : 28;
+      const scaleFactor = 1.15;
+      if (typeof pattern === 'number') {
+        const dur = Math.max(minPulse, Math.round(pattern * scaleFactor));
+        return { value: dur, totalMs: dur };
+      }
+      const scaled = pattern.map((ms, idx) =>
+        idx % 2 === 0
+          ? Math.max(minPulse, Math.round(ms * scaleFactor))
+          : Math.max(24, Math.round(ms))
+      );
+      const totalMs = scaled.reduce((sum, n) => sum + n, 0);
+      return { value: scaled, totalMs };
+    }
+
+    // Forceful Mode: High-torque motor spin-up durations (80ms–135ms minimum) + multi-pulse bursts
+    const minPulse = intensity === 'heavy' ? 130 : intensity === 'medium' ? 95 : 80;
+    const scaleFactor = 1.5;
     if (typeof pattern === 'number') {
       const dur = Math.max(minPulse, Math.round(pattern * scaleFactor));
+      if (intensity === 'heavy' || intensity === 'medium') {
+        const arr = [dur, 38, Math.round(dur * 1.15)];
+        return { value: arr, totalMs: arr[0] + arr[1] + arr[2] };
+      }
       return { value: dur, totalMs: dur };
     }
     const scaled = pattern.map((ms, idx) =>
       idx % 2 === 0
         ? Math.max(minPulse, Math.round(ms * scaleFactor))
-        : Math.max(24, Math.round(ms))
+        : Math.max(35, Math.round(ms))
     );
     const totalMs = scaled.reduce((sum, n) => sum + n, 0);
     return { value: scaled, totalMs };
@@ -639,33 +900,26 @@ class ControllerHapticsEngine {
   ): HapticResult {
     const eventType = resolveHapticEventType(reasonOrEvent, customPattern);
     const preset = HAPTIC_PRESETS[eventType];
-    const pattern = customPattern ?? preset.pattern;
+    const isForceful = this.mode === 'forceful';
+
+    const presetPattern = isForceful ? preset.forcefulPattern : preset.defaultPattern;
+    const usePresetPattern =
+      customPattern === undefined ||
+      (isForceful &&
+        ((typeof customPattern === 'number' && customPattern < 65) ||
+          (Array.isArray(customPattern) && customPattern[0] < 60)));
+    const pattern = usePresetPattern ? presetPattern : customPattern;
     const intensity = options?.intensity ?? preset.intensity;
-    const isSubtleEvent =
-      eventType === 'turn-change' ||
-      eventType === 'phase-transition' ||
-      eventType === 'player-ready' ||
-      eventType === 'host-alert' ||
-      eventType === 'turn-start';
 
     const res = this.trigger(pattern, {
       fromUserGesture: options?.fromUserGesture,
       intensity,
-      // Always force important semantic host events so they never get dropped
-      force:
-        options?.force ??
-        (eventType === 'turn-start' ||
-          eventType === 'action-required' ||
-          eventType === 'timer-warning' ||
-          eventType === 'go' ||
-          eventType === 'frenzy-alert' ||
-          eventType === 'podium-reveal'),
+      force: isForceful ? true : options?.force,
       toneProfile: preset.toneProfile,
-      subtle: isSubtleEvent,
     });
     res.event = eventType;
 
-    if (!options?.silentUi) {
+    if (this.mode !== 'off' && !options?.silentUi) {
       this.notifySubscribers({
         event: eventType,
         reason: reasonOrEvent,
@@ -692,8 +946,6 @@ class ControllerHapticsEngine {
       subtle?: boolean;
     }
   ): HapticResult {
-    this.unlock(Boolean(options?.fromUserGesture));
-
     const platform = this.getPlatform();
     const blockedByIframe = this.isInIframe();
     const result: HapticResult = {
@@ -703,7 +955,15 @@ class ControllerHapticsEngine {
       blockedByIframe,
       platform,
       skippedByLock: false,
+      mode: this.mode,
     };
+
+    if (this.mode === 'off') {
+      return result;
+    }
+
+    const isForceful = this.mode === 'forceful';
+    this.unlock(Boolean(options?.fromUserGesture));
 
     const intensity: HapticIntensity =
       options?.intensity ??
@@ -711,53 +971,71 @@ class ControllerHapticsEngine {
     const priority = PRIORITY_BY_INTENSITY[intensity];
     const now = Date.now();
 
-    // Prevent lower-priority background ticks from cutting off an active heavy vibration pulse
-    if (!options?.force && now < this.activeUntil && priority < this.activePriority) {
+    if (!options?.force && !isForceful && now < this.activeUntil && priority <= this.activePriority) {
+      result.skippedByLock = true;
+      return result;
+    }
+    if (!options?.force && isForceful && now < this.activeUntil && priority < this.activePriority) {
       result.skippedByLock = true;
       return result;
     }
 
+    const { value, totalMs } = this.normalizePattern(pattern, intensity, isForceful);
+
+    // In Forceful mode, queue for touchend/click re-assertion if triggered during pointerdown/touchstart
+    if (isForceful && options?.fromUserGesture) {
+      this.pendingPatternForTouchEnd = {
+        pattern: value,
+        expiresAt: now + 260,
+      };
+    }
+
     // 1. Native W3C Vibration API (Android Chrome / Firefox / Edge / Samsung Internet)
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function' && !this.isIOS) {
-      try {
-        const { value, totalMs } = this.normalizePattern(pattern, intensity, options?.subtle);
-        const ok = navigator.vibrate(value);
-        result.vibrated = Boolean(ok);
-        if (result.vibrated) {
-          this.vibratePrimed = true;
-          this.activeUntil = now + Math.min(360, totalMs);
-          this.activePriority = priority;
-        }
-      } catch {
-        result.vibrated = false;
+      result.vibrated = this.tryRawNavigatorVibrate(value);
+      if (result.vibrated) {
+        this.vibratePrimed = true;
+        this.activeUntil = now + Math.min(420, totalMs);
+        this.activePriority = priority;
       }
     }
 
     // 2. iOS 17.4+/18+ Safari / WebKit Taptic Engine Switch
-    if (this.isIOS && !options?.skipIosSwitch) {
-      result.iosTaptic = this.fireIosTapticSwitch();
+    if (this.isIOS && !options?.skipIosSwitch && (isForceful || options?.fromUserGesture)) {
+      const burstCount = isForceful
+        ? intensity === 'heavy'
+          ? 3
+          : intensity === 'medium'
+          ? 2
+          : 1
+        : 1;
+      result.iosTaptic = this.fireIosTapticSwitch(burstCount);
     }
 
-    // 3. Forced Low-Frequency Tactile Sub-Bass Synthesizer:
-    // Always co-fires so phones with OS vibration muted, Battery Saver enabled, or iOS WebKit
-    // still produce an unmistakable physical + acoustic tactile thump automatically.
-    result.audioThump = this.fireTactileAudioThump(intensity, options?.toneProfile ?? 'thump');
-    if (!result.vibrated && result.audioThump) {
-      this.activeUntil = now + (intensity === 'heavy' ? 110 : 60);
-      this.activePriority = priority;
+    // 3. WebAudio Tactile Sub-Bass & Mechanical Transient Resonator:
+    // - In Forceful mode: Always co-fires compressed HD Rumble to shake the phone chassis.
+    // - In Default mode: Fires as a gentle fallback only when native navigator.vibrate didn't fire.
+    if (isForceful || !result.vibrated) {
+      result.audioThump = this.fireTactileAudioThump(
+        intensity,
+        options?.toneProfile ?? 'thump',
+        isForceful
+      );
+      if (!result.vibrated && result.audioThump) {
+        this.activeUntil = now + (intensity === 'heavy' ? 140 : 80);
+        this.activePriority = priority;
+      }
     }
 
     return result;
   }
 
   public describeResult(res: HapticResult): string {
-    if (res.vibrated || res.iosTaptic || res.audioThump) {
-      return 'Force Haptics Active!';
-    }
-    return 'Force Haptics Active!';
+    if (res.mode === 'off') return 'Haptics Off';
+    if (res.mode === 'forceful') return 'Forceful Haptics Active';
+    return 'Default Haptics Active';
   }
 }
 
 export const controllerHaptics = new ControllerHapticsEngine();
 export const globalHaptics = controllerHaptics;
-

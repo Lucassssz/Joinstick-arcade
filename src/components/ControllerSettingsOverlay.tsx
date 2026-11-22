@@ -1,4 +1,5 @@
-import { Move, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
+import { Move, RotateCcw, SlidersHorizontal, Vibrate, X } from 'lucide-react';
+import { HapticMode } from '../lib/haptics';
 import { useLanguage } from '../lib/i18n';
 
 export type ButtonLayoutMode = 'vertical' | 'angled' | 'horizontal';
@@ -154,6 +155,8 @@ interface ControllerSettingsOverlayProps {
   onReset: () => void;
   onEnterDragMode?: () => void;
   onClose: () => void;
+  hapticMode: HapticMode;
+  onHapticModeChange: (mode: HapticMode) => void;
   accentHex: string;
   actionALabel: string;
   actionBLabel: string;
@@ -168,6 +171,8 @@ export function ControllerSettingsOverlay({
   onReset,
   onEnterDragMode,
   onClose,
+  hapticMode,
+  onHapticModeChange,
   accentHex,
   actionALabel,
   actionBLabel,
@@ -247,6 +252,96 @@ export function ControllerSettingsOverlay({
 
       {/* Scrollable Body */}
       <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar pr-1 space-y-3">
+        {/* Haptic Intensity Mode Selector ('Default', 'Forceful', 'Off') */}
+        <div className="rounded-xl bg-[#1A1E26] border border-[#2A303D] p-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Vibrate className="w-4 h-4 text-[#10D98B] shrink-0" />
+              <div>
+                <div className="font-display font-bold text-xs sm:text-sm text-white">
+                  {t('Haptic Intensity', '震动反馈强度')}
+                </div>
+                <div className="text-[10px] sm:text-[11px] text-[#9CA3AF]">
+                  {hapticMode === 'forceful'
+                    ? t(
+                        'Forceful: Max-torque Vibration APIs + HD Rumble resonator for phones with weak or restricted motors',
+                        '强力模式：高扭矩多段震动 API + 机身低频共振增强，兼容各种手机硬件'
+                      )
+                    : hapticMode === 'default'
+                    ? t(
+                        'Default: Balanced standard tactile vibration pulses on turns, alerts & button taps',
+                        '标准模式：在回合切换、警报和按键时触发均衡细腻的震动反馈'
+                      )
+                    : t(
+                        'Off: All smartphone vibrations and tactile audio feedback disabled',
+                        '已关闭：停用所有手机马达震动与触感反馈'
+                      )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            role="radiogroup"
+            aria-label={t('Haptic Intensity', '震动反馈强度')}
+            className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#101217] border border-[#262C38]"
+          >
+            {(
+              [
+                {
+                  id: 'default',
+                  en: 'Default',
+                  zh: '标准 (Default)',
+                  subEn: 'Balanced pulses',
+                  subZh: '均衡柔和',
+                  activeClass: 'bg-[#00C2FF] text-[#0B1219] shadow-[0_2px_0_#007FA8]',
+                },
+                {
+                  id: 'forceful',
+                  en: 'Forceful',
+                  zh: '强力 (Forceful)',
+                  subEn: 'Max Vibration APIs',
+                  subZh: '强力多段震动',
+                  activeClass: 'bg-[#10D98B] text-[#071A12] shadow-[0_2px_0_#0A915D]',
+                },
+                {
+                  id: 'off',
+                  en: 'Off',
+                  zh: '关闭 (Off)',
+                  subEn: 'Silent motor',
+                  subZh: '停用震动',
+                  activeClass: 'bg-[#2E3646] text-white',
+                },
+              ] as const
+            ).map((opt) => {
+              const active = hapticMode === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => onHapticModeChange(opt.id)}
+                  className={`py-2 px-2.5 rounded-lg text-center transition-all cursor-pointer select-none ${
+                    active ? opt.activeClass : 'text-[#9CA3AF] hover:text-white hover:bg-[#1A1E26]'
+                  }`}
+                >
+                  <div className="font-display font-extrabold text-xs leading-tight">
+                    {t(opt.en, opt.zh)}
+                  </div>
+                  <div
+                    className={`text-[10px] leading-tight mt-0.5 ${
+                      active ? 'opacity-85 font-semibold' : 'text-[#6B7280]'
+                    }`}
+                  >
+                    {t(opt.subEn, opt.subZh)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Live Mini Controller Placement Preview */}
         <div className="rounded-xl bg-[#101217] border border-[#242934] px-3 py-2 flex items-center justify-between gap-3">
           <div className="text-[11px] text-[#9CA3AF] leading-snug">

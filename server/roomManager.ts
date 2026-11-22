@@ -12,6 +12,7 @@ import {
   type GameSnapshot,
   type PlayerColorSpec,
   type PlayerFilterMode,
+  type PlayerMatchStats,
   type PlayerSummary,
   type RankingEntry,
   type RemoteDirection,
@@ -64,6 +65,34 @@ interface ConnectedPlayer {
   prevA: boolean;
   prevB: boolean;
   disconnectedAt: number | null;
+  matchStats: PlayerMatchStats;
+  cardPromptStartedAt: number | null;
+}
+
+function createDefaultMatchStats(): PlayerMatchStats {
+  return {
+    wins: 0,
+    cardWins: 0,
+    matchesPlayed: 0,
+    totalActions: 0,
+    cardActions: 0,
+    cardResponses: 0,
+    totalCardResponseMs: 0,
+    avgCardResponseMs: null,
+    lastCardResponseMs: null,
+    fastestCardResponseMs: null,
+  };
+}
+
+function recordCardPlayerResponse(player: ConnectedPlayer, elapsedMs: number): void {
+  const clamped = Math.max(80, Math.min(30_000, Math.round(elapsedMs)));
+  const st = player.matchStats;
+  st.cardResponses += 1;
+  st.totalCardResponseMs += clamped;
+  st.lastCardResponseMs = clamped;
+  st.avgCardResponseMs = Math.round(st.totalCardResponseMs / st.cardResponses);
+  st.fastestCardResponseMs =
+    st.fastestCardResponseMs === null ? clamped : Math.min(st.fastestCardResponseMs, clamped);
 }
 
 interface HostHapticTracker {
@@ -383,6 +412,7 @@ export class RoomManager {
         statText: p.statText,
         cooldownA: p.cooldownA,
         cooldownB: p.cooldownB,
+        matchStats: { ...p.matchStats },
       }));
 
     return {
@@ -634,6 +664,8 @@ export class RoomManager {
           prevA: false,
           prevB: false,
           disconnectedAt: null,
+          matchStats: createDefaultMatchStats(),
+          cardPromptStartedAt: null,
         };
 
         room.players.set(playerId, player);
@@ -1056,13 +1088,45 @@ export class RoomManager {
 
         const engine = SERVER_GAMES[room.selectedGameId];
         if (!engine.handleCardAction) return;
+
+        const now = Date.now();
+        if (msg.action.type !== 'select-index') {
+          player.matchStats.totalActions += 1;
+          player.matchStats.cardActions += 1;
+          const isDecisionAction =
+            msg.action.type === 'play-card' ||
+            msg.action.type === 'draw-or-pass' ||
+            msg.action.type === 'pick-color' ||
+            msg.action.type === 'submit-selected' ||
+            msg.action.type === 'call-bluff' ||
+            msg.action.type === 'trust-claim';
+          if (isDecisionAction) {
+            let elapsedMs: number | null =
+              player.cardPromptStartedAt !== null ? now - player.cardPromptStartedAt : null;
+            if (elapsedMs === null && room.lastSnapshot) {
+              const snap = room.lastSnapshot;
+              if (
+                (snap.gameId === 'color-clash' || snap.gameId === 'liars-deck') &&
+                snap.turnTotal > 0
+              ) {
+                elapsedMs = Math.max(120, Math.round((snap.turnTotal - snap.turnTimeLeft) * 1000));
+              }
+            }
+            if (elapsedMs !== null) {
+              recordCardPlayerResponse(player, elapsedMs);
+            }
+            player.cardPromptStartedAt = now;
+          }
+        }
+
         engine.handleCardAction(room.gameState, player.id, msg.action, this.toInputPlayers(room));
         room.lastSnapshot = engine.getSnapshot(room.gameState);
-        room.lastActivityAt = Date.now();
+        room.lastActivityAt = now;
         this.pushCardStates(room, undefined, true);
         if (room.lastSnapshot) {
           this.broadcastTick(room, room.lastSnapshot, []);
         }
+        this.broadcastRoom(room);
         return;
       }
 
@@ -1252,6 +1316,8 @@ export class RoomManager {
       prevA: false,
       prevB: false,
       disconnectedAt: null,
+      matchStats: createDefaultMatchStats(),
+      cardPromptStartedAt: null,
     };
 
     room.players.set(botId, botPlayer);
@@ -2052,6 +2118,19 @@ export class RoomManager {
         if (room.countdownTimer <= 0) {
           room.status = 'PLAYING';
           room.countdownValue = 0;
+          const startedAt = Date.now();
+          for (const p of room.players.values()) {
+            p.cardPromptStartedAt = null;
+          }
+          if (
+            room.lastSnapshot &&
+            (room.lastSnapshot.gameId === 'color-clash' || room.lastSnapshot.gameId === 'liars-deck')
+          ) {
+            const activeP = room.players.get(room.lastSnapshot.activePlayerId);
+            if (activeP) {
+              activeP.cardPromptStartedAt = startedAt;
+            }
+          }
           this.broadcastRoom(room);
           if (room.lastSnapshot) {
             this.broadcastTick(room, room.lastSnapshot, [{ type: 'go' }]);
@@ -2137,10 +2216,26 @@ export class RoomManager {
       const simDt = Math.min(0.085, dt * speedScale);
       const scoreMult = mutator.scoreMult * (room.frenzy.active ? 2 : 1);
 
+      const prevSnapshot = room.lastSnapshot;
       const result = engine.step(room.gameState, currentInputs, simDt);
+      const isCardMatch =
+        room.selectedGameId === 'color-clash' || room.selectedGameId === 'liars-deck';
 
       // Persist edge-trigger states & live HUD telemetry (with Frenzy + Mutator score multiplier)
       for (const p of room.players.values()) {
+        const justA = p.input.a && !p.prevA;
+        const justB = p.input.b && !p.prevB;
+        if (!p.isBot && (justA || justB)) {
+          const presses = (justA ? 1 : 0) + (justB ? 1 : 0);
+          p.matchStats.totalActions += presses;
+          if (isCardMatch) {
+            p.matchStats.cardActions += 1;
+            if (p.cardPromptStartedAt !== null) {
+              recordCardPlayerResponse(p, now - p.cardPromptStartedAt);
+              p.cardPromptStartedAt = now;
+            }
+          }
+        }
         p.prevA = p.input.a;
         p.prevB = p.input.b;
         const hud = result.hudUpdates[p.id];
@@ -2160,6 +2255,10 @@ export class RoomManager {
           p.cooldownA = hud.cooldownA;
           p.cooldownB = hud.cooldownB;
         }
+      }
+
+      if (isCardMatch && prevSnapshot) {
+        this.trackCardSnapshotStats(room, prevSnapshot, result.snapshot, now);
       }
 
       room.lastSnapshot = result.snapshot;
@@ -2265,6 +2364,25 @@ export class RoomManager {
           room.rankings = baseRankings;
         }
 
+        for (const p of room.players.values()) {
+          p.matchStats.matchesPlayed += 1;
+          p.cardPromptStartedAt = null;
+        }
+        for (const r of room.rankings) {
+          if (r.rank === 1) {
+            const winPlayer = room.players.get(r.playerId);
+            if (winPlayer) {
+              winPlayer.matchStats.wins += 1;
+              if (
+                room.selectedGameId === 'color-clash' ||
+                room.selectedGameId === 'liars-deck'
+              ) {
+                winPlayer.matchStats.cardWins += 1;
+              }
+            }
+          }
+        }
+
         if (room.tournament?.active) {
           this.applyTournamentMatchResult(room);
         }
@@ -2284,6 +2402,92 @@ export class RoomManager {
         this.broadcastRoom(room);
       }
     }, TICK_MS);
+  }
+
+  private trackCardSnapshotStats(
+    room: RoomRecord,
+    prevSnap: GameSnapshot,
+    nextSnap: GameSnapshot,
+    now: number
+  ): void {
+    if (prevSnap.gameId === 'color-clash' && nextSnap.gameId === 'color-clash') {
+      const turnChanged = nextSnap.activePlayerId !== prevSnap.activePlayerId;
+      const turnAdvanced = nextSnap.turnCount > prevSnap.turnCount;
+      const enteredColorPick = !prevSnap.awaitingColorPick && nextSnap.awaitingColorPick;
+
+      if (turnChanged || turnAdvanced || enteredColorPick) {
+        const actor = room.players.get(prevSnap.activePlayerId);
+        if (actor) {
+          if (actor.isBot) {
+            actor.matchStats.totalActions += 1;
+            actor.matchStats.cardActions += 1;
+          }
+          if (actor.cardPromptStartedAt !== null && (actor.isBot || now - actor.cardPromptStartedAt > 65)) {
+            recordCardPlayerResponse(actor, now - actor.cardPromptStartedAt);
+          }
+          actor.cardPromptStartedAt = enteredColorPick && !turnChanged ? now : null;
+        }
+      }
+
+      if (turnChanged) {
+        const nextActor = room.players.get(nextSnap.activePlayerId);
+        if (nextActor) {
+          nextActor.cardPromptStartedAt = now;
+        }
+      }
+      return;
+    }
+
+    if (prevSnap.gameId === 'liars-deck' && nextSnap.gameId === 'liars-deck') {
+      // Transition 1: Active player submitted face-down cards (selecting -> challenge)
+      if (prevSnap.phase === 'selecting' && nextSnap.phase === 'challenge') {
+        const actor = room.players.get(prevSnap.activePlayerId);
+        if (actor) {
+          if (actor.isBot) {
+            actor.matchStats.totalActions += 1;
+            actor.matchStats.cardActions += 1;
+          }
+          if (actor.cardPromptStartedAt !== null && (actor.isBot || now - actor.cardPromptStartedAt > 65)) {
+            recordCardPlayerResponse(actor, now - actor.cardPromptStartedAt);
+          }
+          actor.cardPromptStartedAt = null;
+        }
+        // Start challenge decision clock for all other players
+        for (const p of room.players.values()) {
+          p.cardPromptStartedAt = p.id !== nextSnap.lastClaimPlayerId ? now : null;
+        }
+        return;
+      }
+
+      // Transition 2: Challenge phase resolved (challenge -> reveal or challenge -> selecting)
+      if (prevSnap.phase === 'challenge' && nextSnap.phase !== 'challenge') {
+        for (const pView of nextSnap.players) {
+          const p = room.players.get(pView.id);
+          if (!p || p.id === prevSnap.lastClaimPlayerId) continue;
+          const prevView = prevSnap.players.find((pv) => pv.id === pView.id);
+          const actedThisStep =
+            pView.lastAction !== null && pView.lastAction !== (prevView?.lastAction ?? null);
+          if (p.isBot && (actedThisStep || nextSnap.phase === 'selecting')) {
+            p.matchStats.totalActions += 1;
+            p.matchStats.cardActions += 1;
+            if (p.cardPromptStartedAt !== null) {
+              recordCardPlayerResponse(p, now - p.cardPromptStartedAt);
+            }
+          }
+          p.cardPromptStartedAt = null;
+        }
+      }
+
+      // Transition 3: Entering or advancing selecting phase
+      if (
+        nextSnap.phase === 'selecting' &&
+        (prevSnap.phase !== 'selecting' || nextSnap.activePlayerId !== prevSnap.activePlayerId)
+      ) {
+        for (const p of room.players.values()) {
+          p.cardPromptStartedAt = p.id === nextSnap.activePlayerId ? now : null;
+        }
+      }
+    }
   }
 
   private extractHostSnapshotMeta(snap: GameSnapshot): {
@@ -2413,20 +2617,20 @@ export class RoomManager {
     // 2. Phase Transitions & Action Prompts (Rich Street Buy Prompt, Lucky Auction Reveal, Liar's Deck Challenge)
     if (meta.phase && meta.phase !== tracker.lastPhase) {
       tracker.lastPhase = meta.phase;
-      if (snap.gameId === 'rich-street' && meta.phase === 'buy-prompt' && meta.activePlayerId) {
+      if (snap.gameId === 'rich-street' && meta.phase === 'decision' && meta.activePlayerId) {
         if (!skipPlayers.has(meta.activePlayerId)) {
           this.dispatchHapticToPlayer(room, meta.activePlayerId, {
-            pattern: [34, 28, 54],
+            pattern: [105, 40, 125, 40, 165],
             reason: 'buy-prompt',
             event: 'action-required',
-            label: 'BUY PROPERTY?',
-            intensity: 'medium',
+            label: 'Buy or Pass!',
+            intensity: 'heavy',
             minGapMs: 100,
           });
         }
       } else if (snap.gameId === 'lucky-auction' && meta.phase === 'reveal') {
         this.broadcastHapticToRoom(room, {
-          pattern: [28, 30, 44],
+          pattern: [100, 45, 155],
           reason: 'round-transition',
           event: 'round-transition',
           label: 'CHEST REVEAL!',
@@ -2444,7 +2648,7 @@ export class RoomManager {
     ) {
       tracker.lastRoundOrWave = meta.roundOrWave;
       this.broadcastHapticToRoom(room, {
-        pattern: [28, 32, 44],
+        pattern: [100, 45, 155],
         reason: 'round-transition',
         event: 'round-transition',
         label: `ROUND ${meta.roundOrWave}`,
@@ -2459,7 +2663,7 @@ export class RoomManager {
     if (meta.banner && meta.banner !== tracker.lastBanner) {
       tracker.lastBanner = meta.banner;
       this.broadcastHapticToRoom(room, {
-        pattern: [24, 26, 38],
+        pattern: [95, 40, 145],
         reason: 'host-alert',
         event: 'host-alert',
         label: meta.banner.slice(0, 32),
@@ -2473,23 +2677,23 @@ export class RoomManager {
     // 5. Red Light Dash Traffic Light Warnings on Host
     if (snap.gameId === 'red-light-dash' && meta.lightState !== tracker.lastLightState) {
       tracker.lastLightState = meta.lightState;
-      if (meta.lightState === 'warning') {
+      if (meta.lightState === 'yellow') {
         this.broadcastHapticToRoom(room, {
-          pattern: [24, 22, 30],
+          pattern: [95, 35, 95, 35, 140],
           reason: 'yellow-light',
           event: 'timer-warning',
-          label: 'YELLOW LIGHT!',
-          intensity: 'medium',
+          label: 'YELLOW LIGHT — SLOW!',
+          intensity: 'heavy',
           onlyAlive: true,
           minGapMs: 120,
         });
       } else if (meta.lightState === 'red') {
         this.broadcastHapticToRoom(room, {
-          pattern: [36, 26, 52],
+          pattern: [110, 40, 160],
           reason: 'red-light',
           event: 'host-alert',
           label: 'RED LIGHT — FREEZE!',
-          intensity: 'medium',
+          intensity: 'heavy',
           onlyAlive: true,
           minGapMs: 120,
         });

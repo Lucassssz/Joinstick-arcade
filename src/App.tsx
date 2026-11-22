@@ -65,7 +65,29 @@ export default function App() {
     setInitialRoomCode('');
   };
 
+  const forceBrowserFullscreen = () => {
+    if (typeof document === 'undefined') return;
+    try {
+      const doc = document as Document & { webkitFullscreenElement?: Element };
+      if (document.fullscreenElement || doc.webkitFullscreenElement) return;
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void> | void;
+        msRequestFullscreen?: () => Promise<void> | void;
+      };
+      if (typeof el.requestFullscreen === 'function') {
+        el.requestFullscreen({ navigationUI: 'hide' } as FullscreenOptions).catch(() => {});
+      } else if (typeof el.webkitRequestFullscreen === 'function') {
+        el.webkitRequestFullscreen();
+      } else if (typeof el.msRequestFullscreen === 'function') {
+        el.msRequestFullscreen();
+      }
+    } catch {
+      // Ignore if blocked by browser policy
+    }
+  };
+
   const handleHostRoom = (gameId?: GameId) => {
+    forceBrowserFullscreen();
     arcadeAudio.unlock();
     if (gameId) setPreferredGameId(gameId);
     const url = new URL(window.location.href);
@@ -75,6 +97,7 @@ export default function App() {
   };
 
   const handleJoinController = (code?: string) => {
+    forceBrowserFullscreen();
     const cleaned = (code || '').toUpperCase().slice(0, 4);
     setInitialRoomCode(cleaned);
     const url = new URL(window.location.href);
