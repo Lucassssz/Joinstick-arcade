@@ -757,7 +757,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '冲刺/甩盘',
     controlTip: '端着熟食面向右侧出餐台直接按抛盘，省下跑路时间狂刷分！',
     settingLabel: '营业时长',
-    settingOptions: { 60: '60 秒', 75: '75 秒', 90: '90 秒', 120: '120 秒' },
+    settingOptions: { 60: '60 秒', 75: '75 秒', 80: '80 秒', 90: '90 秒', 120: '120 秒' },
   },
   'treasure-dig': {
     name: '海岛寻宝挖矿',
@@ -1255,6 +1255,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
       const optMap: Record<number, string> = {};
       meta.settingOptions.forEach((opt) => {
         optMap[opt.value] = opt.label
+          .replace(/\s*(?:sec|s)$/i, ' 秒')
           .replace(/Rounds/g, '局')
           .replace(/Dice/g, '颗骰子')
           .replace('Sprint', '极速冲刺')
@@ -1298,6 +1299,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
       const optMap: Record<number, string> = {};
       meta.settingOptions.forEach((opt) => {
         optMap[opt.value] = opt.label
+          .replace(/\s*(?:sec|s)$/i, ' 秒')
           .replace(/Rounds/g, '回合')
           .replace(/Steps/g, '级玻璃')
           .replace(/Qs/g, '题');
@@ -1339,7 +1341,9 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
       const zh = PACK_RETRO_ARCADE_ZH[meta.id as keyof typeof PACK_RETRO_ARCADE_ZH];
       const optMap: Record<number, string> = {};
       meta.settingOptions.forEach((opt) => {
-        optMap[opt.value] = opt.label.replace(/Frames/g, '局');
+        optMap[opt.value] = opt.label
+          .replace(/\s*(?:sec|s)$/i, ' 秒')
+          .replace(/Frames/g, '局');
       });
       return [
         meta.id,
@@ -1552,6 +1556,7 @@ export function translateServerMessage(msg: string, lang: Language): string {
     return '开始游戏前，请至少连接 1 名玩家或添加 1 个机器人。';
   }
   if (msg.includes('Only the Room Host')) return '仅房主可以控制大屏或开始游戏。';
+  if (msg.includes('removed from the room')) return '你已被房主移出房间。';
   if (
     msg.includes('The host monitor session ended') ||
     msg.includes('The room was closed') ||
@@ -2485,6 +2490,52 @@ const EXACT_GAME_TEXT_ZH: Record<string, string> = {
   'EARLY INFERNO': '半程烈焰',
   'MIRROR CURSE': '镜像反转',
   'GOLDEN OVERDRIVE': '黄金超载',
+  'Kuala Lumpur, Malaysia': '马来西亚 · 吉隆坡',
+  'Tokyo, Japan': '日本 · 东京',
+  'Paris, France': '法国 · 巴黎',
+  'New York, USA': '美国 · 纽约',
+  'Cairo, Egypt': '埃及 · 开罗',
+  'Sydney, Australia': '澳大利亚 · 悉尼',
+  'Rio de Janeiro, Brazil': '巴西 · 里约热内卢',
+  'Beijing, China': '中国 · 北京',
+  'London, UK': '英国 · 伦敦',
+  Singapore: '新加坡',
+  'PASS THE BOMB!': '快把炸弹传出去！',
+  'YOU ARE IT!': '你是追捕者！',
+  '🔥 STOVE FIRE!': '🔥 灶台着火！',
+  'SUDDEN DEATH SHRINK!': '决胜时刻 — 缩圈开始！',
+  'BIG JOKER': '大王',
+  'SM JOKER': '小王',
+  'LANDLORD 地主': '地主',
+  'UNDERCOVER SPY!': '卧底身份！',
+  CIVILIAN: '平民',
+  ELIMINATED: '已被放逐',
+  CRACKED: '已破译',
+  'Pick the new table color!': '请选择新的牌桌颜色！',
+  'Hold your poker face...': '保持扑克脸别露馅……',
+  'ARRANGING...': '理牌中...',
+  '5-CARD BUST!': '五张爆牌！',
+  'BUST!': '爆牌！',
+  PUSH: '平局',
+  'SET COMPLETE!': '凑齐整套！',
+  'WILD FULL SET!': '万能补齐整套！',
+  'WILD DEED!': '万能地契！',
+  'BOARD CLEARED': '全盘清空',
+  'FRESH ROUND': '新一轮开始',
+  'MATCH POINT!': '赛点时刻！',
+  'BAN BAN ×3!': '双A/双十天牌 ×3！',
+  '7-7-7 JACKPOT ×7!': '7-7-7 豹子大奖 ×7！',
+  'BAN LUCK ×2!': '21点天牌 ×2！',
+  '5-CARD BUST ×2!': '五张爆牌 ×2！',
+  'WU LONG 21 ×3!': '五龙21点 ×3！',
+  'WU LONG ×2!': '五龙过关 ×2！',
+  'NEED 16+ TO STAND': '需满 16 点才能停牌',
+  '1 CARD!': '剩 1 张牌！',
+  WHITE: '白板',
+  'OVERTIME!': '加时赛！',
+  'FINAL SPRINT!': '最后冲刺！',
+  'ROUND 1': '第 1 回合',
+  'HOST DISCONNECTED': '房主已断开',
 };
 
 function translateOrdinalZh(ord: string): string {
@@ -3310,6 +3361,9 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^HEALED \+(\d+)G!$/i))) {
     return `营地回满血 +${m[1]}金！`;
   }
+  if ((m = trimmed.match(/^⚠️ (.+) triggered (.+?) \(-(\d+) HP\)!$/i))) {
+    return `⚠️ ${m[1]} 触发了 ${translateGameText(m[2], lang)} (-${m[3]} 生命)！`;
+  }
   if ((m = trimmed.match(/^(.+?) \(-(\d+) HP\)!$/i))) {
     return `${translateGameText(m[1], lang)} (-${m[2]} 生命)！`;
   }
@@ -3319,7 +3373,7 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^(.+) SLEW THE DRAGON BOSS!$/i))) {
     return `${m[1]} 屠龙成功！`;
   }
-  if ((m = trimmed.match(/^([A-Za-z0-9_ ()]+)\s*\((\d+) LEFT\)$/i))) {
+  if ((m = trimmed.match(/^([A-Za-z0-9_ ()♥+-]+)\s*\((\d+) LEFT\)$/i))) {
     return `${translateGameText(m[1], lang)} (${m[2]} 剩)`;
   }
 
@@ -3503,7 +3557,7 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^TRIPLE ([A-Z0-9]+)s$/i))) {
     return `三张 ${m[1]}`;
   }
-  if ((m = trimmed.match(/^FOUR ([A-Z0-9]+)s$/i))) {
+  if ((m = trimmed.match(/^FOUR ([A-Z0-9]+)s!?$/i))) {
     return `四条 ${m[1]} 炸弹`;
   }
   if ((m = trimmed.match(/^FULL HOUSE ([A-Z0-9]+)s$/i))) {
@@ -3512,11 +3566,17 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^FLUSH (.+)$/i))) {
     return `同花 ${m[1]}`;
   }
+  if ((m = trimmed.match(/^NGAU (\d+) ×(\d+)$/i))) {
+    return `牛 ${m[1]} ×${m[2]}`;
+  }
   if ((m = trimmed.match(/^NGAU (\d+)$/i))) {
     return `牛 ${m[1]}`;
   }
   if ((m = trimmed.match(/^STAND \((\d+)\)$/i))) {
     return `停牌 (${m[1]}点)`;
+  }
+  if ((m = trimmed.match(/^BANKER (.+)'S TURN \(庄家操作\)!$/i))) {
+    return `庄家 ${m[1]} 的回合！`;
   }
   if ((m = trimmed.match(/^BANKER (.+)$/i))) {
     return `庄家：${translateGameText(m[1], lang)}`;
@@ -3686,6 +3746,319 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^(.+) FLAGGED A MINE \(\+(\d+)\)!$/i))) return `${m[1]} 精准标雷 (+${m[2]})！`;
   if ((m = trimmed.match(/^FLAGGED A MINE \(\+(\d+)\)!$/i))) return `精准标雷 (+${m[1]})！`;
   if ((m = trimmed.match(/^BOOM! (.+) HIT A MINE!$/i))) return `轰！${m[1]} 踩中地雷！`;
+
+  // --- Comprehensive Game Audit Additions (All 150 Games) ---
+  if ((m = trimmed.match(/^(RED TEAM|BLUE TEAM|HOLO-CPU):\s*(\d+)\/(\d+)$/i))) {
+    const tName = m[1].toUpperCase() === 'RED TEAM' ? '红队' : m[1].toUpperCase() === 'BLUE TEAM' ? '蓝队' : '全息AI';
+    return `${tName}：${m[2]}/${m[3]}`;
+  }
+  if ((m = trimmed.match(/^TIME:\s*(\d+)s$/i))) return `时间：${m[1]}秒`;
+  if ((m = trimmed.match(/^FUSE ([\d.]+)s · (\d+)s$/i))) return `引信 ${m[1]}秒 · ${m[2]}秒`;
+  if ((m = trimmed.match(/^([\d.]+)s · (\d+)s$/i))) return `${m[1]}秒 · ${m[2]}秒`;
+  if ((m = trimmed.match(/^(MUSIC|PODS|WAIT|ALARM|DROP|SAFE|ROUND|HUNT|FREEZE|RUN|DANCE|STOP) · (\d+)s$/i))) {
+    const phaseMap: Record<string, string> = {
+      MUSIC: '音乐响起',
+      PODS: '抢座时刻',
+      WAIT: '准备阶段',
+      ALARM: '警报拉响',
+      DROP: '坠落危机',
+      SAFE: '安全期',
+      ROUND: '回合中',
+      HUNT: '狩猎中',
+      FREEZE: '静止',
+      RUN: '奔跑',
+      DANCE: '热舞',
+      STOP: '停下',
+    };
+    return `${phaseMap[m[1].toUpperCase()] ?? m[1]} · ${m[2]}秒`;
+  }
+  if ((m = trimmed.match(/^LEFT\s+(\d+)\s+[—-]\s+(\d+)\s+RIGHT\s+\(TO\s+(\d+)\)$/i))) {
+    return `左队 ${m[1]} — ${m[2]} 右队 (先到 ${m[3]} 分)`;
+  }
+  if ((m = trimmed.match(/^(\d+)\s+[–—-]\s+(\d+)$/))) return `${m[1]} – ${m[2]}`;
+  if ((m = trimmed.match(/^(TRUTH|DARE)( ×2 STAKES!)? · VOTES (\d+)\/(\d+)$/i))) {
+    const kind = m[1].toUpperCase() === 'DARE' ? '大冒险' : '真心话';
+    const mult = m[2] ? ' ×2倍积分！' : '';
+    return `${kind}${mult} · 投票 ${m[3]}/${m[4]}`;
+  }
+  if ((m = trimmed.match(/^(P\d+\s+.+?):\s*(\d+)\/(\d+)\s+·\s+(\d+)pt$/i))) {
+    return `${m[1]}：${m[2]}/${m[3]} · ${m[4]}分`;
+  }
+  if ((m = trimmed.match(/^(.+?):\s*(\d+)\s+Discs\s+\((\d+)s\)$/i))) {
+    return `${m[1]}：${m[2]} 棋 (${m[3]}秒)`;
+  }
+  if ((m = trimmed.match(/^(P\d+\s+.+?):\s*(\d+)pt\s+\((\d+)H\)$/i))) {
+    return `${m[1]}：${m[2]}分 (${m[3]}击)`;
+  }
+  if ((m = trimmed.match(/^(P\d+\s+.+?):\s*(\d+)P\s+·\s+(\d+)KO$/i))) {
+    return `${m[1]}：${m[2]}子 · ${m[3]}吃子`;
+  }
+  if ((m = trimmed.match(/^(P\d+\s+.+?):\s*(\d+)pt\s+\((\d+)\)$/i))) {
+    return `${m[1]}：${m[2]}分 (${m[3]}袋)`;
+  }
+  if ((m = trimmed.match(/^(\d+) TILES · (\d+)$/i))) return `${m[1]} 张牌 · ${m[2]} 分`;
+  if ((m = trimmed.match(/^STREAK (\d+) · (\d+)$/i))) return `连胜 ${m[1]} · ${m[2]} 分`;
+  if ((m = trimmed.match(/^(\d+) Elim(?:s)?$/i))) return `${m[1]} 淘汰`;
+  if ((m = trimmed.match(/^(\d+) KO(?:s)?$/i))) return `${m[1]} 击倒`;
+  if ((m = trimmed.match(/^(.+?) · Wins (\d+)\/(\d+)$/i))) return `${m[1]} · 胜 ${m[2]}/${m[3]}`;
+  if ((m = trimmed.match(/^(.+?) WINS ON LIFE!$/i))) return `${m[1]} 凭借剩余生命获胜！`;
+  if ((m = trimmed.match(/^(Volcano Survivor|Melted) · (\d+) Fire Gems$/i))) {
+    return `${m[1] === 'Melted' ? '已熔毁' : '火山幸存者'} · ${m[2]} 火宝石`;
+  }
+  if ((m = trimmed.match(/^(.+) · (\d+) pts · (\d+) served$/i))) {
+    return `${m[1]} · ${m[2]} 分 · 上菜 ${m[3]} 份`;
+  }
+  if ((m = trimmed.match(/^(\d+) served · (.+)$/i))) {
+    return `上菜 ${m[1]} 份 · ${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(.+?) Team · (\d+) pts · (\d+) touches$/i))) {
+    return `${m[1].toUpperCase() === 'RED' ? '红队' : '蓝队'} · ${m[2]} 分 · 触球 ${m[3]} 次`;
+  }
+  if ((m = trimmed.match(/^(RED|BLUE) · (\d+-\d+) · (\d+) pts$/i))) {
+    return `${m[1].toUpperCase() === 'RED' ? '红队' : '蓝队'} · ${m[2]} · ${m[3]} 分`;
+  }
+  if ((m = trimmed.match(/^♥(\d+) · ⚔\+(\d+) · (\d+)G$/i))) {
+    return `♥${m[1]} · ⚔+${m[2]} · ${m[3]}金`;
+  }
+  if ((m = trimmed.match(/^YOUR TURN · ♥(\d+) · ⚔\+(\d+) · (\d+)G$/i))) {
+    return `你的回合 · ♥${m[1]} · ⚔+${m[2]} · ${m[3]}金`;
+  }
+  if ((m = trimmed.match(/^YOUR TURN · (.+)$/i))) {
+    return `你的回合 · ${translateGameText(m[1], lang)}`;
+  }
+
+  // Board & Card turn prompts / events
+  if ((m = trimmed.match(/^(.+) launched the Carrom Striker!$/i))) return `${m[1]} 弹射了克朗母球！`;
+  if ((m = trimmed.match(/^👑 (.+) sank the Red Queen Puck \(\+50 pts\)!$/i))) return `👑 ${m[1]} 将红皇后入袋 (+50 分)！`;
+  if ((m = trimmed.match(/^(.+) pocketed a ([A-Z]+) puck \(\+(\d+) pts\)!$/i))) {
+    const pKind = m[2] === 'WHITE' ? '白' : m[2] === 'BLACK' ? '黑' : m[2] === 'RED' ? '红' : m[2];
+    return `${m[1]} 将${pKind}子入袋 (+${m[3]} 分)！`;
+  }
+  if ((m = trimmed.match(/^(.+)'s Turn — Aim & Flick Striker!$/i))) return `轮到 ${m[1]} — 瞄准并弹射母球！`;
+  if ((m = trimmed.match(/^(.+)'s Turn — Aim & Press A to Flick Striker!$/i))) return `轮到 ${m[1]} — 瞄准并按 A 弹射母球！`;
+  if ((m = trimmed.match(/^(.+)'s turn$/i))) return `轮到 ${m[1]}`;
+  if ((m = trimmed.match(/^(.+)'s Turn!$/i))) return `轮到 ${m[1]}！`;
+  if ((m = trimmed.match(/^(.+)'s Turn — Press A to Roll or B for Hero Potion!$/i))) return `轮到 ${m[1]} — 按 A 掷骰，按 B 喝勇者药水！`;
+  if ((m = trimmed.match(/^🧪 (.+) drank a Hero Potion \(\+4 HP & \+2 Attack Power\)!$/i))) return `🧪 ${m[1]} 喝下勇者药水 (+4 生命 / +2 攻击力)！`;
+  if ((m = trimmed.match(/^(.+) rolled (\d+)! Advancing deeper into the crypt\.\.\.$/i))) return `${m[1]} 掷出 ${m[2]} 点！正深入地牢……`;
+  if ((m = trimmed.match(/^(.+) encountered (.+?)! Press A to Strike!$/i))) return `${m[1]} 遭遇了 ${translateGameText(m[2], lang)}！按 A 攻击！`;
+  if ((m = trimmed.match(/^💎 (.+) looted (.+?) \(\+(\d+) Gold & \+1 Sword ATK\)!$/i))) return `💎 ${m[1]} 洗劫了 ${translateGameText(m[2], lang)} (+${m[3]} 金币 & +1 攻击)！`;
+  if ((m = trimmed.match(/^🔥 (.+) rested at (.+?) \(Full HP & \+(\d+) Gold\)!$/i))) return `🔥 ${m[1]} 在 ${translateGameText(m[2], lang)} 休整 (满血 & +${m[3]} 金币)！`;
+  if ((m = trimmed.match(/^🐉 (.+) struck the Dragon Boss for (\d+) DMG \(\+(\d+) Gold\)!$/i))) return `🐉 ${m[1]} 重创终极巨龙 ${m[2]} 点伤害 (+${m[3]} 金币)！`;
+  if ((m = trimmed.match(/^⚔️ (.+) rolled (\d+)\+(\d+)=(\d+) & slew (.+?) \(\+(\d+) Gold\)!$/i))) {
+    return `⚔️ ${m[1]} 掷出 ${m[2]}+${m[3]}=${m[4]} 斩杀了 ${translateGameText(m[5], lang)} (+${m[6]} 金币)！`;
+  }
+  if ((m = trimmed.match(/^🛡️ (.+) rolled (\d+) vs (\d+) — took 2 damage but grabbed 15 Gold!$/i))) {
+    return `🛡️ ${m[1]} 掷出 ${m[2]} 对阵 ${m[3]} — 受伤 -2 但抢到 15 金币！`;
+  }
+  if ((m = trimmed.match(/^⚡ (.+) scored a 4-IN-A-ROW Connect!$/i))) return `⚡ ${m[1]} 达成了四子连线！`;
+  if ((m = trimmed.match(/^🔨 (.+) crushed Column (\d+) with an Anvil Token!$/i))) return `🔨 ${m[1]} 用铁砧震碎并清空了第 ${m[2]} 列！`;
+  if ((m = trimmed.match(/^(.+) dropped a token in Column (\d+)!$/i))) return `${m[1]} 将棋子投入了第 ${m[2]} 列！`;
+  if ((m = trimmed.match(/^(.+) wins Jungle Ladders!$/i))) return `${m[1]} 赢得丛林蛇梯棋冠军！`;
+  if ((m = trimmed.match(/^WHOA! (.+) slipped on a Banana to #(\d+)!$/i))) return `哎呀！${m[1]} 踩到香蕉滑到了 #${m[2]}！`;
+  if ((m = trimmed.match(/^(.+) climbs a bamboo ladder to #(\d+)!$/i))) return `${m[1]} 顺着竹梯一路爬到了 #${m[2]}！`;
+  if ((m = trimmed.match(/^OH NO! (.+) slid down a snake to #(\d+)!$/i))) return `糟糕！${m[1]} 被蛇咬滑落到 #${m[2]}！`;
+  if ((m = trimmed.match(/^(.+) found a Mystery Tile! TRICK \(B\) Ready!$/i))) return `${m[1]} 踩中神秘格！陷阱道具 (B) 已就绪！`;
+  if ((m = trimmed.match(/^(.+) activated TRICK! \+2 Roll Boost & Banana Trap!$/i))) return `${m[1]} 发动整蛊！掷骰 +2 并布下香蕉陷阱！`;
+  if ((m = trimmed.match(/^(.+) is picking cards\.\.\.$/i))) return `${m[1]} 正在选牌中……`;
+  if ((m = trimmed.match(/^TARGET:\s*(.+)$/i))) return `目标牌面：${m[1]}`;
+  if ((m = trimmed.match(/^(.+)'s Turn — Stick\/B Picks Token · Press A to Roll!$/i))) return `轮到 ${m[1]} — 摇杆/B 选棋子 · 按 A 掷骰！`;
+  if ((m = trimmed.match(/^(.+) selected Token #(\d+) \((.+)\)$/i))) return `${m[1]} 选择了 #${m[2]} 号棋子 (${translateGameText(m[3], lang)})`;
+  if ((m = trimmed.match(/^(.+) rolled (\d+) — Need 5 or 6 to deploy from Base!$/i))) return `${m[1]} 掷出 ${m[2]} — 需掷出 5 或 6 才能起飞！`;
+  if ((m = trimmed.match(/^(.+) rolled (\d+) & deployed Token #(\d+) onto the track!$/i))) return `${m[1]} 掷出 ${m[2]} 点，#${m[3]} 号棋子成功起飞！`;
+  if ((m = trimmed.match(/^(.+) escorted Token #(\d+) to the Royal Crown!$/i))) return `${m[1]} 护送 #${m[2]} 号棋子抵达皇家终点！`;
+  if ((m = trimmed.match(/^(.+) landed on a Safe Star Tile — Boost Charged!$/i))) return `${m[1]} 落在安全星格 — 加速能量已充能！`;
+  if ((m = trimmed.match(/^(.+) sent (.+)'s Token #(\d+) back to Base!$/i))) return `${m[1]} 将 ${m[2]} 的 #${m[3]} 号棋子撞回基地！`;
+  if ((m = trimmed.match(/^(.+) rolled a 6 and gets a Bonus Turn!$/i))) return `${m[1]} 掷出 6 点，获得额外一回合！`;
+  if ((m = trimmed.match(/^📡 (.+) scanned 3x3 sector \((\d+),(\d+)\) — (\d+) hidden hulls?!$/i))) {
+    return `📡 ${m[1]} 扫描 3×3 海域 (${m[2]},${m[3]}) — 探测到 ${m[4]} 个隐藏目标！`;
+  }
+  if ((m = trimmed.match(/^💥 (.+) destroyed a Golden Flagship at \((\d+),(\d+)\)!$/i))) return `💥 ${m[1]} 在 (${m[2]},${m[3]}) 摧毁了黄金旗舰！`;
+  if ((m = trimmed.match(/^🎯 (.+) hit an armored warship at \((\d+),(\d+)\)!$/i))) return `🎯 ${m[1]} 在 (${m[2]},${m[3]}) 命中了一艘装甲战舰！`;
+  if ((m = trimmed.match(/^💣 (.+) triggered a Sea Mine at \((\d+),(\d+)\)!$/i))) return `💣 ${m[1]} 在 (${m[2]},${m[3]}) 误触水雷！`;
+  if ((m = trimmed.match(/^🌊 (.+) splashed open water at \((\d+),(\d+)\)\.$/i))) return `🌊 ${m[1]} 炮击 (${m[2]},${m[3]}) 仅击中空海域。`;
+  if ((m = trimmed.match(/^👑 (.+) promoted a piece to a Shielded King!$/i))) return `👑 ${m[1]} 将一枚棋子晋升为带盾王棋！`;
+  if ((m = trimmed.match(/^⚡ (.+) jumped & captured an enemy checker!$/i))) return `⚡ ${m[1]} 飞跃并吃掉了敌方棋子！`;
+  if ((m = trimmed.match(/^(.+) moved to \((\d+),(\d+)\)\.$/i))) return `${m[1]} 移动到了 (${m[2]},${m[3]})。`;
+  if ((m = trimmed.match(/^(.+) placed at \((\d+),(\d+)\) & flipped (\d+) discs?!$/i))) {
+    return `${m[1]} 落子 (${m[2]},${m[3]}) 并翻转了 ${m[4]} 枚棋子！`;
+  }
+
+  // Rich Street & Star Party
+  if ((m = trimmed.match(/^(.+): Roll to break out of Jail!$/i))) return `${m[1]}：掷骰尝试离开禁闭室！`;
+  if ((m = trimmed.match(/^(.+) landed on GO! \+\$150 Bonus!$/i))) return `${m[1]} 精准停在起点！+$150 奖金！`;
+  if ((m = trimmed.match(/^(.+) won the \$(\d+) City Jackpot!$/i))) return `${m[1]} 赢走了 $${m[2]} 城市大彩池！`;
+  if ((m = trimmed.match(/^(.+) visited Chill Jail! Next turn rolls to exit\.$/i))) return `${m[1]} 进了悠闲禁闭室！下回合掷骰离开。`;
+  if ((m = trimmed.match(/^(.+) paid \$(\d+) to Jackpot Pool!$/i))) return `${m[1]} 向大彩池缴纳了 $${m[2]} 税费！`;
+  if ((m = trimmed.match(/^Lucky Card: Street Festival! (.+) \+\$200$/i))) return `幸运卡：街头嘉年华！${m[1]} +$200`;
+  if ((m = trimmed.match(/^Lucky Card: (.+) gained a Free Rent Shield!$/i))) return `幸运卡：${m[1]} 获得免费免租护盾！`;
+  if ((m = trimmed.match(/^Lucky Card: Party Gift! (.+) \+\$(\d+)$/i))) return `幸运卡：派对红包！${m[1]} +$${m[2]}`;
+  if ((m = trimmed.match(/^Lucky Card: Parking Ticket! -\$(\d+) to Jackpot$/i))) return `幸运卡：违停罚单！-$${m[1]} 充入大彩池`;
+  if ((m = trimmed.match(/^Buy (.+?) for \$(\d+)\? \(A: Buy \/ B: Skip\)$/i))) {
+    return `花 $${m[2]} 买下 ${translateGameText(m[1], lang)}？(A 购买 / B 跳过)`;
+  }
+  if ((m = trimmed.match(/^(.+) can't afford (.+?) \(\$(\d+)\)$/i))) {
+    return `${m[1]} 现金不足，买不起 ${translateGameText(m[2], lang)} ($${m[3]})`;
+  }
+  if ((m = trimmed.match(/^Upgrade (.+?) to Lv\.(\d+) for \$(\d+)\?$/i))) {
+    return `花 $${m[3]} 将 ${translateGameText(m[1], lang)} 升到 ${m[2]} 级？`;
+  }
+  if ((m = trimmed.match(/^(.+) visited own (.+?)! \+\$50 VIP bonus$/i))) {
+    return `${m[1]} 回到自家 ${translateGameText(m[2], lang)}！+$50 贵宾分红`;
+  }
+  if ((m = trimmed.match(/^(.+)'s Rent Shield blocked rent on (.+?)!$/i))) {
+    return `${m[1]} 的免租护盾抵挡了 ${translateGameText(m[2], lang)} 的租金！`;
+  }
+  if ((m = trimmed.match(/^(.+) paid \$(\d+) rent & went bankrupt!$/i))) return `${m[1]} 支付 $${m[2]} 租金后资金耗尽破产！`;
+  if ((m = trimmed.match(/^(.+) used Lucky Perk! Rent Shield \+ \$80$/i))) return `${m[1]} 启动幸运特权！免租盾 + $80`;
+  if ((m = trimmed.match(/^(.+) left Jail & moves (\d+) spaces!$/i))) return `${m[1]} 离开禁闭室并前进 ${m[2]} 步！`;
+  if ((m = trimmed.match(/^(.+) saved cash and skipped\.$/i))) return `${m[1]} 保留现金，选择跳过。`;
+  if ((m = trimmed.match(/^(.+)'s Turn — Press A to Roll or B for 2X Candy!$/i))) return `轮到 ${m[1]} — 按 A 掷骰，按 B 用双倍糖果！`;
+  if ((m = trimmed.match(/^(.+) spent 5 Coins on 2X Double Dice Candy!$/i))) return `${m[1]} 花 5 金币买了 2× 双倍骰子糖！`;
+  if ((m = trimmed.match(/^(.+) rolled (\d+)! Hopping across Star Island\.\.\.$/i))) return `${m[1]} 掷出 ${m[2]} 点！正穿梭星光岛……`;
+  if ((m = trimmed.match(/^🌟 (.+) traded (\d+) Coins for a Golden Star!$/i))) return `🌟 ${m[1]} 用 ${m[2]} 金币兑换了一颗黄金星星！`;
+  if ((m = trimmed.match(/^(.+) landed on a Blue Coin Tile \(\+6 Coins\)!$/i))) return `${m[1]} 停在蓝金币格 (+6 金币)！`;
+  if ((m = trimmed.match(/^(.+) hit the Lucky Jackpot Fountain \(\+12 Coins\)!$/i))) return `${m[1]} 触发幸运喷泉大奖 (+12 金币)！`;
+  if ((m = trimmed.match(/^(.+) found a Free 2X Candy & \+5 Coins!$/i))) return `${m[1]} 捡到免费双倍糖果并获 +5 金币！`;
+  if ((m = trimmed.match(/^(.+) stepped on a Zap Trap \(-(\d+) Coins\)!$/i))) return `${m[1]} 踩中电击陷阱 (-${m[2]} 金币)！`;
+  if ((m = trimmed.match(/^(.+) raided (.+) for (\d+) Coins!$/i))) return `${m[1]} 劫掠了 ${m[2]} 的 ${m[3]} 枚金币！`;
+  if ((m = trimmed.match(/^(.+) won the Duel Tile bonus \(\+8 Coins\)!$/i))) return `${m[1]} 赢得决斗格奖励 (+8 金币)！`;
+
+  // Packs 1–7 Dynamic Banners, Popups, Cards & Stats
+  if ((m = trimmed.match(/^(.+) CRAFTED A GIANT WATERMELON!$/i))) return `${m[1]} 成功合成了巨型大西瓜！`;
+  if ((m = trimmed.match(/^(.+) CLEARED A FULL STACK! \+500!$/i))) return `${m[1]} 清空整叠三消方块！+500！`;
+  if ((m = trimmed.match(/^(.+) FINISHED #(\d+)!$/i))) return `${m[1]} 冲线获得第 #${m[2]} 名！`;
+  if ((m = trimmed.match(/^BOOM! (.+) — (.+)!$/i))) return `轰！${m[1]} 炸裂 — ${translateGameText(m[2], lang)}！`;
+  if ((m = trimmed.match(/^(.+) NAILED IT! \+(\d+) PTS!$/i))) return `${m[1]} 答对爆分！+${m[2]} 分！`;
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) — PASS FAST!$/i))) return `第 ${m[1]}/${m[2]} 轮 — 快传炸弹！`;
+  if ((m = trimmed.match(/^(.+) IS DRAWING:\s*(.+)$/i))) return `${m[1]} 正在画：${m[2]}`;
+  if ((m = trimmed.match(/^(.+) IS SKETCHING — GUESS FAST!$/i))) return `${m[1]} 正在灵魂作画 — 赶快抢答！`;
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) — BID FOR LANDLORD!$/i))) return `第 ${m[1]}/${m[2]} 局 — 叫分抢地主！`;
+  if ((m = trimmed.match(/^(.+) IS LANDLORD \(×(\d+)\)!$/i))) return `${m[1]} 成为地主（倍数 ×${m[2]}）！`;
+  if ((m = trimmed.match(/^(.+) TABLE ×(\d+)!$/i))) return `${translateGameText(m[1], lang)} · 牌桌 ×${m[2]}！`;
+  if ((m = trimmed.match(/^LANDLORD (.+) WINS! \+(\d+)!$/i))) return `地主 ${m[1]} 获胜！+${m[2]}！`;
+  if ((m = trimmed.match(/^PEASANTS WIN! \+(\d+) EACH!$/i))) return `农民获胜！每人 +${m[1]}！`;
+  if ((m = trimmed.match(/^MAHJONG ROUND (\d+)\/(\d+) — BUILD 2 MELDS \+ 1 PAIR!$/i))) return `麻将第 ${m[1]}/${m[2]} 局 — 凑两副加一对胡牌！`;
+  if ((m = trimmed.match(/^ROUND (\d+) — SHAKE & BID! \(1s ARE WILD\)$/i))) return `第 ${m[1]} 轮 — 摇骰叫点（1点万能）！`;
+  if ((m = trimmed.match(/^BID (\d+)× (.+)$/i))) return `叫 ${m[1]} 个 ${m[2]}`;
+  if ((m = trimmed.match(/^BID (\d+)×$/i))) return `叫 ${m[1]} 倍`;
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) — CHECK YOUR SECRET WORD & PICK A CLUE!$/i))) return `第 ${m[1]}/${m[2]} 轮 — 查看密词并提交线索！`;
+  if ((m = trimmed.match(/^SPY CAUGHT! (.+) WAS THE UNDERCOVER!$/i))) return `揪出卧底！${m[1]} 就是潜伏的卧底！`;
+  if ((m = trimmed.match(/^WRONG VOTE! (.+) ESCAPED UNDETECTED!$/i))) return `投错了！卧底 ${m[1]} 逃出生天！`;
+  if ((m = trimmed.match(/^NIGHT (\d+) FALLS — SPECIAL ROLES ACT!$/i))) return `第 ${m[1]} 夜降临 — 特殊身份请行动！`;
+  if ((m = trimmed.match(/^(.+) LINKED:\s*(.+)$/i))) return `${m[1]} 成功接龙：${m[2]}`;
+  if ((m = trimmed.match(/^(.+) BROKE THE CHAIN!$/i))) return `${m[1]} 接龙失败断链了！`;
+  if ((m = trimmed.match(/^(.+) TIMED OUT!$/i))) return `${m[1]} 思考超时！`;
+  if ((m = trimmed.match(/^HU! \+(\d+)$/i))) return `胡牌！+${m[1]}`;
+  if ((m = trimmed.match(/^PONG (.+)!$/i))) return `碰 ${m[1]}！`;
+  if ((m = trimmed.match(/^DISCARD (.+)$/i))) return `打出 ${m[1]}`;
+  if ((m = trimmed.match(/^SOW PIT (\d+)$/i))) return `播种第 ${m[1]} 坑`;
+  if ((m = trimmed.match(/^\+(\d+) WIN!$/i))) return `+${m[1]} 胜！`;
+  if ((m = trimmed.match(/^(.+) HIT A VIRUS!$/i))) return `${m[1]} 撞上病毒分裂了！`;
+  if ((m = trimmed.match(/^(.+) SLICED (.+)'S RIBBON!$/i))) return `${m[1]} 切断了 ${m[2]} 的丝带！`;
+  if ((m = trimmed.match(/^(.+) CROSSED THE GLASS BRIDGE!$/i))) return `${m[1]} 成功闯过玻璃桥！`;
+  if ((m = trimmed.match(/^(.+) CRACKED "(.+)"!$/i))) return `${m[1]} 成功破译「${m[2]}」！`;
+  if ((m = trimmed.match(/^SPYMASTER CLUE:\s*(.+)$/i))) return `队长密令线索：${m[1]}`;
+  if ((m = trimmed.match(/^Clue:\s*"([^"]+)"\s*—\s*Tap matching codenames, avoid the Assassin!$/i))) {
+    return `线索「${m[1]}」— 点选匹配特工词，切勿误触黑衣刺客！`;
+  }
+  if ((m = trimmed.match(/^(.+) · (\d+) LEFT$/i))) return `${m[1]} · 剩余 ${m[2]} 词`;
+  if ((m = trimmed.match(/^ROUND (\d+) · GALAH PANJANG!$/i))) return `第 ${m[1]} 局 · 马来过五关！`;
+  if ((m = trimmed.match(/^(.+) HOLDS 3♦ · LEADS FIRST!$/i))) return `${m[1]} 手持 ♦3 · 先手领出！`;
+  if ((m = trimmed.match(/^(.+) WINS TRICK · FREE LEAD!$/i))) return `${m[1]} 赢下本墩 · 自由领出！`;
+  if ((m = trimmed.match(/^(.+) CLEARED ALL 13! \+(\d+) PTS!$/i))) return `${m[1]} 清空 13 张手牌！+${m[2]} 分！`;
+  if ((m = trimmed.match(/^ROUND (\d+) · PICK 3 CARDS = MULTIPLE OF 10!$/i))) return `第 ${m[1]} 局 · 挑 3 张牌凑成 10 的倍数！`;
+  if ((m = trimmed.match(/^SHOWDOWN! BANKER HAS (.+)$/i))) return `全员亮牌！庄家亮出 ${translateGameText(m[1], lang)}`;
+  if ((m = trimmed.match(/^(.+) POWERED UP! CHOMP GHOSTS!$/i))) return `${m[1]} 能量觉醒！反杀吞噬幽灵！`;
+  if ((m = trimmed.match(/^(.+) CHOMPED A GHOST \(\+(\d+)\)!$/i))) return `${m[1]} 吃掉了一只幽灵 (+${m[2]})！`;
+  if ((m = trimmed.match(/^WAVE (\d+) INCOMING!$/i))) return `第 ${m[1]} 波敌军来袭！`;
+  if ((m = trimmed.match(/^(.+) CLEARED (\d+) LINES! GARBAGE SENT!$/i))) return `${m[1]} 连消 ${m[2]} 行！向对手空投垃圾行！`;
+  if ((m = trimmed.match(/^(.+) REACHED THE LILY PAD \(\+(\d+)\)!$/i))) return `${m[1]} 成功跳上金莲座 (+${m[2]})！`;
+  if ((m = trimmed.match(/^(.+) REACHED THE CROWN SUMMIT \(\+(\d+)\)!$/i))) return `${m[1]} 率先登顶夺冠 (+${m[2]})！`;
+  if ((m = trimmed.match(/^(.+) SANK A 100-PT JACKPOT!$/i))) return `${m[1]} 投入 100 分超级大奖洞！`;
+  if ((m = trimmed.match(/^⚡ STRIKE! (.+) \(\+(\d+)\)!$/i))) return `⚡ 全倒 STRIKE！${m[1]} (+${m[2]})！`;
+  if ((m = trimmed.match(/^(.+) DROPPED A GIANT MEGA COIN!$/i))) return `${m[1]} 投下巨型超级金币！`;
+  if ((m = trimmed.match(/^💎 (.+) SCORED A RUBY GEM \(\+(\d+)\)!$/i))) return `💎 ${m[1]} 推落红宝石大奖 (+${m[2]})！`;
+  if ((m = trimmed.match(/^(.+) SUNK HOLE (\d+)! \+(\d+)$/i))) return `${m[1]} 攻克第 ${m[2]} 洞！+${m[3]}`;
+  if ((m = trimmed.match(/^HOLE (\d+) — TEE OFF!$/i))) return `第 ${m[1]} 洞 — 挥杆开球！`;
+  if ((m = trimmed.match(/^(.+) HIT GOLD BULLSEYE!$/i))) return `${m[1]} 正中黄金十环靶心！`;
+  if ((m = trimmed.match(/^(.+) KNOCKED OUT (.+)!$/i))) return `${m[1]} 重拳击倒了 ${m[2]}！`;
+  if ((m = trimmed.match(/^(.+) WINS THE RALLY! \+(\d+)$/i))) return `${m[1]} 赢下本回合对抽！+${m[2]}`;
+  if ((m = trimmed.match(/^(.+) CRUSHED A (\d+)FT MOONSHOT!$/i))) return `${m[1]} 轰出 ${m[2]} 尺超级本垒打！`;
+  if ((m = trimmed.match(/^(.+) CAUGHT A BLAZING BALL!$/i))) return `${m[1]} 空手接住烈焰躲避球！`;
+  if ((m = trimmed.match(/^(.+) BLASTED (.+)!$/i))) return `${m[1]} 一球砸飞了 ${m[2]}！`;
+  if ((m = trimmed.match(/^(.+) RINGED OUT (.+)! \+(\d+)$/i))) return `${m[1]} 把 ${m[2]} 推出了土俵 (+${m[3]})！`;
+  if ((m = trimmed.match(/^(.+) CROSSED THE FINISH!$/i))) return `${m[1]} 划过终点线夺冠！`;
+  if ((m = trimmed.match(/^(LEFT TEAM|RIGHT TEAM) GOAL! \+(\d+)$/i))) {
+    return `${m[1].toUpperCase() === 'LEFT TEAM' ? '左队' : '右队'} 破门得分！+${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(LEFT TEAM|RIGHT TEAM) SHUTTLE WINNER! \+(\d+)$/i))) {
+    return `${m[1].toUpperCase() === 'LEFT TEAM' ? '左队' : '右队'} 赢下羽球回合！+${m[2]}`;
+  }
+  if ((m = trimmed.match(/^(.+) POTTED \+(\d+)!$/i))) return `${m[1]} 精彩落袋 +${m[2]}！`;
+  if ((m = trimmed.match(/^(.+) UNHORSED (.+)! \+(\d+)$/i))) return `${m[1]} 挑落马下 ${m[2]}！+${m[3]}`;
+  if ((m = trimmed.match(/^(.+) GOT ZAPPED BY THE LASER!$/i))) return `${m[1]} 被旋转激光电到了！`;
+  if ((m = trimmed.match(/^(.+) FELL INTO THE LAVA!$/i))) return `${m[1]} 跌入了滚烫岩浆！`;
+  if ((m = trimmed.match(/^(.+) PASSED THE BOMB TO (.+)!$/i))) return `${m[1]} 把定时炸弹传给了 ${m[2]}！`;
+  if ((m = trimmed.match(/^KABOOM! (.+) BLEW UP!$/i))) return `轰隆！${m[1]} 的炸弹引爆了！`;
+  if ((m = trimmed.match(/^(.+) MISSED A THRONE!$/i))) return `${m[1]} 没抢到王座被淘汰！`;
+  if ((m = trimmed.match(/^(.+) SLID (.+) INTO THE SEA!$/i))) return `${m[1]} 把 ${m[2]} 撞进了冰海！`;
+  if ((m = trimmed.match(/^(.+) GRABBED A GOLD STAR CORE!$/i))) return `${m[1]} 抢到了金星核心！`;
+  if ((m = trimmed.match(/^(.+) TRIPPED THE VAULT ALARM!$/i))) return `${m[1]} 触发了金库红外警报！`;
+  if ((m = trimmed.match(/^(.+) INFECTED (.+)!$/i))) return `${m[1]} 感染了 ${m[2]}！`;
+  if ((m = trimmed.match(/^NEW WAVE! (.+) IS PATIENT ZERO!$/i))) return `新一波来袭！${m[1]} 成为零号病人！`;
+  if ((m = trimmed.match(/^(.+) TRAPPED (.+) UNDER AN ANVIL!$/i))) return `${m[1]} 把 ${m[2]} 推进了铁砧砸落区！`;
+  if ((m = trimmed.match(/^(.+) SLID OFF THE SEESAW!$/i))) return `${m[1]} 从空中跷跷板滑落了！`;
+  if ((m = trimmed.match(/^(.+) HIT A CANYON SAW!$/i))) return `${m[1]} 撞上了峡谷电锯！`;
+  if ((m = trimmed.match(/^(.+) GOT WRECKED!$/i))) return `${m[1]} 被大铁球砸飞了！`;
+  if ((m = trimmed.match(/^(.+) DROPPED THROUGH A TRAPDOOR!$/i))) return `${m[1]} 从陷阱地板掉了下去！`;
+  if ((m = trimmed.match(/^(.+) HIT 5-IN-A-ROW! \+(\d+)$/i))) return `${m[1]} 连成五子连珠！+${m[2]}`;
+  if ((m = trimmed.match(/^(.+) KNIGHT-CHECKED (.+)!$/i))) return `${m[1]} 骑士跳吃击败 ${m[2]}！`;
+  if ((m = trimmed.match(/^(.+) SNAPPED \[(\d+)\|(\d+)\] \(\+(\d+)\)$/i))) return `${m[1]} 接上骨牌 [${m[2]}|${m[3]}] (+${m[4]})`;
+  if ((m = trimmed.match(/^(.+) BLOT-BUMPED (.+)! \+(\d+)$/i))) return `${m[1]} 撞飞了 ${m[2]} 的单子！+${m[3]}`;
+  if ((m = trimmed.match(/^(.+) BORE OFF A CHECKER! \+(\d+)$/i))) return `${m[1]} 成功将棋子归位！+${m[2]}`;
+  if ((m = trimmed.match(/^(.+) CAPTURED \+(\d+) OPPOSITE GEMS!$/i))) return `${m[1]} 横扫抢走对岸 +${m[2]} 颗宝石！`;
+  if ((m = trimmed.match(/^(.+) SUMMONED A GEM SHOWER!$/i))) return `${m[1]} 触发宝石暴雨！`;
+  if ((m = trimmed.match(/^Tap 3 matching ranks OR 3-card suited sequence, then tap MELD 3\+!$/i))) {
+    return '点选 3 张同点（三条）或同花顺后点击「亮牌凑组」！';
+  }
+  if ((m = trimmed.match(/^(.+) LAID A MELD \(\+(\d+)\)!$/i))) return `${m[1]} 亮出一组牌 (+${m[2]})！`;
+  if ((m = trimmed.match(/^TRICK (\d+)\/(\d+) — PICK YOUR CARD!$/i))) return `第 ${m[1]}/${m[2]} 墩 — 请出牌！`;
+  if ((m = trimmed.match(/^(.+) WON THE TRICK! \+(\d+)$/i))) return `${m[1]} 赢下本墩！+${m[2]}`;
+  if ((m = trimmed.match(/^HAND (\d+)\/(\d+) — DRAW OR LOCK!$/i))) return `第 ${m[1]}/${m[2]} 手 — 换牌或锁牌！`;
+  if ((m = trimmed.match(/^CLASH (\d+)\/(\d+) — CAST AN ELEMENT!$/i))) return `第 ${m[1]}/${m[2]} 轮 — 释放元素牌！`;
+  if ((m = trimmed.match(/^ROUND (\d+)\/(\d+) — FORM YOUR BEST 2-CARD PAIR!$/i))) return `第 ${m[1]}/${m[2]} 轮 — 选2张牌凑近9点！`;
+  if ((m = trimmed.match(/^(.+) SWEPT WITH (\d+) \((NATURAL 9!|HIGH)\)!$/i))) {
+    return `${m[1]} 以 ${m[2]} 点（${m[3] === 'HIGH' ? '最大' : '天生9点！'}）横扫全场！`;
+  }
+  if ((m = trimmed.match(/^Select exactly 2 cards whose mod-10 total gets closest to 9!$/i))) {
+    return '选 2 张牌使个位数总和最接近 9 点！';
+  }
+  if ((m = trimmed.match(/^Tap 2 cards to match symbols! Watch TV flips to steal pairs!$/i))) {
+    return '点选 2 张配对翻牌！留心大屏翻开的牌偷对子！';
+  }
+  if ((m = trimmed.match(/^(.+) MATCHED (.+) \(\+(\d+)\)!$/i))) return `${m[1]} 配对成功 ${m[2]} (+${m[3]})！`;
+  if ((m = trimmed.match(/^Tap any numbered card to claim a matching TV square \(J = Wild Steal\)!$/i))) {
+    return '点击任意数字牌占领大屏同号格（J 为万能抢占）！';
+  }
+  if ((m = trimmed.match(/^(.+) RECYCLED DEAD \[(.+)\] \(\+(\d+)\)$/i))) return `${m[1]} 回收了废牌 [${m[2]}] (+${m[3]})`;
+  if ((m = trimmed.match(/^PLAY (.+)$/i))) return `出牌 ${translateGameText(m[1], lang)}`;
+  if ((m = trimmed.match(/^(.+) FIXED!$/i))) return `${translateGameText(m[1], lang)} 修复完成！`;
+  if ((m = trimmed.match(/^PONG 碰 (.+)$/i))) return `碰 ${m[1]}`;
+  if ((m = trimmed.match(/^(.+) PONG! 碰!$/i))) return `${m[1]} 碰牌！`;
+  if ((m = trimmed.match(/^(.+) DRAGON \(一条龙\) INSTANT WIN!$/i))) return `${m[1]} 一条龙秒赢全场！`;
+  if ((m = trimmed.match(/^ROUND (\d+) · (.+) IS BANKER \(庄家\)!$/i))) return `第 ${m[1]} 局 · ${m[2]} 坐庄！`;
+  if ((m = trimmed.match(/^LEN (\d+)$/i))) return `长度 ${m[1]}`;
+  if ((m = trimmed.match(/^(.+) \((\d+)\) · (\d+) LEFT$/i))) return `${m[1]} (${m[2]}) · 剩 ${m[3]} 张`;
+  if ((m = trimmed.match(/^⚡ STRIKE! (.+) \(\+(\d+)\)$/i))) return `⚡ 全倒 STRIKE！${m[1]} (+${m[2]})`;
+  if ((m = trimmed.match(/^POW -(\d+)!$/i))) return `重击 -${m[1]}！`;
+  if ((m = trimmed.match(/^BANK \$(\d+)M$/i))) return `存入 $${m[1]}M`;
+  if ((m = trimmed.match(/^Col (\d+)$/i))) return `第 ${m[1]} 列`;
+  if ((m = trimmed.match(/^(\d+) CARDS · (.+)$/i))) return `${m[1]} 张牌 · ${translateGameText(m[2], lang)}`;
+  if ((m = trimmed.match(/^RUN \((\d+)\)$/i))) return `跑路 (${m[1]})`;
+  if ((m = trimmed.match(/^(\d+) PIN$/i))) return `压制 ${m[1]} 次`;
+  if ((m = trimmed.match(/^(\d+) RPM$/i))) return `转速 ${m[1]}`;
+  if ((m = trimmed.match(/^(\d+) STEPS$/i))) return `剩 ${m[1]} 步`;
 
   if (trimmed === 'Your Turn!' || trimmed === 'Card Turn!') {
     return '⚡ 轮到你了！';

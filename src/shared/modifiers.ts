@@ -131,11 +131,31 @@ export function getMutatorSpec(id?: MutatorId | null): MutatorSpec {
   return (id && MUTATOR_BY_ID[id]) || MUTATOR_BY_ID.normal;
 }
 
+export interface FrenzyTimeConfig {
+  durationSeconds: number;
+  scoreMultiplier: number;
+  speedMultiplier: number;
+  botReactionScale: number; // Aligned with universal bot profile cognition during frenzy
+}
+
 export interface FrenzyGamePerk {
   perk1En: string;
   perk1Zh: string;
   perk2En: string;
   perk2Zh: string;
+  frenzyTime?: FrenzyTimeConfig;
+}
+
+export const DEFAULT_FRENZY_TIME_CONFIG: FrenzyTimeConfig = {
+  durationSeconds: 25,
+  scoreMultiplier: 2.0,
+  speedMultiplier: 1.18,
+  botReactionScale: 0.85,
+};
+
+export function getGameFrenzyTimeConfig(gameId: GameId): FrenzyTimeConfig {
+  const perk = GAME_FRENZY_PERKS[gameId];
+  return perk?.frenzyTime || DEFAULT_FRENZY_TIME_CONFIG;
 }
 
 export const GAME_FRENZY_PERKS: Record<GameId, FrenzyGamePerk> = {

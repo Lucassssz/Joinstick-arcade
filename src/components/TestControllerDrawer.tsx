@@ -53,7 +53,7 @@ export function TestControllerDrawer({ roomCode, open, onClose }: TestController
           'Uses a live WebSocket connection identical to a physical phone. Drag the thumbstick or use ',
           '与真实手机完全一致的实时连接。拖动摇杆或使用 '
         )}
-        <span className="text-white font-mono">WASD + Space/Shift</span>
+        <span className="text-white font-mono">WASD + {t('Space/Shift', '空格/Shift')}</span>
         {t(' for Pad 1.', ' 控制 1 号手柄。')}
       </p>
 

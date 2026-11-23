@@ -4,7 +4,11 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './server/roomManager.ts';
-import { getOrGenerateDemoClipAsync, getOrGenerateDemoSnapshotAsync } from './server/demoSnapshot.ts';
+import {
+  getOrGenerateDemoClipAsync,
+  getOrGenerateDemoSnapshotAsync,
+  getOrGenerateRuleClipsAsync,
+} from './server/demoSnapshot.ts';
 import type { GameId } from './src/shared/types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -53,6 +57,22 @@ async function startServer() {
     } catch (err) {
       console.error(`[demo-clip] Failed for ${gameId}:`, err);
       res.status(500).json({ error: 'Failed to generate demo clip' });
+    }
+  });
+
+  app.get('/api/rule-clips/:gameId', async (req, res) => {
+    const gameId = req.params.gameId as GameId;
+    try {
+      const ruleClips = await getOrGenerateRuleClipsAsync(gameId);
+      if (!ruleClips) {
+        res.status(404).json({ error: 'Unknown gameId' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+      res.json(ruleClips);
+    } catch (err) {
+      console.error(`[rule-clips] Failed for ${gameId}:`, err);
+      res.status(500).json({ error: 'Failed to generate rule clips' });
     }
   });
 

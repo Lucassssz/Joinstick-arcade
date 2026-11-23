@@ -12,14 +12,24 @@ export interface DemoClipPayload {
   frames: GameSnapshot[];
 }
 
+export interface RuleClipsPayload {
+  gameId: GameId;
+  segmentDurationMs: number;
+  fps: number;
+  segments: GameSnapshot[][];
+}
+
 // Strict LRU caches so scaling to 150+ games keeps server RAM bounded
 const MAX_SNAPSHOT_CACHE = 96;
 const MAX_CLIP_CACHE = 32;
+const MAX_RULE_CLIP_CACHE = 24;
 
 const snapshotCache = new Map<GameId, GameSnapshot>();
 const clipCache = new Map<GameId, DemoClipPayload>();
+const ruleClipCache = new Map<GameId, RuleClipsPayload>();
 const inflightSnapshots = new Map<GameId, Promise<GameSnapshot | null>>();
 const inflightClips = new Map<GameId, Promise<DemoClipPayload | null>>();
+const inflightRuleClips = new Map<GameId, Promise<RuleClipsPayload | null>>();
 
 function getLru<K, V>(cache: Map<K, V>, key: K): V | undefined {
   const val = cache.get(key);
@@ -210,3 +220,137 @@ export async function getOrGenerateDemoClipAsync(gameId: GameId): Promise<DemoCl
   inflightClips.set(gameId, task);
   return task;
 }
+
+/**
+ * Generates 4 distinct 2.0-second (24 frames @ 12fps) real-engine rule clips per game:
+ *  - Segment 0 (Rule 1): Opening movement / navigation / card deal
+ *  - Segment 1 (Rule 2): Active Primary Action A bursts (dash/fire/strike/play)
+ *  - Segment 2 (Rule 3): Secondary Action B & mid-match interaction (shield/special/hazard)
+ *  - Segment 3 (Rule 4): Late-game Frenzy climax & scoring push
+ */
+export async function getOrGenerateRuleClipsAsync(
+  gameId: GameId
+): Promise<RuleClipsPayload | null> {
+  const cached = getLru(ruleClipCache, gameId);
+  if (cached) return cached;
+
+  const pending = inflightRuleClips.get(gameId);
+  if (pending) return pending;
+
+  const engine = SERVER_GAMES[gameId];
+  if (!engine) return null;
+
+  const task = (async (): Promise<RuleClipsPayload | null> => {
+    const meta = getGameMeta(gameId);
+    const genre = getGameGenre(gameId);
+    const isCard = CARD_GAME_IDS.has(gameId);
+
+    const FPS = 12;
+    const SEGMENT_DURATION_MS = 2000;
+    const FRAMES_PER_SEGMENT = 24;
+    const stepDt = isCard ? 0.08 : genre === 'board' ? 0.07 : 1 / 24;
+    const substepsPerFrame = 2;
+
+    let players = createDemoPlayers(gameId);
+    let botMemories: BotMemory[] = players.map(() => createBotMemory());
+    let state = engine.createState(players, meta.defaultSetting);
+    let currentSnap: GameSnapshot = engine.getSnapshot(state);
+
+    const resetSim = () => {
+      players = createDemoPlayers(gameId);
+      botMemories = players.map(() => createBotMemory());
+      state = engine.createState(players, meta.defaultSetting);
+      currentSnap = engine.getSnapshot(state);
+    };
+
+    const advanceSegmentTick = (mode: 0 | 1 | 2 | 3, tickIdx: number): boolean => {
+      for (let i = 0; i < players.length; i++) {
+        players[i].prevA = players[i].input.a;
+        players[i].prevB = players[i].input.b;
+        const botIn = computeBotInput(
+          currentSnap,
+          players[i].id,
+          'spicy',
+          stepDt,
+          botMemories[i]
+        );
+        // Script P1 (slot 0) to demonstrate each rule's distinct mechanic clearly
+        if (i === 0 && !isCard) {
+          if (mode === 0) {
+            // Rule 1: Pure movement / steering / aiming
+            botIn.a = false;
+            botIn.b = false;
+          } else if (mode === 1) {
+            // Rule 2: Primary Action A pulses
+            botIn.a = tickIdx % 6 === 1 || tickIdx % 6 === 2;
+            botIn.b = false;
+          } else if (mode === 2) {
+            // Rule 3: Secondary Action B pulses
+            botIn.b = tickIdx % 7 === 2 || tickIdx % 7 === 3;
+          }
+        }
+        players[i].input = botIn;
+      }
+      const out = engine.step(state, players, stepDt, mode === 3);
+      if (out.finished) return true;
+      currentSnap = out.snapshot;
+      return false;
+    };
+
+    // Short initial warmup so actors are active in arena
+    const warmup = isCard ? 10 : genre === 'board' ? 12 : 8;
+    for (let w = 0; w < warmup; w++) {
+      if (advanceSegmentTick(0, w)) resetSim();
+    }
+
+    const segments: GameSnapshot[][] = [];
+    for (let segIdx = 0; segIdx < 4; segIdx++) {
+      const mode = segIdx as 0 | 1 | 2 | 3;
+
+      // Advance simulation slightly between segments so each 2s clip starts in a fresh state
+      if (segIdx > 0) {
+        const skipTicks = segIdx === 3 ? 26 : 14;
+        for (let k = 0; k < skipTicks; k++) {
+          if (advanceSegmentTick(mode, k)) {
+            resetSim();
+          }
+          if (k % 12 === 11) await yieldEventLoop();
+        }
+      }
+
+      const frames: GameSnapshot[] = [];
+      for (let f = 0; f < FRAMES_PER_SEGMENT; f++) {
+        let ended = false;
+        for (let s = 0; s < substepsPerFrame; s++) {
+          ended = advanceSegmentTick(mode, f * substepsPerFrame + s);
+          if (ended) break;
+        }
+        if (ended) {
+          resetSim();
+          for (let w = 0; w < 6; w++) {
+            if (advanceSegmentTick(mode, w)) break;
+          }
+        }
+        frames.push(structuredClone(currentSnap));
+        if (f % 6 === 5) await yieldEventLoop();
+      }
+      segments.push(frames);
+    }
+
+    const payload: RuleClipsPayload = {
+      gameId,
+      segmentDurationMs: SEGMENT_DURATION_MS,
+      fps: FPS,
+      segments,
+    };
+
+    setLru(ruleClipCache, gameId, payload, MAX_RULE_CLIP_CACHE);
+    return payload;
+  })().finally(() => {
+    inflightRuleClips.delete(gameId);
+  });
+
+  inflightRuleClips.set(gameId, task);
+  return task;
+}
+

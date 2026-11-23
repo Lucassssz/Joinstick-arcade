@@ -76,6 +76,7 @@ import {
   type TeamId,
 } from '../shared/party';
 import { CardControllerDeck } from './CardControllerDeck';
+import { PhoneControllerDemo } from './PhoneControllerDemo';
 import {
   ActionButtonSpec,
   CardClientAction,
@@ -1628,7 +1629,7 @@ export function PhoneController({
                 {t('Back', '返回')}
               </button>
             ) : (
-              <span className="font-display font-bold text-lg">JoinStick Arcade</span>
+              <span className="font-display font-bold text-lg">{t('JoinStick Arcade', 'JoinStick 街机派对')}</span>
             )}
             <div className="flex items-center gap-2.5">
               <LanguageToggle compact />
@@ -3305,6 +3306,16 @@ export function PhoneController({
           </div>
 
           <div className="flex flex-col gap-2.5 justify-center">
+            {!embedded && (
+              <div className="hidden sm:flex justify-center">
+                <PhoneControllerDemo
+                  gameId={gameMeta.id}
+                  accentHex={gameMeta.accentHex}
+                  activeRuleText={gameMeta.rules[0] ?? ''}
+                  compact
+                />
+              </div>
+            )}
             <button
               type="button"
               onClick={() => {

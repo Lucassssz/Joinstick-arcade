@@ -1,3 +1,5 @@
+import { selectTurnBasedBotMove, getTurnBotDelayMs } from './botEngine.ts';
+import type { BotDifficulty } from '../../src/shared/types.ts';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
@@ -1722,11 +1724,10 @@ interface PitHarvestInternal {
   popups: PitHarvestSnapshot['popups'];
   players: PitHarvestSnapshot['players'];
   finished: boolean;
+  botThinkTimer?: number;
 }
 
 function nextCongkakPos(pos: number, activeSide: 0 | 1): number {
-  // Side 0 sows: 0->1->2->3->4->5->6->(-1 rumah0)->7->8->9->10->11->12->13->0
-  // Side 1 sows: 7->8->9->10->11->12->13->(-2 rumah1)->0->1->2->3->4->5->6->7
   if (pos === -1) return 7;
   if (pos === -2) return 0;
   if (pos === 6) return activeSide === 0 ? -1 : 7;
@@ -1734,28 +1735,29 @@ function nextCongkakPos(pos: number, activeSide: 0 | 1): number {
   return pos + 1;
 }
 
-function chooseBestCongkakPit(state: PitHarvestInternal, side: 0 | 1): number {
+function chooseBestCongkakPit(state: PitHarvestInternal, side: 0 | 1, difficulty?: BotDifficulty): number {
   const start = side === 0 ? 0 : 7;
-  let bestLocal = -1;
-  let bestScore = -999;
+  const candidates: { move: number; rawScore: number }[] = [];
   for (let i = 0; i < 7; i++) {
     const idx = start + i;
     const count = state.pits[idx];
     if (count <= 0 || state.burntPits[idx]) continue;
     const distToRumah = 7 - i;
     let val = count * 2;
-    if (count === distToRumah) val += 45; // Guaranteed free turn (Jalan Terus!)
+    if (count === distToRumah) val += 45; // Free turn (Jalan Terus!)
     const landIdx = (idx + count) % 14;
     if (count < distToRumah && state.pits[landIdx] === 0 && !state.burntPits[landIdx]) {
       const oppIdx = 13 - landIdx;
       val += state.pits[oppIdx] * 5; // Tembak capture!
     }
-    if (val > bestScore) {
-      bestScore = val;
-      bestLocal = i;
-    }
+    candidates.push({ move: i, rawScore: val });
   }
-  return bestLocal >= 0 ? bestLocal : 0;
+  if (candidates.length === 0) return 0;
+  const chosen = selectTurnBasedBotMove({
+    difficulty,
+    candidates,
+  });
+  return chosen !== null ? chosen : candidates[0].move;
 }
 
 function sideHasMoves(state: PitHarvestInternal, side: 0 | 1): boolean {
@@ -1941,7 +1943,7 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
             const start = state.activeSide === 0 ? 0 : 7;
             let idx = start + clamp(localPit, 0, 6);
             if (state.pits[idx] <= 0 || state.burntPits[idx]) {
-              idx = start + chooseBestCongkakPit(state, state.activeSide);
+              idx = start + chooseBestCongkakPit(state, state.activeSide, inp?.botDifficulty);
             }
             if (state.pits[idx] <= 0) return;
             state.sowingInHand = state.pits[idx];
@@ -1954,8 +1956,13 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
           };
 
           if (isVirtualBot) {
-            if (state.turnTimeLeft <= state.turnTotal - 0.85) {
-              triggerSow(chooseBestCongkakPit(state, state.activeSide));
+            if (state.botThinkTimer === undefined) {
+              state.botThinkTimer = getTurnBotDelayMs(inp?.botDifficulty) / 1000;
+            }
+            state.botThinkTimer -= dt;
+            if (state.botThinkTimer <= 0) {
+              state.botThinkTimer = undefined;
+              triggerSow(chooseBestCongkakPit(state, state.activeSide, inp?.botDifficulty));
             }
           } else {
             const dx = inp.input.dx;
@@ -1968,7 +1975,7 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
             if (inp.input.a && !inp.prevA) {
               triggerSow(activePlayer.cursorPit);
             } else if ((inp.input.b && !inp.prevB) || state.turnTimeLeft <= 0) {
-              triggerSow(chooseBestCongkakPit(state, state.activeSide));
+              triggerSow(chooseBestCongkakPit(state, state.activeSide, inp?.botDifficulty));
             }
           }
         }

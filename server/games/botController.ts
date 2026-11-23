@@ -7,7 +7,7 @@ import {
   type GameSnapshot,
 } from '../../src/shared/types.ts';
 import { getUniversalBotProfile } from '../../src/shared/botProfile.ts';
-import { runRealtimeBotAdapter, type RealtimeTargetPoint } from './botEngine.ts';
+import { runRealtimeBotAdapter, selectTurnBasedBotMove, getTurnBotDelayMs, type RealtimeTargetPoint } from './botEngine.ts';
 
 export interface BotMemory {
   wanderAngle: number;
@@ -1623,8 +1623,14 @@ export function computeBotInput(
     case 'reversi-clash': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || snapshot.activePlayerId !== botId) break;
-      if (snapshot.turnTimeLeft < 12.2 && mem.actionCooldown <= 0) {
-        const bestMove = [...snapshot.validMoves].sort((m1, m2) => m2.flips - m1.flips)[0];
+      const turnDelaySec = getTurnBotDelayMs(difficulty) / 1000;
+      if (snapshot.turnTimeLeft < 14 - turnDelaySec && mem.actionCooldown <= 0) {
+        const candidates = (snapshot.validMoves ?? []).map((m) => ({
+          move: m,
+          rawScore: m.flips + ((m.col === 0 || m.col === snapshot.cols - 1) && (m.row === 0 || m.row === snapshot.rows - 1) ? 25 : 0),
+        }));
+        const chosenMove = selectTurnBasedBotMove({ difficulty, candidates });
+        const bestMove = chosenMove ?? snapshot.validMoves[0];
         if (bestMove) {
           if (me.cursorCol !== bestMove.col) {
             dx = Math.sign(bestMove.col - me.cursorCol);
@@ -1651,7 +1657,8 @@ export function computeBotInput(
     case 'four-in-a-row': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || snapshot.activePlayerId !== botId) break;
-      if (snapshot.turnTimeLeft < 12.2 && mem.actionCooldown <= 0) {
+      const turnDelaySec = getTurnBotDelayMs(difficulty) / 1000;
+      if (snapshot.turnTimeLeft < 14 - turnDelaySec && mem.actionCooldown <= 0) {
         const cols = snapshot.cols;
         const rows = snapshot.rows;
         const dropRowOf = (col: number) => {
@@ -1677,8 +1684,7 @@ export function computeBotInput(
           }
           return false;
         };
-        let targetCol = 3;
-        let bestScore = -999;
+        const candidates: { move: number; rawScore: number }[] = [];
         for (let c = 0; c < cols; c++) {
           const r = dropRowOf(c);
           if (r < 0) continue;
@@ -1687,16 +1693,16 @@ export function computeBotInput(
           for (const opp of snapshot.players) {
             if (opp.id !== botId && wouldConnect4(c, r, opp.id)) sc += 400;
           }
-          if (sc > bestScore) {
-            bestScore = sc;
-            targetCol = c;
-          }
+          candidates.push({ move: c, rawScore: sc });
         }
+        const chosenCol = selectTurnBasedBotMove({ difficulty, candidates });
+        const targetCol = chosenCol !== null ? chosenCol : (candidates[0]?.move ?? 3);
+
         if (me.hoverCol !== targetCol && snapshot.turnTimeLeft > 8.5) {
           dx = Math.sign(targetCol - me.hoverCol);
           mem.actionCooldown = 0.16;
         } else {
-          if (me.anvilCharges > 0 && bestScore < 400 && Math.random() < 0.15) {
+          if (me.anvilCharges > 0 && Math.random() < 0.15) {
             b = true;
           } else {
             a = true;

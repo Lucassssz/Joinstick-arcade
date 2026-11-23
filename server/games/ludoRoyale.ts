@@ -1,4 +1,5 @@
 import type {
+  BotDifficulty,
   LudoPlayerState,
   LudoRoyaleSnapshot,
   RankingEntry,
@@ -11,6 +12,7 @@ import type {
   ServerPlayerInputState,
   StepOutput,
 } from './engine.ts';
+import { selectTurnBasedBotMove, getTurnBotDelayMs } from './botEngine.ts';
 
 interface LudoRoyaleState {
   round: number;
@@ -31,6 +33,7 @@ interface LudoRoyaleState {
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: LudoPlayerState[];
   finished: boolean;
+  botThinkTimer?: number;
 }
 
 const TRACK_LEN = 28;
@@ -52,26 +55,13 @@ function advanceTurn(state: LudoRoyaleState): void {
   state.turnTimeLeft = TURN_TIMEOUT;
   state.diceRolling = false;
   state.banner = null;
+  state.botThinkTimer = undefined;
   const active = state.players[state.turnIndex];
   if (active) {
-    // Auto-focus a movable token
     const firstActive = active.tokens.findIndex((t) => t >= 0 && t < GOAL_STEP);
     if (firstActive !== -1) active.selectedToken = firstActive;
     state.eventText = `${active.name}'s Turn — Stick/B Picks Token · Press A to Roll!`;
   }
-}
-
-function chooseBestToken(player: LudoPlayerState, roll: number): number {
-  const preferred = player.selectedToken;
-  const canMove = (step: number) => {
-    if (step === -1) return roll >= 5 || player.tokens.every((t) => t === -1 || t >= GOAL_STEP);
-    return step < GOAL_STEP;
-  };
-  if (canMove(player.tokens[preferred])) return preferred;
-  for (let i = 0; i < player.tokens.length; i++) {
-    if (canMove(player.tokens[i])) return i;
-  }
-  return -1;
 }
 
 export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
@@ -126,6 +116,7 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
   step(state: LudoRoyaleState, players: ServerPlayerInputState[], dt: number): StepOutput {
     const sounds: SoundEvent[] = [];
     const haptics: HapticTrigger[] = [];
+    const inputMap = new Map(players.map((p) => [p.id, p]));
 
     for (let i = state.popups.length - 1; i >= 0; i--) {
       state.popups[i].y -= dt * 28;
@@ -137,7 +128,7 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
 
     if (!state.finished) {
       const active = state.players[state.turnIndex];
-      const inp = players.find((p) => p.id === active.id);
+      const inp = inputMap.get(active.id);
       const justA = Boolean(inp && inp.input.a && !inp.prevA);
       const justB = Boolean(inp && inp.input.b && !inp.prevB);
       state.moveCooldowns[active.id] = Math.max(0, (state.moveCooldowns[active.id] || 0) - dt);
@@ -145,32 +136,46 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
       if (state.phase === 'wait-roll') {
         state.turnTimeLeft = Math.max(0, state.turnTimeLeft - dt);
 
-        // Joystick Left/Right OR Button B switches selected token
-        const stickDir =
-          inp && state.moveCooldowns[active.id] <= 0 && Math.abs(inp.input.dx) > 0.45
-            ? Math.sign(inp.input.dx)
-            : 0;
-        if (justB || stickDir !== 0) {
-          const delta = stickDir !== 0 ? stickDir : 1;
-          active.selectedToken = (active.selectedToken + delta + 3) % 3;
-          state.moveCooldowns[active.id] = 0.22;
-          const tokStatus =
-            active.tokens[active.selectedToken] === -1
-              ? 'In Base'
-              : active.tokens[active.selectedToken] >= GOAL_STEP
-              ? 'Home'
-              : `Step ${active.tokens[active.selectedToken] + 1}`;
-          state.eventText = `${active.name} selected Token #${active.selectedToken + 1} (${tokStatus})`;
-          sounds.push({ type: 'nav', playerId: active.id });
-        }
+        if (active.isBot) {
+          if (state.botThinkTimer === undefined) {
+            state.botThinkTimer = getTurnBotDelayMs(inp?.botDifficulty) / 1000;
+          }
+          state.botThinkTimer -= dt;
+          if (state.botThinkTimer <= 0) {
+            state.phase = 'rolling';
+            state.phaseTimer = 0.75;
+            state.diceRolling = true;
+            state.diceValue = 1 + Math.floor(Math.random() * 6);
+            sounds.push({ type: 'confirm', playerId: active.id });
+            haptics.push({ playerId: active.id, pattern: 22, reason: 'ludo-roll' });
+          }
+        } else {
+          const stickDir =
+            inp && state.moveCooldowns[active.id] <= 0 && Math.abs(inp.input.dx) > 0.45
+              ? Math.sign(inp.input.dx)
+              : 0;
+          if (justB || stickDir !== 0) {
+            const delta = stickDir !== 0 ? stickDir : 1;
+            active.selectedToken = (active.selectedToken + delta + 3) % 3;
+            state.moveCooldowns[active.id] = 0.22;
+            const tokStatus =
+              active.tokens[active.selectedToken] === -1
+                ? 'In Base'
+                : active.tokens[active.selectedToken] >= GOAL_STEP
+                ? 'Home'
+                : `Step ${active.tokens[active.selectedToken] + 1}`;
+            state.eventText = `${active.name} selected Token #${active.selectedToken + 1} (${tokStatus})`;
+            sounds.push({ type: 'nav', playerId: active.id });
+          }
 
-        if (justA || state.turnTimeLeft <= 0) {
-          state.phase = 'rolling';
-          state.phaseTimer = 0.75;
-          state.diceRolling = true;
-          state.diceValue = 1 + Math.floor(Math.random() * 6);
-          sounds.push({ type: 'confirm', playerId: active.id });
-          haptics.push({ playerId: active.id, pattern: 22, reason: 'ludo-roll' });
+          if (justA || state.turnTimeLeft <= 0) {
+            state.phase = 'rolling';
+            state.phaseTimer = 0.75;
+            state.diceRolling = true;
+            state.diceValue = 1 + Math.floor(Math.random() * 6);
+            sounds.push({ type: 'confirm', playerId: active.id });
+            haptics.push({ playerId: active.id, pattern: 22, reason: 'ludo-roll' });
+          }
         }
       } else if (state.phase === 'rolling') {
         state.phaseTimer -= dt;
@@ -185,7 +190,36 @@ export const ludoRoyaleModule: ServerGameModule<LudoRoyaleState> = {
           }
           state.diceValue = roll;
 
-          const tokIdx = chooseBestToken(active, roll);
+          const difficulty = inp?.botDifficulty;
+          const candidates = active.tokens.map((tokenPos, tokenIdx) => {
+            const canMove = tokenPos === -1 ? roll >= 5 || active.tokens.every((t) => t === -1 || t >= GOAL_STEP) : tokenPos < GOAL_STEP;
+            if (!canMove) return null;
+            let rawScore = tokenPos === -1 ? 30 : tokenPos * 2;
+            if (tokenPos + roll >= GOAL_STEP) rawScore += 120;
+            const curStep = tokenPos === -1 ? 0 : tokenPos;
+            const newStep = Math.min(GOAL_STEP, curStep + roll);
+            if (newStep < TRACK_LEN) {
+              const absTrack = (active.startTrackIndex + newStep) % TRACK_LEN;
+              if (state.starIndices.includes(absTrack)) rawScore += 40;
+              for (const other of state.players) {
+                if (other.id === active.id) continue;
+                for (const oStep of other.tokens) {
+                  if (oStep >= 0 && oStep < TRACK_LEN) {
+                    if ((other.startTrackIndex + oStep) % TRACK_LEN === absTrack) {
+                      rawScore += 90;
+                    }
+                  }
+                }
+              }
+            }
+            return { move: tokenIdx, rawScore };
+          }).filter(Boolean) as { move: number; rawScore: number }[];
+
+          const tokIdx = candidates.length > 0
+            ? (active.isBot
+                ? selectTurnBasedBotMove({ difficulty, candidates }) ?? candidates[0].move
+                : (candidates.find((c) => c.move === active.selectedToken)?.move ?? candidates[0].move))
+            : -1;
           if (tokIdx === -1) {
             state.eventText = `${active.name} rolled ${roll} — Need 5 or 6 to deploy from Base!`;
             state.phase = 'event';

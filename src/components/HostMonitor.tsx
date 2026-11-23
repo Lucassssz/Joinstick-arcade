@@ -45,6 +45,8 @@ import {
 import { getPadTutorialGuide } from '../shared/padProfiles';
 import { GameHoverPreview } from './GameHoverPreview';
 import { GameThumbnail } from './GameThumbnail';
+import { BriefingTutorialCard } from './BriefingTutorialCard';
+import { GameTutorialOverlay } from './GameTutorialOverlay';
 import { CupVotingStage } from './CupVotingStage';
 import { PlayerAvatar } from './PlayerAvatar';
 import {
@@ -132,6 +134,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
+  const [showInGameTutorial, setShowInGameTutorial] = useState(false);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [floatingEmotes, setFloatingEmotes] = useState<FloatingEmote[]>([]);
   const [isMonitorFullscreen, setIsMonitorFullscreen] = useState(false);
@@ -2869,7 +2872,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   : 'bg-[#1E232D] text-[#D1D5DB] border-[#2F3747]'
               } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
             >
-              <span className="text-[#9CA3AF] truncate">{t('Bot:', 'AI:')}</span>
+              <span className="text-[#9CA3AF] truncate">{t('Bot:', '机器人:')}</span>
               <span style={{ color: difficultyColor(room.botDifficulty) }}>
                 {getLocalizedDifficulty(room.botDifficulty, lang).label}
               </span>
@@ -2947,7 +2950,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       ? Math.round((readyHumans.length / connectedHumans.length) * 100)
       : 100;
   const activeTournament = room.tournament?.active ? room.tournament : null;
-  const frenzyPerks = GAME_FRENZY_PERKS[room.selectedGameId];
+  const frenzyPerks = GAME_FRENZY_PERKS[room.selectedGameId] || {
+    perk1En: '2× SCORE BOOST',
+    perk1Zh: '双倍积分狂热',
+    perk2En: '1.18× SPEED RUSH',
+    perk2Zh: '1.18× 极速冲刺',
+  };
 
   return (
     <div className="fixed inset-0 h-dvh w-full bg-[#121419] text-[#F4F6FA] flex flex-col overflow-hidden select-none">
@@ -3022,6 +3030,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           >
             <Smartphone className="w-3.5 h-3.5" />
             <span className="hidden xl:inline">{t('Test Pad', '测试手柄')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowInGameTutorial(true)}
+            title={t('In-Game Tutorial', '游戏教程')}
+            className="h-8 px-2.5 rounded-lg bg-[#00C2FF]/20 hover:bg-[#00C2FF]/30 border border-[#00C2FF]/50 text-[#00C2FF] text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+            <span className="hidden sm:inline">{t('Tutorial', '教程')}</span>
           </button>
 
           <button
@@ -3455,7 +3473,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 initial={{ opacity: 0, scale: 0.94, y: 12 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
-                className="max-w-3xl w-full max-h-full flex flex-col overflow-y-auto arcade-scrollbar rounded-2xl sm:rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl"
+                className="max-w-5xl w-full max-h-full flex flex-col overflow-y-auto arcade-scrollbar rounded-2xl sm:rounded-3xl bg-[#1A1E26] border-2 border-[#2F3747] shadow-2xl"
               >
                 {/* Tournament Progress Strip when playing 5-Game Tournament */}
                 {activeTournament && (
@@ -3498,8 +3516,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 )}
 
                 {/* Header strip with game artwork thumbnail */}
-                <div className="flex flex-row items-center gap-3 sm:gap-4 p-3.5 sm:p-5 border-b border-[#262C38] bg-[#151820] shrink-0">
-                  <div className="w-24 sm:w-36 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
+                <div className="flex flex-row items-center gap-3 sm:gap-4 px-4 py-3 border-b border-[#262C38] bg-[#151820] shrink-0">
+                  <div className="w-20 sm:w-28 aspect-video rounded-xl overflow-hidden bg-[#101217] border border-[#2A303D] shrink-0">
                     <GameThumbnail
                       gameId={selectedGame.id}
                       gameName={selectedGame.name}
@@ -3513,7 +3531,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-[#00C2FF]">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#00C2FF]">
                         {t('How to Play', '玩法说明')} · {selectedGame.category}
                       </span>
                       {room.activeMutator !== 'normal' && (
@@ -3528,142 +3546,27 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                         </span>
                       )}
                     </div>
-                    <h2 className="font-display text-lg sm:text-3xl font-extrabold text-white mt-0.5 truncate">
+                    <h2 className="font-display text-lg sm:text-2xl font-extrabold text-white mt-0.5 truncate">
                       {selectedGame.name}
                     </h2>
-                    <p className="text-xs sm:text-base text-[#D1D5DB] mt-0.5 sm:mt-1 line-clamp-2">{selectedGame.tagline}</p>
+                    <p className="text-xs sm:text-sm text-[#D1D5DB] truncate">{selectedGame.tagline}</p>
                   </div>
                 </div>
 
-                {/* Body: Simple Rules + Clear Phone Controls (Scrollable if tablet height is tight) */}
-                <div className="p-3.5 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 md:flex-1 md:min-h-0 md:overflow-y-auto arcade-scrollbar">
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF] mb-3">
-                      {t('Simple Rules', '简单规则')}
-                    </h3>
-                    <ul className="space-y-2.5 text-sm sm:text-[15px] text-white">
-                      {selectedGame.rules.map((rule, idx) => (
-                        <li key={idx} className="flex items-start gap-2.5 leading-snug">
-                          <span
-                            className="w-6 h-6 rounded-md font-mono text-xs font-black flex items-center justify-center shrink-0 mt-0.5"
-                            style={{
-                              backgroundColor: `${selectedGame.accentHex}24`,
-                              color: selectedGame.accentHex,
-                            }}
-                          >
-                            {idx + 1}
-                          </span>
-                          <span>{rule}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="rounded-2xl bg-[#101217] border border-[#262C38] p-4 flex flex-col justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
-                          {t('Your Phone Controls', '手机按键说明')}
-                        </h3>
-                        <span
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-display text-[11px] font-extrabold border"
-                          style={{
-                            color: selectedPadGuide.accentHex,
-                            borderColor: `${selectedPadGuide.accentHex}55`,
-                            backgroundColor: `${selectedPadGuide.accentHex}16`,
-                          }}
-                        >
-                          <Gamepad2 className="w-3 h-3 shrink-0" />
-                          <span>{selectedPadGuide.padTitle}</span>
-                        </span>
-                      </div>
-
-                      <div className="mb-3 rounded-xl bg-[#151922] border border-[#242B38] px-3 py-2 space-y-1">
-                        <div className="flex flex-wrap items-center justify-between gap-1.5">
-                          <span className="font-mono text-[10px] font-bold uppercase text-[#9CA3AF]">
-                            {selectedPadGuide.presetTag}
-                          </span>
-                          <span className="text-[11px] text-[#9CA3AF] truncate">
-                            {selectedPadGuide.whyText}
-                          </span>
-                        </div>
-                        <p className="text-xs text-[#E5E7EB] leading-snug">
-                          {selectedPadGuide.tutorialText}
-                        </p>
-                      </div>
-
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-[#1E232D] border-2 border-[#2F3747] flex items-center justify-center shrink-0">
-                            <div className="w-4 h-4 rounded-full bg-white/90" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-xs text-[#9CA3AF]">{t('Left Joystick', '左侧摇杆')}</div>
-                            <div className="text-sm font-bold text-white truncate">
-                              {selectedGame.controllerSchema.joystickLabel}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-10 h-10 rounded-full font-display font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm"
-                            style={{
-                              backgroundColor: selectedGame.controllerSchema.actionA.colorHex,
-                              color: selectedGame.controllerSchema.actionA.textColor,
-                            }}
-                          >
-                            A
-                          </div>
-                          <div className="min-w-0">
-                            <div
-                              className="text-sm font-extrabold leading-tight"
-                              style={{ color: selectedGame.controllerSchema.actionA.colorHex }}
-                            >
-                              {selectedGame.controllerSchema.actionA.label}
-                            </div>
-                            <div className="text-xs text-[#A5AEBD] truncate">
-                              {selectedGame.controllerSchema.actionA.sublabel}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-10 h-10 rounded-full font-display font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm"
-                            style={{
-                              backgroundColor: selectedGame.controllerSchema.actionB.colorHex,
-                              color: selectedGame.controllerSchema.actionB.textColor,
-                            }}
-                          >
-                            B
-                          </div>
-                          <div className="min-w-0">
-                            <div
-                              className="text-sm font-extrabold leading-tight"
-                              style={{ color: selectedGame.controllerSchema.actionB.colorHex }}
-                            >
-                              {selectedGame.controllerSchema.actionB.label}
-                            </div>
-                            <div className="text-xs text-[#A5AEBD] truncate">
-                              {selectedGame.controllerSchema.actionB.sublabel}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <p className="mt-4 pt-3 border-t border-[#242934] text-xs text-[#A5AEBD] leading-relaxed">
-                      <strong className="text-white">{t('Tip:', '小提示：')}</strong>{' '}
-                      {selectedGame.controllerSchema.controlTip}
-                    </p>
-                  </div>
+                {/* Body: One-page Rule List + Animations Beside Rules (Zero Scroll Needed) */}
+                <div className="p-3.5 sm:p-4 shrink-0">
+                  <BriefingTutorialCard
+                    gameId={selectedGame.id}
+                    gameName={selectedGame.name}
+                    accentHex={selectedGame.accentHex}
+                    rules={selectedGame.rules}
+                  />
                 </div>
 
                 {/* Live Ready Progress + Per-Player Ready Chips (NO auto-countdown!) */}
-                <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-[#151820] border-t border-[#262C38] space-y-3 shrink-0">
+                <div className="px-4 sm:px-5 py-3 bg-[#151820] border-t border-[#262C38] space-y-2.5 shrink-0">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm font-bold text-white">
+                    <div className="text-xs sm:text-sm font-bold text-white">
                       {connectedHumans.length > 0
                         ? t(
                             `Tap "I'm Ready!" on your phone when finished reading (${readyHumans.length}/${connectedHumans.length} Ready)`,
@@ -3680,7 +3583,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   </div>
 
                   {/* Smooth Progress Bar */}
-                  <div className="h-2.5 w-full rounded-full bg-[#242A36] overflow-hidden">
+                  <div className="h-2 w-full rounded-full bg-[#242A36] overflow-hidden">
                     <motion.div
                       className="h-full bg-[#10D98B] rounded-full"
                       initial={false}
@@ -3690,7 +3593,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   </div>
 
                   {/* Player Ready Chips */}
-                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 max-h-24 overflow-y-auto arcade-scrollbar">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {room.players.map((p) => {
                       const isReady = p.isBot || (p.connected && p.ready);
                       const teamSpec = room.teamMode !== 'ffa' ? getTeamSpec(p.teamId) : null;
@@ -4293,6 +4196,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         open={testDrawerOpen}
         onClose={() => setTestDrawerOpen(false)}
       />
+
+      {showInGameTutorial && selectedGame && (
+        <GameTutorialOverlay
+          gameId={selectedGame.id}
+          gameName={selectedGame.name}
+          accentHex={selectedGame.accentHex}
+          rules={selectedGame.rules}
+          onClose={() => setShowInGameTutorial(false)}
+          onPlayNow={() => setShowInGameTutorial(false)}
+        />
+      )}
     </div>
   );
 }

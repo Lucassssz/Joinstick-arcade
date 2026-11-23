@@ -386,7 +386,7 @@ export function renderRummyRoyale(ctx: CanvasRenderingContext2D, snap: RummyRoya
     ctx.fillText(m.ownerName, x + 142, y + 32);
     ctx.fillStyle = '#0F172A';
     ctx.font = '900 32px "JetBrains Mono", monospace';
-    ctx.fillText(m.label, x + 142, y + 82);
+    ctx.fillText(tCanvas(m.label), x + 142, y + 82);
   });
 
   drawScoreFooter(
