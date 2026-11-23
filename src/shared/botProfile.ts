@@ -1,4 +1,4 @@
-import type { BotDifficulty } from './types';
+import type { BotDifficulty } from './types.ts';
 
 /**
  * Single source of truth for JoinStick Arcade bot cognition.

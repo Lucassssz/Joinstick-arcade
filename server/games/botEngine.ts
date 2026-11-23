@@ -1,5 +1,5 @@
-import type { BotDifficulty, ControllerInput } from '../../src/shared/types';
-import { getUniversalBotProfile, type UniversalBotProfile } from '../../src/shared/botProfile';
+import type { BotDifficulty, ControllerInput } from '../../src/shared/types.ts';
+import { getUniversalBotProfile, type UniversalBotProfile } from '../../src/shared/botProfile.ts';
 
 export type BotAdapterKind = 'real-time' | 'turn-based' | 'card';
 
