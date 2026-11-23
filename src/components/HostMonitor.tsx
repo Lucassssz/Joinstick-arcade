@@ -173,6 +173,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const wheelAutoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionsGridRef = useRef<HTMLDivElement | null>(null);
+  const filterTabsRef = useRef<HTMLDivElement | null>(null);
   const lastSentLayoutRef = useRef<{ gameCols: number; actionCols: number }>({
     gameCols: 0,
     actionCols: 0,
@@ -790,6 +791,36 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       void getStylizedGameThumbnail(neighbor.id, neighbor.accentHex, getGameGenre(neighbor.id));
     }
   }, [room?.status, room?.lobbyFilter, room?.selectedGameId]);
+
+  // Auto-scroll the horizontal filter bar so the remote-focused or active filter tab is always centered in view
+  useEffect(() => {
+    if (room?.status !== 'LOBBY') return;
+    const container = filterTabsRef.current;
+    if (!container) return;
+
+    const targetIdx =
+      room.remoteFocus.zone === 'filter'
+        ? room.remoteFocus.index
+        : Math.max(
+            0,
+            PLAYER_FILTER_OPTIONS.findIndex((opt) => opt.id === room.lobbyFilter)
+          );
+
+    const btn = container.querySelector<HTMLElement>(`[data-filter-idx="${targetIdx}"]`);
+    if (!btn) return;
+
+    const targetLeft =
+      btn.offsetLeft - container.clientWidth / 2 + btn.offsetWidth / 2;
+    container.scrollTo({
+      left: Math.max(0, targetLeft),
+      behavior: 'smooth',
+    });
+  }, [
+    room?.status,
+    room?.lobbyFilter,
+    room?.remoteFocus?.zone,
+    room?.remoteFocus?.index,
+  ]);
 
   // Keyboard Left / Right arrow flipping in LOBBY when mouse control is active
   useEffect(() => {
@@ -1973,44 +2004,98 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           <section className="md:col-span-7 lg:col-span-8 flex flex-col min-h-0 gap-3 sm:gap-3.5 overflow-hidden">
             {/* Row 0: Filter Bar (zone === 'filter') — Isolated in its own padded row so its focus ring never touches the game card below */}
             <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 shrink-0 pb-0.5">
-              <div
-                role="tablist"
-                aria-label={t('Filter games by player count', '按游玩人数筛选游戏')}
-                className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-[#101217] border border-[#262C39] overflow-x-auto no-scrollbar max-w-full min-w-0"
-              >
-                {PLAYER_FILTER_OPTIONS.map((opt, idx) => {
-                  const isActiveFilter = room.lobbyFilter === opt.id;
-                  const isRemoteFocused = focus.zone === 'filter' && focus.index === idx;
-                  const count = filterGamesByPlayerMode(opt.id).length;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActiveFilter}
-                      onClick={() =>
-                        guardHostOnlyClick(() =>
-                          wsRef.current?.send({
-                            type: 'lobby:filter',
-                            filter: opt.id,
-                          })
-                        )
+              <div className="flex items-center gap-1 min-w-0 max-w-full">
+                <button
+                  type="button"
+                  onClick={() =>
+                    guardHostOnlyClick(() => {
+                      const curIdx = Math.max(
+                        0,
+                        PLAYER_FILTER_OPTIONS.findIndex((o) => o.id === room.lobbyFilter)
+                      );
+                      const prevOpt =
+                        PLAYER_FILTER_OPTIONS[
+                          (curIdx - 1 + PLAYER_FILTER_OPTIONS.length) % PLAYER_FILTER_OPTIONS.length
+                        ];
+                      if (prevOpt) {
+                        wsRef.current?.send({ type: 'lobby:filter', filter: prevOpt.id });
                       }
-                      className={`px-2.5 xl:px-3 py-1 rounded-lg text-xs font-extrabold whitespace-nowrap shrink-0 transition-all border ${
-                        isRemoteFocused
-                          ? 'bg-[#FFB800] text-[#14120B] ring-2 ring-[#FFB800] border-[#FFB800] shadow-[0_0_14px_rgba(255,184,0,0.45)] z-10'
-                          : isActiveFilter
-                          ? opt.id === 'heritage'
-                            ? 'bg-[#F59E0B] text-[#141008] border-transparent'
-                            : 'bg-[#FF4D2E] text-white border-transparent'
-                          : 'bg-transparent text-[#9CA3AF] border-transparent hover:text-white'
-                      } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
-                    >
-                      {getLocalizedFilterLabel(opt.id, lang, true)}{' '}
-                      <span className="font-mono opacity-80 tabular-nums">({count})</span>
-                    </button>
-                  );
-                })}
+                    })
+                  }
+                  title={t('Previous category filter', '上一个分类筛选')}
+                  aria-label={t('Previous category filter', '上一个分类筛选')}
+                  className={`h-9 w-7 rounded-lg bg-[#101217] hover:bg-[#1B202B] border border-[#262C39] text-[#9CA3AF] hover:text-white flex items-center justify-center shrink-0 transition-colors ${
+                    isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'
+                  }`}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <div
+                  ref={filterTabsRef}
+                  role="tablist"
+                  aria-label={t('Filter games by player count', '按游玩人数筛选游戏')}
+                  className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-[#101217] border border-[#262C39] overflow-x-auto no-scrollbar max-w-full min-w-0 scroll-smooth"
+                >
+                  {PLAYER_FILTER_OPTIONS.map((opt, idx) => {
+                    const isActiveFilter = room.lobbyFilter === opt.id;
+                    const isRemoteFocused = focus.zone === 'filter' && focus.index === idx;
+                    const count = filterGamesByPlayerMode(opt.id).length;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="tab"
+                        data-filter-idx={idx}
+                        aria-selected={isActiveFilter}
+                        onClick={() =>
+                          guardHostOnlyClick(() =>
+                            wsRef.current?.send({
+                              type: 'lobby:filter',
+                              filter: opt.id,
+                            })
+                          )
+                        }
+                        className={`px-2.5 xl:px-3 py-1 rounded-lg text-xs font-extrabold whitespace-nowrap shrink-0 transition-all border ${
+                          isRemoteFocused
+                            ? 'bg-[#FFB800] text-[#14120B] ring-2 ring-[#FFB800] border-[#FFB800] shadow-[0_0_14px_rgba(255,184,0,0.45)] z-10'
+                            : isActiveFilter
+                            ? opt.id === 'heritage'
+                              ? 'bg-[#F59E0B] text-[#141008] border-transparent'
+                              : 'bg-[#FF4D2E] text-white border-transparent'
+                            : 'bg-transparent text-[#9CA3AF] border-transparent hover:text-white'
+                        } ${isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'}`}
+                      >
+                        {getLocalizedFilterLabel(opt.id, lang, true)}{' '}
+                        <span className="font-mono opacity-80 tabular-nums">({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    guardHostOnlyClick(() => {
+                      const curIdx = Math.max(
+                        0,
+                        PLAYER_FILTER_OPTIONS.findIndex((o) => o.id === room.lobbyFilter)
+                      );
+                      const nextOpt =
+                        PLAYER_FILTER_OPTIONS[(curIdx + 1) % PLAYER_FILTER_OPTIONS.length];
+                      if (nextOpt) {
+                        wsRef.current?.send({ type: 'lobby:filter', filter: nextOpt.id });
+                      }
+                    })
+                  }
+                  title={t('Next category filter', '下一个分类筛选')}
+                  aria-label={t('Next category filter', '下一个分类筛选')}
+                  className={`h-9 w-7 rounded-lg bg-[#101217] hover:bg-[#1B202B] border border-[#262C39] text-[#9CA3AF] hover:text-white flex items-center justify-center shrink-0 transition-colors ${
+                    isScreenRemoteLocked ? 'cursor-default' : 'cursor-pointer'
+                  }`}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">

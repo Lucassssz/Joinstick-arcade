@@ -2396,21 +2396,11 @@ export class RoomManager {
     };
 
     if (focus.zone === 'filter') {
-      if (action === 'left') {
-        focus.index = Math.max(0, focus.index - 1);
-        this.playHostSound(room, 'nav');
-      } else if (action === 'right') {
-        focus.index = Math.min(PLAYER_FILTER_OPTIONS.length - 1, focus.index + 1);
-        this.playHostSound(room, 'nav');
-      } else if (action === 'down') {
-        if (filteredGames.length > 0) {
-          focus.zone = 'games';
-          const targetCol = Math.min(COLS - 1, Math.max(0, focus.index));
-          selectGameAt(Math.min(filteredGames.length - 1, targetCol));
-          this.playHostSound(room, 'nav');
-        }
-      } else if (action === 'ok') {
-        const chosenOpt = PLAYER_FILTER_OPTIONS[focus.index];
+      const totalFilters = PLAYER_FILTER_OPTIONS.length;
+      const applyFilterAtIndex = (idx: number) => {
+        const clampedIdx = ((idx % totalFilters) + totalFilters) % totalFilters;
+        focus.index = clampedIdx;
+        const chosenOpt = PLAYER_FILTER_OPTIONS[clampedIdx];
         if (chosenOpt) {
           room.lobbyFilter = chosenOpt.id;
           const nextGames = filterGamesByPlayerMode(room.lobbyFilter);
@@ -2418,8 +2408,24 @@ export class RoomManager {
             room.selectedGameId = nextGames[0].id;
             room.gameSettingValue = nextGames[0].defaultSetting;
           }
-          this.playHostSound(room, 'confirm');
         }
+      };
+
+      if (action === 'left') {
+        applyFilterAtIndex(focus.index - 1);
+        this.playHostSound(room, 'nav');
+      } else if (action === 'right') {
+        applyFilterAtIndex(focus.index + 1);
+        this.playHostSound(room, 'nav');
+      } else if (action === 'down' || action === 'ok') {
+        applyFilterAtIndex(focus.index);
+        const nextGames = filterGamesByPlayerMode(room.lobbyFilter);
+        if (nextGames.length > 0) {
+          focus.zone = 'games';
+          const selectedIdx = nextGames.findIndex((g) => g.id === room.selectedGameId);
+          selectGameAt(selectedIdx >= 0 ? selectedIdx : 0);
+        }
+        this.playHostSound(room, action === 'ok' ? 'confirm' : 'nav');
       }
       this.broadcastRoom(room);
       return;
