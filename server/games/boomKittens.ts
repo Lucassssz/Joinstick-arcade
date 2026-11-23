@@ -9,6 +9,7 @@ import type {
   SoundEvent,
 } from '../../src/shared/types.ts';
 import type { HapticTrigger, PlayerHudUpdate, ServerGameModule } from './engine.ts';
+import { getTurnBotDelayMs, selectCardBotMove } from './botEngine.ts';
 
 const TURN_LIMIT_SEC = 14.0;
 
@@ -622,17 +623,70 @@ export const boomKittensModule: ServerGameModule<BoomKittensState> = {
       if (active.isBot) {
         state.botThinkTimer -= dt;
         if (state.botThinkTimer <= 0) {
-          const topIsBoom = state.deck.length > 0 && state.deck[state.deck.length - 1].kind === 'boom';
-          const skipIdx = active.hand.findIndex((c) => c.kind === 'skip' || c.kind === 'attack');
-          const actionIdx = active.hand.findIndex((c) => c.kind !== 'defuse' && c.kind !== 'boom');
-          if ((state.drawsOwed > 1 || topIsBoom) && skipIdx >= 0 && Math.random() < 0.78) {
-            playCard(state, active, skipIdx);
-            state.botThinkTimer = 0.85;
-          } else if (actionIdx >= 0 && Math.random() < 0.48) {
-            playCard(state, active, actionIdx);
-            state.botThinkTimer = 0.85;
+          const botInp = inputPlayers.find((ip) => ip.id === active.id);
+          const botDiff = botInp?.botDifficulty;
+          // Legal public + private seat information ONLY (never peeks at state.deck!)
+          const publicView = {
+            deckCount: state.deck.length,
+            drawsOwed: state.drawsOwed,
+            aliveCount: state.players.filter((p) => p.alive).length,
+          };
+          const privateSeatView = {
+            hand: active.hand,
+            hasDefuse: active.hand.some((c) => c.kind === 'defuse'),
+            // Only knows top card if this seat legally played 'see' (See the Future) earlier this turn
+            knownFutureTopKind: active.peekNote
+              ? active.peekNote.includes('BOOM!') && active.peekNote.indexOf('BOOM!') < 16
+                ? 'BOOM!'
+                : 'SAFE'
+              : null,
+          };
+          type BoomMove = { type: 'play'; cardIndex: number; kind: KittenCardKind } | { type: 'draw' };
+          const legalMoves: BoomMove[] = [{ type: 'draw' }];
+          active.hand.forEach((c, idx) => {
+            if (c.kind !== 'defuse' && c.kind !== 'boom') {
+              legalMoves.push({ type: 'play', cardIndex: idx, kind: c.kind });
+            }
+          });
+          const publicDanger =
+            publicView.deckCount > 0
+              ? Math.min(1, Math.max(0.1, (publicView.aliveCount - 1) / publicView.deckCount))
+              : 0.5;
+          const chosen = selectCardBotMove({
+            difficulty: botDiff,
+            publicView,
+            privateSeatView,
+            legalMoves,
+            scoreMove: (move, pub, priv) => {
+              const riskHigh =
+                pub.drawsOwed > 1 ||
+                priv.knownFutureTopKind === 'BOOM!' ||
+                (!priv.hasDefuse && publicDanger > 0.32);
+              if (move.type === 'draw') {
+                return { score: riskHigh ? 15 : 68, isAggressive: false };
+              }
+              if (move.kind === 'attack' || move.kind === 'skip') {
+                return {
+                  score: riskHigh ? 95 : 35,
+                  isAggressive: move.kind === 'attack',
+                };
+              }
+              if (move.kind === 'see') {
+                return { score: priv.knownFutureTopKind ? 10 : 58, isAggressive: false };
+              }
+              if (move.kind === 'shuffle') {
+                return { score: priv.knownFutureTopKind === 'BOOM!' ? 88 : 28, isAggressive: false };
+              }
+              return { score: 52, isAggressive: move.kind === 'favor' };
+            },
+          });
+
+          if (chosen && chosen.type === 'play') {
+            playCard(state, active, chosen.cardIndex);
+            state.botThinkTimer = getTurnBotDelayMs(botDiff) / 1000;
           } else {
             drawCardAction(state, active);
+            state.botThinkTimer = getTurnBotDelayMs(botDiff) / 1000;
           }
         }
       } else {

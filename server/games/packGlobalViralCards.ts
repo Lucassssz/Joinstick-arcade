@@ -11,6 +11,7 @@ import type {
   CompactResultEntry,
   CompactSoundEvent,
 } from './packModuleAdapter.ts';
+import { getTurnBotDelayMs, selectCardBotMove } from './botEngine.ts';
 
 function rankByScore<T extends { id: string; score: number }>(
   items: T[],
@@ -57,6 +58,33 @@ function scoreWordleGuess(guess: string, answer: string): ('correct' | 'present'
     }
   }
   return res;
+}
+
+/**
+ * Pure public-clue consistency evaluator for Word Pulse:
+ * Scores how many public feedback rows a candidate word is consistent with,
+ * WITHOUT ever reading `pack.answer`.
+ */
+function scoreCandidateAgainstPublicRows(
+  candidate: string,
+  rows: WordPulseSnapshot['rows'],
+): number {
+  if (rows.length === 0) return 50;
+  let score = 50;
+  for (const row of rows) {
+    const simulated = scoreWordleGuess(row.word, candidate);
+    let matchesAll = true;
+    for (let i = 0; i < 5; i++) {
+      if (simulated[i] === row.marks[i]) {
+        score += 12;
+      } else {
+        matchesAll = false;
+        score -= 25;
+      }
+    }
+    if (matchesAll) score += 40;
+  }
+  return score;
 }
 
 interface WordPulseState {
@@ -129,7 +157,8 @@ export const wordPulseModule: CompactGameModule<WordPulseState, WordPulseSnapsho
         for (const p of state.players) {
           p.solved = false;
           p.lastPick = null;
-          p.botDelay = 2.0 + Math.random() * 2.5;
+          const inp = players.find((pl) => pl.id === p.id);
+          p.botDelay = getTurnBotDelayMs(inp?.botDifficulty) / 1000;
         }
         state.banner = `ROUND ${state.round} · CRACK THE 5-LETTER WORD!`;
       }
@@ -139,15 +168,26 @@ export const wordPulseModule: CompactGameModule<WordPulseState, WordPulseSnapsho
     state.timeLeft = Math.max(0, state.timeLeft - dt);
     const mult = frenzy ? 2 : 1;
 
-    // Bot guesses
+    // Bot guesses using ONLY public letter clue rows (never reads pack.answer!)
     for (const p of state.players) {
       if (!p.isBot || p.solved) continue;
       p.botDelay -= dt;
       if (p.botDelay <= 0) {
-        p.botDelay = 2.6 + Math.random() * 2.0;
+        const inp = players.find((pl) => pl.id === p.id);
+        const botDiff = inp?.botDifficulty;
+        p.botDelay = getTurnBotDelayMs(botDiff) / 1000;
         const avail = pack.pool.filter((w) => !state.usedWords.has(w));
         if (avail.length > 0) {
-          const pick = state.rows.length >= 2 && Math.random() < 0.65 ? pack.answer : avail[Math.floor(Math.random() * avail.length)];
+          const pick =
+            selectCardBotMove({
+              difficulty: botDiff,
+              publicView: { rows: state.rows, cat: pack.cat },
+              privateSeatView: { pool: avail },
+              legalMoves: avail,
+              scoreMove: (word, pub) => ({
+                score: scoreCandidateAgainstPublicRows(word, pub.rows),
+              }),
+            }) ?? avail[0];
           submitWordGuess(state, p, pick, pack.answer, mult, sounds);
         }
       }
@@ -461,10 +501,24 @@ export const triviaBlitzModule: CompactGameModule<TriviaState, TriviaBlitzSnapsh
     if (state.phase === 'question') {
       for (const p of state.players) {
         if (p.isBot && !p.answered) {
-          p.botDelay -= dt;
+          p.botDelay = Math.min(p.botDelay, 1.45) - dt;
           if (p.botDelay <= 0) {
+            const inp = players.find((pl) => pl.id === p.id);
+            const botDiff = inp?.botDifficulty;
             p.answered = true;
-            p.pickedIdx = Math.random() < 0.72 ? q.ans : Math.floor(Math.random() * 4);
+            // Trivia knowledge estimation using universal profile evaluationNoise & mistakeRate
+            const picked =
+              selectCardBotMove({
+                difficulty: botDiff,
+                publicView: { prompt: q.q, optionsCount: q.opts.length },
+                privateSeatView: {},
+                legalMoves: [0, 1, 2, 3],
+                scoreMove: (optIdx) => ({
+                  // Heuristic trivia familiarity prior (normalized to [0..1] before evaluationNoise)
+                  score: optIdx === q.ans ? 1.0 : 0.45,
+                }),
+              }) ?? 0;
+            p.pickedIdx = picked;
             p.pickTimeLeft = state.timeLeft;
             sounds.push({ type: 'tick', playerId: p.id });
           }
@@ -712,6 +766,74 @@ interface CodeGridState {
   banner: string | null;
 }
 
+/**
+ * Pure public semantic association table for Codenames Grid:
+ * Evaluates how closely an English word relates to the public Spymaster clue word
+ * (including plausible distractors), WITHOUT ever reading the card's secret `kind`.
+ */
+const PUBLIC_CLUE_SEMANTIC_AFFINITY: Record<string, Record<string, number>> = {
+  OCEAN: {
+    SHARK: 0.92,
+    CORAL: 0.90,
+    WHALE: 0.94,
+    ANCHOR: 0.85,
+    CLOUD: 0.58,
+    DESERT: 0.45,
+    CROWN: 0.30,
+    TRAIN: 0.25,
+    CLOCK: 0.22,
+    PIANO: 0.20,
+    APPLE: 0.24,
+    SKULL: 0.32,
+  },
+  SPACE: {
+    ROCKET: 0.94,
+    ORBIT: 0.91,
+    METEOR: 0.89,
+    GALAXY: 0.93,
+    MIRROR: 0.54,
+    BRIDGE: 0.40,
+    FOREST: 0.28,
+    GARDEN: 0.24,
+    GUITAR: 0.22,
+    HAMMER: 0.25,
+    BREAD: 0.18,
+    POISON: 0.20,
+  },
+  KITCHEN: {
+    KNIFE: 0.91,
+    OVEN: 0.94,
+    SPICE: 0.88,
+    NOODLE: 0.90,
+    ROBOT: 0.52,
+    PILLOW: 0.44,
+    JACKET: 0.35,
+    DIAMOND: 0.25,
+    CASTLE: 0.22,
+    RIVER: 0.28,
+    TIGER: 0.18,
+    BOMB: 0.24,
+  },
+  WINTER: {
+    GLACIER: 0.93,
+    SCARF: 0.90,
+    PENGUIN: 0.89,
+    SKI: 0.92,
+    CANDLE: 0.60,
+    COMPASS: 0.46,
+    VOLCANO: 0.40,
+    KEY: 0.28,
+    CAMEL: 0.22,
+    CACTUS: 0.20,
+    MANGO: 0.18,
+    VENOM: 0.20,
+  },
+};
+
+function getPublicClueWordAffinity(clueWord: string, cardWord: string): number {
+  return PUBLIC_CLUE_SEMANTIC_AFFINITY[clueWord]?.[cardWord] ?? 0.35;
+}
+
 function buildCodeGridRound(roundIdx: number) {
   const r = CODENAME_ROUNDS[roundIdx % CODENAME_ROUNDS.length];
   const raw: CodeGridSnapshot['cards'] = [
@@ -778,15 +900,27 @@ export const codenamesGridModule: CompactGameModule<CodeGridState, CodeGridSnaps
 
     for (const p of state.players) {
       if (!p.isBot) continue;
-      p.botDelay -= dt;
+      p.botDelay = Math.min(p.botDelay, 1.45) - dt;
       if (p.botDelay <= 0) {
-        p.botDelay = 2.5 + Math.random() * 2.2;
+        const inp = players.find((pl) => pl.id === p.id);
+        const botDiff = inp?.botDifficulty;
+        p.botDelay = getTurnBotDelayMs(botDiff) / 1000;
+        // Legal public view ONLY: unrevealed card words + public clueWord (NEVER reads c.kind!)
         const unrevealed = state.cards.filter((c) => !c.revealed);
-        const agents = unrevealed.filter((c) => c.kind === 'agent');
-        const pick = agents.length > 0 && Math.random() < 0.72
-          ? agents[Math.floor(Math.random() * agents.length)]
-          : unrevealed[Math.floor(Math.random() * unrevealed.length)];
-        if (pick) flipCodeCard(state, p, pick, mult, sounds);
+        if (unrevealed.length > 0) {
+          const publicWordOnly = unrevealed.map((c) => ({ id: c.id, word: c.word }));
+          const chosen = selectCardBotMove({
+            difficulty: botDiff,
+            publicView: { clueWord: state.clueWord, cards: publicWordOnly },
+            privateSeatView: {},
+            legalMoves: publicWordOnly,
+            scoreMove: (card, pub) => ({
+              score: getPublicClueWordAffinity(pub.clueWord, card.word),
+            }),
+          });
+          const pick = unrevealed.find((c) => c.id === chosen?.id) ?? unrevealed[0];
+          if (pick) flipCodeCard(state, p, pick, mult, sounds);
+        }
       }
     }
 

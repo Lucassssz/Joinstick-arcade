@@ -1,4 +1,5 @@
 import type {
+  BotDifficulty,
   CardClientAction,
   CardPrivateState,
   GameId,
@@ -34,6 +35,7 @@ export interface CompactPlayerInit {
   name: string;
   colorHex: string;
   isBot?: boolean;
+  botDifficulty?: BotDifficulty;
 }
 
 export interface CompactPlayerInput {
@@ -42,6 +44,7 @@ export interface CompactPlayerInput {
   name: string;
   colorHex: string;
   isBot?: boolean;
+  botDifficulty?: BotDifficulty;
   input: {
     moveX: number;
     moveY: number;
@@ -106,6 +109,7 @@ function toCompactPlayers(players: ServerPlayerInputState[]): CompactPlayerInput
     name: p.name,
     colorHex: p.color.hex,
     isBot: p.isBot,
+    botDifficulty: p.botDifficulty,
     input: {
       moveX: p.input.dx,
       moveY: p.input.dy,
@@ -163,6 +167,7 @@ export function adaptPackModule<TState, TSnap extends GameSnapshot>(
           name: p.name,
           colorHex: p.color.hex,
           isBot: p.isBot,
+          botDifficulty: p.botDifficulty,
         })),
         settingValue,
       });

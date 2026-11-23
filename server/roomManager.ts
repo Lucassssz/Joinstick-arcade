@@ -1088,6 +1088,7 @@ export class RoomManager {
         if (!room) return;
         const target = room.players.get(msg.playerId);
         if (!target) return;
+        if (binding.role === 'player' && binding.playerId === target.id) return;
 
         if (target.ws) {
           this.send(target.ws, {
@@ -3658,6 +3659,7 @@ export class RoomManager {
         color: p.color,
         connected: p.connected,
         isBot: p.isBot,
+        botDifficulty: p.isBot ? (p.botDifficulty ?? room.botDifficulty) : undefined,
         input: p.input,
         prevA: p.prevA,
         prevB: p.prevB,

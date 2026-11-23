@@ -3,8 +3,11 @@ import {
   ARENA_WIDTH,
   type BotDifficulty,
   type ControllerInput,
+  type GameId,
   type GameSnapshot,
 } from '../../src/shared/types.ts';
+import { getUniversalBotProfile } from '../../src/shared/botProfile.ts';
+import { runRealtimeBotAdapter, type RealtimeTargetPoint } from './botEngine.ts';
 
 export interface BotMemory {
   wanderAngle: number;
@@ -24,29 +27,115 @@ interface DifficultyTuning {
   reflexFactor: number;
 }
 
-const DIFFICULTY_TUNING: Record<BotDifficulty, DifficultyTuning> = {
-  chill: {
-    moveScale: 0.56,
-    abilityChance: 0.22,
-    aimJitter: 0.42,
-    reactionCooldown: 0.55,
-    reflexFactor: 0.45,
-  },
-  arcade: {
-    moveScale: 0.74,
-    abilityChance: 0.44,
-    aimJitter: 0.24,
-    reactionCooldown: 0.3,
-    reflexFactor: 0.68,
-  },
-  spicy: {
-    moveScale: 0.88,
-    abilityChance: 0.72,
-    aimJitter: 0.11,
-    reactionCooldown: 0.15,
-    reflexFactor: 0.86,
-  },
-};
+function getTuningFromUniversalProfile(difficulty: BotDifficulty): DifficultyTuning {
+  const p = getUniversalBotProfile(difficulty);
+  return {
+    // Universal fairness rule: moveScale is ALWAYS 1.0 (bots move at identical legal speed as humans)
+    moveScale: 1.0,
+    abilityChance: p.aggression,
+    aimJitter: p.aimError,
+    reactionCooldown: p.reactionTime,
+    reflexFactor: Math.max(0.2, 1 - p.mistakeRate),
+  };
+}
+
+/**
+ * Phase 2 Turn-Based Board Games (18) and Phase 3 Card Games (30).
+ * These 48 games are excluded from the Phase 1 Real-Time Adapter and will be
+ * migrated in Phase 2 and Phase 3 respectively upon user approval.
+ */
+const NON_REALTIME_PHASE_GAME_IDS = new Set<GameId>([
+  // Phase 2 — Turn-Based Board Adapter (18 games)
+  'rich-street',
+  'jungle-ladders',
+  'ludo-royale',
+  'star-party-board',
+  'reversi-clash',
+  'four-in-a-row',
+  'naval-salvo',
+  'neon-checkers',
+  'carrom-arena',
+  'dungeon-crawl-board',
+  'pit-harvest',
+  'gomoku-blitz',
+  'chess-blitz',
+  'domino-chain',
+  'hexagon-conquest',
+  'backgammon-sprint',
+  'mancala-jewels',
+  'curling-masters',
+  // Phase 3 — Hidden-Information Card Adapter (30 games)
+  'lucky-auction',
+  'color-clash',
+  'liars-deck',
+  'boom-kittens',
+  'property-deal',
+  'flip-seven',
+  'royal-bluff',
+  'dark-flip-clash',
+  'sushi-draft',
+  'big-two-royale',
+  'lucky-21',
+  'ten-pair-showdown',
+  'landlord-clash',
+  'speed-mahjong',
+  'liars-dice-tavern',
+  'undercover-word',
+  'midnight-werewolf',
+  'idiom-chain',
+  'word-pulse',
+  'trivia-blitz',
+  'codenames-grid',
+  'fib-party',
+  'rummy-royale',
+  'hearts-breaker',
+  'spades-bidding',
+  'poker-showdown',
+  'tarot-arcana',
+  'baccarat-club',
+  'memory-pairs',
+  'sequence-jack',
+]);
+
+/**
+ * Phase 1 Real-Time games that use discrete grid/lane/axis inputs rather than
+ * 2D continuous free-angle vectors.
+ */
+const DISCRETE_STEERING_REALTIME_GAME_IDS = new Set<GameId>([
+  'red-light-dash',
+  'lava-hopper',
+  'melon-merge',
+  'tile-triple',
+  'block-hop',
+  'platform-leap',
+  'truth-bomb',
+  'draw-guess-relay',
+  'sky-climb',
+  'glass-bridge',
+  'tug-titan',
+  'flappy-flock',
+  'dino-dash',
+  'tile-2048-blitz',
+  'mine-sweep-duel',
+  'geo-pin-rush',
+  'wavelength-sync',
+  'brick-clash',
+  'alien-wave',
+  'block-stack',
+  'frog-crossing',
+  'barrel-tower',
+  'rhythm-pulse',
+  'skee-roll',
+  'stack-tower',
+  'bubble-pop-arc',
+  'pin-strike',
+  'coin-dozer',
+  'laser-jump-rope',
+  'falling-anvils',
+  'seesaw-balance',
+  'chain-gang-climb',
+  'crane-drop-chaos',
+]);
 
 export function createBotMemory(): BotMemory {
   return {
@@ -67,20 +156,19 @@ function steerToward(
   fromY: number,
   toX: number,
   toY: number,
-  tuning: DifficultyTuning,
-  jitterSeed = 0
+  _tuning: DifficultyTuning,
+  _jitterSeed = 0
 ): { dx: number; dy: number; dist: number; angle: number } {
   const rx = toX - fromX;
   const ry = toY - fromY;
   const dist = Math.hypot(rx, ry);
   if (dist < 1) return { dx: 0, dy: 0, dist: 0, angle: 0 };
   const baseAngle = Math.atan2(ry, rx);
-  const angle = baseAngle + Math.sin(jitterSeed) * tuning.aimJitter;
   return {
-    dx: Math.cos(angle) * tuning.moveScale,
-    dy: Math.sin(angle) * tuning.moveScale,
+    dx: Math.cos(baseAngle),
+    dy: Math.sin(baseAngle),
     dist,
-    angle,
+    angle: baseAngle,
   };
 }
 
@@ -114,7 +202,14 @@ export function computeBotInput(
 ): ControllerInput {
   if (!snapshot) return { dx: 0, dy: 0, a: false, b: false };
 
-  const tuning = DIFFICULTY_TUNING[difficulty] ?? DIFFICULTY_TUNING.arcade;
+  const profile = getUniversalBotProfile(difficulty);
+  // For Phase 1 real-time games, botController acts strictly as a stateless sensor translator
+  // while runRealtimeBotAdapter() in botEngine.ts applies 100% of cognitive difficulty parameters.
+  // For Phase 2 turn-based board games, keep legacy tuning/canAct() until Phase 2 migration.
+  const isPhase1Realtime = !NON_REALTIME_PHASE_GAME_IDS.has(snapshot.gameId);
+  const tuning: DifficultyTuning = isPhase1Realtime
+    ? { moveScale: 1.0, abilityChance: 1.0, aimJitter: 0, reactionCooldown: 0, reflexFactor: 1.0 }
+    : getTuningFromUniversalProfile(difficulty);
   mem.wanderTimer -= dt;
   mem.driftPhase = (mem.driftPhase ?? 0) + dt * 1.45;
   mem.actionCooldown = Math.max(0, mem.actionCooldown - dt);
@@ -127,55 +222,94 @@ export function computeBotInput(
     mem.wanderTimer = 0.7 + Math.random() * 0.9;
   }
 
-  const canAct = () => mem.actionCooldown <= 0 && Math.random() < tuning.abilityChance;
+  const canAct = () =>
+    isPhase1Realtime ? true : mem.actionCooldown <= 0 && Math.random() < tuning.abilityChance;
   const markActed = () => {
-    mem.actionCooldown = tuning.reactionCooldown;
+    if (!isPhase1Realtime) {
+      mem.actionCooldown = tuning.reactionCooldown;
+    }
   };
 
   let dx = 0;
   let dy = 0;
   let a = false;
   let b = false;
+  let rtSelfPos: { x: number; y: number; vx?: number; vy?: number } | undefined;
+  let rtSafeCenter: { x: number; y: number; safeRadius?: number } | undefined;
+  let rtTargets: RealtimeTargetPoint[] | undefined;
+  let rtIsBoundaryRecovery = false;
+  let rtIsOffensiveMove = false;
+  let rtIsAggressiveA = true;
+  let rtIsAggressiveB = true;
+  let rtRoundElapsedSec: number | undefined;
 
   switch (snapshot.gameId) {
     case 'bumper-brawl': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
+      rtSelfPos = { x: me.x, y: me.y, vx: me.vx, vy: me.vy };
+      rtSafeCenter = {
+        x: snapshot.ringCenterX,
+        y: snapshot.ringCenterY,
+        safeRadius: snapshot.ringRadius,
+      };
+      rtRoundElapsedSec = Math.max(0, 50 - snapshot.roundTimer);
       const distCenter = Math.hypot(me.x - snapshot.ringCenterX, me.y - snapshot.ringCenterY);
-      if (distCenter > snapshot.ringRadius * 0.76) {
+      if (distCenter > snapshot.ringRadius * 0.74) {
+        rtIsBoundaryRecovery = true;
+        rtIsOffensiveMove = false;
         const s = steerToward(me.x, me.y, snapshot.ringCenterX, snapshot.ringCenterY, tuning);
         dx = s.dx;
         dy = s.dy;
-        if (distCenter > snapshot.ringRadius * 0.9 && me.cooldownA <= 0 && canAct()) {
+        if (distCenter > snapshot.ringRadius * 0.88 && me.cooldownA <= 0) {
           a = true;
-          markActed();
+          rtIsAggressiveA = false;
         }
       } else {
-      const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
-      const { item: pwr, dist: pwrDist } = nearestOf(me.x, me.y, snapshot.powerups ?? []);
-      const pwrSafe =
-        pwr && Math.hypot(pwr.x - snapshot.ringCenterX, pwr.y - snapshot.ringCenterY) < snapshot.ringRadius * 0.82;
-      const { item: target, dist } = nearestOf(me.x, me.y, rivals);
-      if (pwr && pwrSafe && pwrDist < 220) {
-        const s = steerToward(me.x, me.y, pwr.x, pwr.y, tuning, mem.driftPhase * 0.5);
-        dx = s.dx;
-        dy = s.dy;
-      } else if (target) {
-        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase);
-        dx = s.dx;
-        dy = s.dy;
-        if (dist < 160 && me.cooldownA <= 0 && canAct() && Math.random() < 0.14) {
-          a = true;
-          markActed();
-        } else if (dist < 105 && me.cooldownB <= 0 && canAct() && Math.random() < 0.18) {
-          b = true;
-          markActed();
+        const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
+        const safePowerups = (snapshot.powerups ?? []).filter(
+          (p) => Math.hypot(p.x - snapshot.ringCenterX, p.y - snapshot.ringCenterY) < snapshot.ringRadius * 0.78,
+        );
+        rtTargets = [
+          ...rivals.map((r) => ({
+            x: r.x,
+            y: r.y,
+            vx: r.vx,
+            vy: r.vy,
+            weight: 1.0,
+            isAggressiveTarget: true,
+          })),
+          ...safePowerups.map((pw) => ({
+            x: pw.x,
+            y: pw.y,
+            weight: 1.35,
+            isAggressiveTarget: false,
+          })),
+        ];
+        const { item: pwr, dist: pwrDist } = nearestOf(me.x, me.y, safePowerups);
+        const { item: target, dist } = nearestOf(me.x, me.y, rivals);
+        if (pwr && pwrDist < 210) {
+          rtIsOffensiveMove = false;
+          const s = steerToward(me.x, me.y, pwr.x, pwr.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+        } else if (target) {
+          rtIsOffensiveMove = true;
+          const s = steerToward(me.x, me.y, target.x, target.y, tuning);
+          dx = s.dx;
+          dy = s.dy;
+          if (dist < 165 && me.cooldownA <= 0) {
+            a = true;
+          }
+          if (dist < 115 && me.cooldownB <= 0) {
+            b = true;
+          }
+        } else {
+          rtIsOffensiveMove = false;
+          const s = steerToward(me.x, me.y, snapshot.ringCenterX, snapshot.ringCenterY, tuning);
+          dx = s.dx;
+          dy = s.dy;
         }
-      } else {
-        const s = steerToward(me.x, me.y, snapshot.ringCenterX, snapshot.ringCenterY, tuning);
-        dx = s.dx * 0.4;
-        dy = s.dy * 0.4;
-      }
       }
       break;
     }
@@ -183,32 +317,53 @@ export function computeBotInput(
     case 'astro-blaster': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
+      rtSelfPos = { x: me.x, y: me.y, vx: me.vx, vy: me.vy };
+      rtSafeCenter = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, safeRadius: 310 };
       const rivals = snapshot.players.filter((p) => p.id !== botId && p.alive);
-      const { item: pickup, dist: pDist } = nearestOf(me.x, me.y, snapshot.pickups);
+      const pickups = snapshot.pickups ?? [];
+      rtTargets = [
+        ...rivals.map((r) => ({
+          x: r.x,
+          y: r.y,
+          vx: r.vx,
+          vy: r.vy,
+          weight: 1.0,
+          isAggressiveTarget: true,
+        })),
+        ...pickups.map((pk) => ({
+          x: pk.x,
+          y: pk.y,
+          weight: 1.4,
+          isAggressiveTarget: false,
+        })),
+      ];
+      const { item: pickup, dist: pDist } = nearestOf(me.x, me.y, pickups);
       const { item: target, dist: tDist } = nearestOf(me.x, me.y, rivals);
 
-      if (pickup && pDist < 200) {
-        const s = steerToward(me.x, me.y, pickup.x, pickup.y, tuning, mem.driftPhase * 0.4);
+      if (pickup && pDist < 220) {
+        rtIsOffensiveMove = false;
+        const s = steerToward(me.x, me.y, pickup.x, pickup.y, tuning);
         dx = s.dx;
         dy = s.dy;
       } else if (target) {
-        const s = steerToward(me.x, me.y, target.x, target.y, tuning, mem.driftPhase);
+        rtIsOffensiveMove = true;
+        const s = steerToward(me.x, me.y, target.x, target.y, tuning);
         if (tDist < 175) {
           // Strafe while keeping aim
-          dx = s.dx * 0.4 - s.dy * 0.6 * mem.strafeDir;
-          dy = s.dy * 0.4 + s.dx * 0.6 * mem.strafeDir;
+          dx = s.dx * 0.45 - s.dy * 0.55 * mem.strafeDir;
+          dy = s.dy * 0.45 + s.dx * 0.55 * mem.strafeDir;
         } else {
           dx = s.dx;
           dy = s.dy;
         }
-        if (tDist < 450 && Math.random() < tuning.abilityChance * 0.46) a = true;
-        if (tDist < 135 && me.cooldownB <= 0 && canAct() && Math.random() < 0.12) {
+        if (tDist < 460) a = true;
+        if (tDist < 140 && me.cooldownB <= 0) {
           b = true;
-          markActed();
         }
       } else {
-        dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.6;
-        dy = Math.sin(mem.wanderAngle) * tuning.moveScale * 0.6;
+        rtIsOffensiveMove = false;
+        dx = Math.cos(mem.wanderAngle);
+        dy = Math.sin(mem.wanderAngle);
       }
       break;
     }
@@ -216,8 +371,12 @@ export function computeBotInput(
     case 'turbo-drift': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.finished || me.falling || snapshot.trackPoints.length === 0) break;
+      rtSelfPos = { x: me.x, y: me.y };
+      rtIsOffensiveMove = false;
+      rtIsAggressiveA = false;
+      rtIsAggressiveB = false;
       const pts = snapshot.trackPoints;
-      // Find closest waypoint and aim 2 waypoints ahead
+      // Find closest waypoint and aim ahead along track (scaled by lookaheadDepth)
       let bestIdx = 0;
       let bestD = Infinity;
       for (let i = 0; i < pts.length; i++) {
@@ -228,20 +387,24 @@ export function computeBotInput(
         }
       }
       const lookAhead = pts[(bestIdx + 2) % pts.length];
-      const nextPt = pts[(bestIdx + 4) % pts.length];
+      const nextPt = pts[(bestIdx + 3 + profile.lookaheadDepth) % pts.length];
       let aimX = lookAhead.x;
       let aimY = lookAhead.y;
+      if (profile.lookaheadDepth >= 1) {
+        aimX = lookAhead.x * 0.78 + nextPt.x * 0.22;
+        aimY = lookAhead.y * 0.78 + nextPt.y * 0.22;
+      }
       const { item: nearCoin, dist: cDist } = nearestOf(me.x, me.y, snapshot.coins ?? []);
-      if (nearCoin && cDist < 105 && Math.random() < tuning.reflexFactor) {
-        aimX = lookAhead.x * 0.68 + nearCoin.x * 0.32;
-        aimY = lookAhead.y * 0.68 + nearCoin.y * 0.32;
+      if (nearCoin && cDist < 105 && profile.lookaheadDepth >= 1) {
+        aimX = aimX * 0.68 + nearCoin.x * 0.32;
+        aimY = aimY * 0.68 + nearCoin.y * 0.32;
       }
       const { item: nearOil, dist: oDist } = nearestOf(me.x, me.y, snapshot.oils ?? []);
       if (nearOil && oDist < 84) {
-        aimX += (me.x - nearOil.x) * 0.7;
-        aimY += (me.y - nearOil.y) * 0.7;
+        aimX += (me.x - nearOil.x) * 0.75;
+        aimY += (me.y - nearOil.y) * 0.75;
       }
-      const s = steerToward(me.x, me.y, aimX, aimY, tuning, mem.driftPhase * 0.35);
+      const s = steerToward(me.x, me.y, aimX, aimY, tuning);
       dx = s.dx;
       dy = s.dy;
 
@@ -252,8 +415,8 @@ export function computeBotInput(
       while (turn > Math.PI) turn -= Math.PI * 2;
       while (turn < -Math.PI) turn += Math.PI * 2;
 
-      b = Math.abs(turn) > 0.58 && me.speed > 265 && Math.random() < tuning.abilityChance * 0.75;
-      a = Math.abs(turn) < 0.32 && me.nitro > 0.5 && Math.random() < tuning.abilityChance * 0.35;
+      b = Math.abs(turn) > 0.56 && me.speed > 260;
+      a = Math.abs(turn) < 0.32 && me.nitro > 0.5;
       break;
     }
 
@@ -901,7 +1064,7 @@ export function computeBotInput(
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || !me.alive) break;
       const mySide: 'floor' | 'ceiling' = me.gravityDir === 1 ? 'floor' : 'ceiling';
-      const lookDist = difficulty === 'chill' ? 148 : difficulty === 'arcade' ? 168 : 184;
+      const lookDist = 148 + profile.lookaheadDepth * 18;
       const aheadDanger = snapshot.obstacles.find(
         (ob) => ob.x > me.x - 16 && ob.x < me.x + lookDist && (ob.side === mySide || ob.side === 'mid')
       );
@@ -1064,7 +1227,7 @@ export function computeBotInput(
           markActed();
         }
       } else if (snapshot.lightState === 'yellow') {
-        const brakeThresh = difficulty === 'spicy' ? 0.52 : difficulty === 'arcade' ? 0.36 : 0.24;
+        const brakeThresh = 0.24 + profile.lookaheadDepth * 0.14;
         const brakeNow = snapshot.lightTimer < brakeThresh;
         dx = brakeNow ? 0 : tuning.moveScale * 0.5;
       } else {
@@ -1079,7 +1242,7 @@ export function computeBotInput(
       if (!me || !me.alive || me.falling) break;
       if (mem.lastColorIdx !== snapshot.targetColorIndex) {
         mem.lastColorIdx = snapshot.targetColorIndex;
-        mem.colorReactionTimer = difficulty === 'chill' ? 0.45 : difficulty === 'arcade' ? 0.25 : 0.11;
+        mem.colorReactionTimer = profile.reactionTime;
       }
       if ((mem.colorReactionTimer ?? 0) > 0) {
         dx = Math.cos(mem.wanderAngle) * tuning.moveScale * 0.25;
@@ -1141,7 +1304,7 @@ export function computeBotInput(
       const activeChop = snapshot.stations.find((s) => s.kind === 'chop' && s.cookingDish);
       const emptyChop = snapshot.stations.find((s) => s.kind === 'chop' && !s.cookingDish);
 
-      const vipOrder = difficulty === 'chill' && Math.random() < 0.5 ? undefined : snapshot.orders.find((o) => o.vip);
+      const vipOrder = Math.random() < profile.mistakeRate ? undefined : snapshot.orders.find((o) => o.vip);
       const wantedDish = (vipOrder ?? snapshot.orders[0])?.dish ?? 'burger';
       const rawKind = wantedDish === 'burger' ? 'raw-burger' : wantedDish === 'pizza' ? 'raw-pizza' : 'raw-taco';
       const rawSt = snapshot.stations.find((s) => s.kind === rawKind);
@@ -1164,7 +1327,7 @@ export function computeBotInput(
         targetX = serveSt.x - 34;
         targetY = Math.max(serveSt.y + 34, Math.min(serveSt.y + serveSt.h - 34, me.y));
         const dServe = Math.hypot(targetX - me.x, targetY - me.y);
-        const tossRange = difficulty === 'spicy' ? 320 : difficulty === 'arcade' ? 220 : 130;
+        const tossRange = 130 + profile.lookaheadDepth * 95;
         if (dServe < tossRange && me.x > 760 && me.cooldownB <= 0 && canAct()) {
           b = true;
           markActed();
@@ -1249,14 +1412,9 @@ export function computeBotInput(
         dx = s.dx;
         dy = s.dy;
       } else {
+        // Legal public view ONLY: only target spots with revealedTimer > 0 (never peek unrevealed buried spots!)
         const revealed = snapshot.spots.filter((s) => s.revealedTimer > 0);
-        const targetList =
-          revealed.length > 0
-            ? revealed
-            : difficulty === 'spicy' && me.heat > 0.62
-              ? snapshot.spots
-              : [];
-        const { item: spot, dist: spotDist } = nearestOf(me.x, me.y, targetList);
+        const { item: spot, dist: spotDist } = nearestOf(me.x, me.y, revealed);
         if (spot) {
           const s = steerToward(me.x, me.y, spot.x, spot.y, tuning, mem.wanderAngle);
           dx = s.dx;
@@ -2046,8 +2204,9 @@ export function computeBotInput(
     case 'geo-pin-rush': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.locked || snapshot.phase !== 'guessing') break;
-      const tx = clampUnit(snapshot.targetX + Math.sin(mem.driftPhase) * 0.14);
-      const ty = clampUnit(snapshot.targetY + Math.cos(mem.driftPhase) * 0.14);
+      const spread = profile.aimError * 0.72 + profile.evaluationNoise * 0.35;
+      const tx = clampUnit(snapshot.targetX + Math.sin(mem.driftPhase * 0.7 + me.slotIndex) * spread);
+      const ty = clampUnit(snapshot.targetY + Math.cos(mem.driftPhase * 0.9 + me.slotIndex) * spread);
       dx = clampUnit((tx - me.x) * 6);
       dy = clampUnit((ty - me.y) * 6);
       if (Math.hypot(tx - me.x, ty - me.y) < 0.06 && snapshot.timeLeft < 9) a = true;
@@ -2057,7 +2216,11 @@ export function computeBotInput(
     case 'wavelength-sync': {
       const me = snapshot.players.find((p) => p.id === botId);
       if (!me || me.locked || snapshot.phase !== 'dialing') break;
-      const tgt = Math.max(0.05, Math.min(0.95, snapshot.targetAngle + Math.sin(mem.driftPhase) * 0.12));
+      const spread = profile.aimError * 0.65 + profile.evaluationNoise * 0.35;
+      const tgt = Math.max(
+        0.05,
+        Math.min(0.95, snapshot.targetAngle + Math.sin(mem.driftPhase * 0.8 + me.slotIndex) * spread),
+      );
       dx = clampUnit((tgt - me.dial) * 6);
       if (Math.abs(tgt - me.dial) < 0.04 && snapshot.timeLeft < 7.5) a = true;
       break;
@@ -3392,6 +3555,40 @@ export function computeBotInput(
       }
       break;
     }
+  }
+
+  if (isPhase1Realtime) {
+    const snapAny = snapshot as unknown as {
+      round?: number;
+      players?: Array<{ id: string; x?: number; y?: number; vx?: number; vy?: number }>;
+    };
+    if (!rtSelfPos && Array.isArray(snapAny.players)) {
+      const me = snapAny.players.find((p) => p.id === botId);
+      if (me && typeof me.x === 'number' && typeof me.y === 'number') {
+        rtSelfPos = { x: me.x, y: me.y, vx: me.vx, vy: me.vy };
+      }
+    }
+    const roundMarker = `${snapshot.gameId}:r${snapAny.round ?? 1}`;
+    return runRealtimeBotAdapter({
+      memoryKey: `${snapshot.gameId}:${botId}`,
+      gameId: snapshot.gameId,
+      botId,
+      difficulty,
+      dt,
+      roundMarker,
+      roundElapsedSec: rtRoundElapsedSec,
+      selfPos: rtSelfPos,
+      safeCenter: rtSafeCenter,
+      targets: rtTargets,
+      desiredMove: { dx: clampUnit(dx), dy: clampUnit(dy) },
+      isBoundaryRecovery: rtIsBoundaryRecovery,
+      isOffensiveMove: rtIsOffensiveMove,
+      wantsActionA: a,
+      isAggressiveActionA: rtIsAggressiveA,
+      wantsActionB: b,
+      isAggressiveActionB: rtIsAggressiveB,
+      discreteSteering: DISCRETE_STEERING_REALTIME_GAME_IDS.has(snapshot.gameId),
+    });
   }
 
   return {

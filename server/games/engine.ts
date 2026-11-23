@@ -1,4 +1,5 @@
 import type {
+  BotDifficulty,
   CardClientAction,
   CardPrivateState,
   ControllerInput,
@@ -189,6 +190,7 @@ export interface ServerPlayerInputState {
   color: PlayerColorSpec;
   connected: boolean;
   isBot?: boolean;
+  botDifficulty?: BotDifficulty;
   input: ControllerInput;
   prevA: boolean;
   prevB: boolean;

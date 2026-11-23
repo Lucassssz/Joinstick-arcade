@@ -34,6 +34,7 @@ import {
   Smile,
   Sparkles,
   Target,
+  Trash2,
   Trophy,
   Users,
   Vote,
@@ -1802,6 +1803,7 @@ export function PhoneController({
   const isRoomHost = room.hostPlayerId === me.id;
   const connectedHumans = room.players.filter((p) => !p.isBot && p.connected);
   const otherHumans = room.players.filter((p) => !p.isBot && p.id !== me.id);
+  const otherPlayers = room.players.filter((p) => p.id !== me.id);
   const otherConnectedHumans = connectedHumans.filter((p) => p.id !== me.id);
   const readyHumans = connectedHumans.filter((p) => p.ready);
   const unreadyHumans = connectedHumans.filter((p) => !p.ready);
@@ -1875,19 +1877,90 @@ export function PhoneController({
     };
   };
 
+  const renderInlineHostKickRoster = () => {
+    if (!isRoomHost || otherPlayers.length === 0) return null;
+    return (
+      <div className="mt-2 pt-2 border-t border-[#262C38]">
+        <div className="flex items-center justify-between text-[10px] font-bold text-[#9CA3AF] mb-1.5">
+          <span>{t('Players · Tap Kick to Remove', '房间成员 · 点击踢出可直接移除')}</span>
+          <button
+            type="button"
+            onClick={() => setPassHostOpen(true)}
+            className="text-[#FFB800] hover:underline cursor-pointer"
+          >
+            {t('Manage All', '管理全部')}
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto arcade-scrollbar pr-0.5">
+          {otherPlayers.map((p) => {
+            const isOffline = !p.isBot && !p.connected;
+            const isReady = p.isBot || (p.connected && p.ready);
+            return (
+              <div
+                key={p.id}
+                className={`inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg border text-[11px] font-bold ${
+                  isOffline
+                    ? 'bg-[#2A191B] border-[#FF4D2E]/60 text-[#FF9B8A]'
+                    : isReady
+                    ? 'bg-[#101217] border-[#10D98B]/45 text-white'
+                    : 'bg-[#101217] border-[#2A303D] text-[#D1D5DB]'
+                }`}
+              >
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: isOffline ? '#FF4D2E' : p.color.hex }}
+                />
+                <span className="truncate max-w-[78px]">{p.name}</span>
+                <span
+                  className={`text-[9px] font-mono px-1 py-0.2 rounded ${
+                    p.isBot
+                      ? 'bg-[#00C2FF]/15 text-[#00C2FF]'
+                      : isOffline
+                      ? 'bg-[#FF4D2E]/25 text-[#FF9B8A]'
+                      : isReady
+                      ? 'bg-[#10D98B]/20 text-[#10D98B]'
+                      : 'bg-[#FFB800]/20 text-[#FFB800]'
+                  }`}
+                >
+                  {p.isBot
+                    ? t('BOT', 'AI')
+                    : isOffline
+                    ? t('OFFLINE', '离线')
+                    : isReady
+                    ? t('READY', '已准备')
+                    : t('WAIT', '未准备')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleKickPlayer(p.id)}
+                  title={t(`Kick ${p.name}`, `踢出 ${p.name}`)}
+                  aria-label={t(`Kick ${p.name}`, `踢出 ${p.name}`)}
+                  className="tactile-btn h-5 px-1.5 rounded bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-[10px] font-extrabold inline-flex items-center gap-0.5 cursor-pointer shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                  <span>{t('Kick', '踢出')}</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const passHostOverlay = passHostOpen && isRoomHost && (
     <div className="absolute inset-0 z-50 bg-[#121419]/95 backdrop-blur-sm p-4 flex flex-col justify-between">
       <div className="flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2">
           <Crown className="w-5 h-5 text-[#FFB800]" />
           <span className="font-display text-lg font-extrabold text-white">
-            {t('Pass Host / Manage Players', '移交房主 / 管理玩家')}
+            {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
           </span>
         </div>
         <button
           type="button"
           onClick={() => setPassHostOpen(false)}
-          aria-label={t('Close Pass Host picker', '关闭移交房主弹窗')}
+          aria-label={t('Close player manager', '关闭玩家管理弹窗')}
           className="h-9 w-9 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
         >
           <X className="w-4 h-4" />
@@ -1895,13 +1968,13 @@ export function PhoneController({
       </div>
 
       <div className="flex-1 overflow-y-auto arcade-scrollbar my-3 pr-1">
-        {otherHumans.length === 0 ? (
+        {otherPlayers.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-sm text-[#9CA3AF]">
-            {t('No other human players are in the room right now.', '目前房间里没有其他真人玩家。')}
+            {t('No other players are in the room right now.', '目前房间里没有其他玩家。')}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {otherHumans.map((p) => (
+            {otherPlayers.map((p) => (
               <div
                 key={p.id}
                 className="min-h-[54px] px-3.5 py-2.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] flex items-center justify-between gap-2.5 text-left"
@@ -1914,8 +1987,12 @@ export function PhoneController({
                     </div>
                     <div className="text-[10px] font-semibold text-[#9CA3AF]">
                       P{p.slotIndex + 1} ·{' '}
-                      {p.connected ? (
-                        <span className="text-[#10D98B]">{t('Online', '在线')}</span>
+                      {p.isBot ? (
+                        <span className="text-[#00C2FF]">{t('AI Robot', 'AI 机器人')}</span>
+                      ) : p.connected ? (
+                        <span className="text-[#10D98B]">
+                          {p.ready ? t('Online · Ready', '在线 · 已准备') : t('Online · Not Ready', '在线 · 未准备')}
+                        </span>
                       ) : (
                         <span className="text-[#FF4D2E]">{t('Offline', '离线')}</span>
                       )}
@@ -1923,7 +2000,7 @@ export function PhoneController({
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {p.connected && (
+                  {!p.isBot && p.connected && (
                     <button
                       type="button"
                       onClick={() => handlePassHost(p.id)}
@@ -1936,8 +2013,8 @@ export function PhoneController({
                   <button
                     type="button"
                     onClick={() => handleKickPlayer(p.id)}
-                    title={t(`Kick ${p.name}`, `移出 ${p.name}`)}
-                    className="tactile-btn px-2.5 py-1.5 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/50 text-[#FF9B8A] hover:text-white text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                    title={t(`Kick ${p.name}`, `踢出 ${p.name}`)}
+                    className="tactile-btn px-2.5 py-1.5 rounded-lg bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                     {t('Kick', '踢出')}
@@ -1954,7 +2031,7 @@ export function PhoneController({
         onClick={() => setPassHostOpen(false)}
         className="h-10 w-full rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-white cursor-pointer shrink-0"
       >
-        {t('Cancel', '取消')}
+        {t('Done', '完成')}
       </button>
     </div>
   );
@@ -2097,6 +2174,7 @@ export function PhoneController({
     return renderConnectedShell(
       <div className="relative flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
         {avatarPickerOverlay}
+        {passHostOverlay}
         {closeRoomOverlay}
         <div className="flex items-center justify-between gap-3 h-11 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -2204,9 +2282,10 @@ export function PhoneController({
             </div>
 
             {renderTeamSelector(false)}
+            {renderInlineHostKickRoster()}
           </div>
 
-          <div className="flex flex-col gap-3 justify-center">
+          <div className="flex flex-col gap-2.5 justify-center">
             {isRoomHost ? (
               <>
                 <button
@@ -2220,6 +2299,16 @@ export function PhoneController({
                   <span>{t('Enter Game Room', '进入游戏厅')}</span>
                   <ArrowRight className="w-5 h-5" />
                 </button>
+                {otherPlayers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPassHostOpen(true)}
+                    className="h-10 w-full rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                    <span>{t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}</span>
+                  </button>
+                )}
                 <p className="text-[11px] text-center text-[#9CA3AF]">
                   {t(
                     'You are the Room Host — tap when everyone has joined and bots are set.',
@@ -2325,14 +2414,14 @@ export function PhoneController({
                   <SlidersHorizontal className="w-3.5 h-3.5" />
                 </button>
               )}
-              {otherHumans.length > 0 && (
+              {otherPlayers.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setPassHostOpen(true)}
                   className="tactile-btn h-8 px-2.5 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[#14120B] text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
                 >
                   <ArrowLeftRight className="w-3.5 h-3.5" />
-                  <span>{t('Pass Host', '移交房主')}</span>
+                  <span>{t('Kick / Host', '踢人 / 房主')}</span>
                 </button>
               )}
               {!embedded && (
@@ -2471,6 +2560,7 @@ export function PhoneController({
                   </div>
                 )}
                 {renderTeamSelector(true)}
+                {renderInlineHostKickRoster()}
               </div>
 
               {/* Host's own Ready Toggle */}
@@ -2512,14 +2602,14 @@ export function PhoneController({
                 </p>
               )}
 
-              {otherHumans.length > 0 && (
+              {otherPlayers.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setPassHostOpen(true)}
                   className="h-10 w-full rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                  <span>{t('Pass Host / Manage Players', '移交房主 / 管理玩家')}</span>
+                  <span>{t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}</span>
                 </button>
               )}
             </div>
@@ -3028,7 +3118,7 @@ export function PhoneController({
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
-            {otherConnectedHumans.length > 0 && (
+            {otherPlayers.length > 0 && (
               <div className="flex items-center justify-center">
                 <button
                   type="button"
@@ -3036,7 +3126,7 @@ export function PhoneController({
                   className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                  {t('Pass Host', '移交房主')}
+                  {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
                 </button>
               </div>
             )}
@@ -3118,6 +3208,18 @@ export function PhoneController({
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
+            {otherPlayers.length > 0 && (
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setPassHostOpen(true)}
+                  className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                  {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-xs text-[#9CA3AF]">
@@ -3135,7 +3237,8 @@ export function PhoneController({
   if (room.status === 'BRIEFING') {
     const schema = gameMeta.controllerSchema;
     return renderConnectedShell(
-      <div className="flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+      <div className="relative flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+        {passHostOverlay}
         <div className="flex items-center justify-between gap-3 h-10 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
@@ -3314,6 +3417,7 @@ export function PhoneController({
                     '慢慢看规则 — 所有人点击「我准备好了」后即刻开始！'
                   )}
             </p>
+            {renderInlineHostKickRoster()}
           </div>
         </div>
 
@@ -3326,16 +3430,25 @@ export function PhoneController({
             >
               {t('Back to Game Room', '返回游戏厅')}
             </button>
-            <span className="text-[11px] text-[#9CA3AF] truncate hidden sm:inline">
-              {t('Starts automatically when all tap Ready', '全员准备后自动开始')}
-            </span>
-            <button
-              type="button"
-              onClick={() => wsRef.current?.send({ type: 'game:dismiss-briefing' })}
-              className="h-8 px-3 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[11px] font-extrabold text-[#14120B] cursor-pointer"
-            >
-              {t('Host Start Now', '房主直接开始')}
-            </button>
+            <div className="flex items-center gap-2">
+              {otherPlayers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPassHostOpen(true)}
+                  className="h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#242A36] border border-[#FF4D2E]/45 text-[11px] font-bold text-[#FF9B8A] inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{t('Kick / Host', '踢人 / 房主')}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => wsRef.current?.send({ type: 'game:dismiss-briefing' })}
+                className="h-8 px-3 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[11px] font-extrabold text-[#14120B] cursor-pointer"
+              >
+                {t('Host Start Now', '房主直接开始')}
+              </button>
+            </div>
           </div>
         ) : (
           <div className="text-center text-[11px] text-[#9CA3AF] shrink-0">
