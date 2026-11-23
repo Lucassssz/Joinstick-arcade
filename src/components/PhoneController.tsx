@@ -86,7 +86,7 @@ import {
   RoomSnapshot,
   ServerMessage,
 } from '../shared/types';
-import { ManagedWebSocket } from '../lib/ws';
+import { ManagedWebSocket, SocketStatus } from '../lib/ws';
 import {
   getLocalizedDifficulty,
   getLocalizedFilterLabel,
@@ -176,6 +176,7 @@ export function PhoneController({
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   const [wsConnected, setWsConnected] = useState(false);
+  const [socketStatus, setSocketStatus] = useState<SocketStatus>('connecting');
   const [joinedPlayerId, setJoinedPlayerId] = useState<string | null>(null);
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -401,11 +402,56 @@ export function PhoneController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded]);
 
+  const simSlot: 'P1' | 'P2' = useMemo(() => {
+    const raw = (defaultName || 'Test P1').trim().toUpperCase();
+    return raw.endsWith('P2') ? 'P2' : 'P1';
+  }, [defaultName]);
+
   const sessionKey = useMemo(
-    () => (embedded ? `joinstick_sim_${defaultName || 'p1'}` : 'joinstick_player_id'),
-    [embedded, defaultName]
+    () => (embedded ? `joinstick_sim_${simSlot}` : 'joinstick_player_id'),
+    [embedded, simSlot]
   );
   const roomCodeSessionKey = `${sessionKey}_room`;
+
+  const persistentDeviceIdRef = useRef<string>('');
+  const getDeviceId = (codeForJoin: string): string => {
+    const cleanCode = codeForJoin.trim().toUpperCase();
+    if (embedded) {
+      return `sim_device_${cleanCode}_${simSlot}`;
+    }
+    if (persistentDeviceIdRef.current) {
+      return persistentDeviceIdRef.current;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const existing =
+          window.localStorage.getItem('joinstick_device_id_v1') ||
+          window.sessionStorage.getItem('joinstick_device_id_v1');
+        if (existing && existing.length >= 8) {
+          persistentDeviceIdRef.current = existing;
+          return existing;
+        }
+        const created = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        try {
+          window.localStorage.setItem('joinstick_device_id_v1', created);
+        } catch {
+          // Ignore localStorage quota/privacy error
+        }
+        try {
+          window.sessionStorage.setItem('joinstick_device_id_v1', created);
+        } catch {
+          // Ignore sessionStorage error
+        }
+        persistentDeviceIdRef.current = created;
+        return created;
+      } catch {
+        // Fallback below
+      }
+    }
+    const fallback = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    persistentDeviceIdRef.current = fallback;
+    return fallback;
+  };
 
   const ensureWakeLock = () => {
     if (embedded || wakeLockRef.current || typeof navigator === 'undefined') return;
@@ -426,17 +472,36 @@ export function PhoneController({
     }
   };
 
-  // Persistent playerId & roomCode for instant reconnects
-  const storedPlayerIdRef = useRef<string | undefined>(undefined);
+  // Persistent playerId & roomCode for instant reconnects (for both real phones & Test Controllers)
+  const storedPlayerIdRef = useRef<string | undefined>((() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      const saved = window.sessionStorage.getItem(sessionKey);
+      const savedRoom = window.sessionStorage.getItem(roomCodeSessionKey);
+      const initCode = initialRoomCode.trim().toUpperCase();
+      if (saved && (!initCode || !savedRoom || savedRoom === initCode)) {
+        return saved;
+      }
+    } catch {
+      // Ignore storage error
+    }
+    return undefined;
+  })());
+
   useEffect(() => {
-    if (!embedded) {
+    try {
       const saved = sessionStorage.getItem(sessionKey);
-      if (saved) storedPlayerIdRef.current = saved;
       const savedRoom = sessionStorage.getItem(roomCodeSessionKey);
-      if (savedRoom && savedRoom.length === 4 && !roomCodeRef.current) {
+      const currentCode = roomCodeRef.current.trim().toUpperCase();
+      if (saved && (!currentCode || !savedRoom || savedRoom === currentCode)) {
+        storedPlayerIdRef.current = saved;
+      }
+      if (!embedded && savedRoom && savedRoom.length === 4 && !roomCodeRef.current) {
         roomCodeRef.current = savedRoom;
         setRoomCode(savedRoom);
       }
+    } catch {
+      // Ignore storage error
     }
   }, [embedded, sessionKey, roomCodeSessionKey]);
 
@@ -543,22 +608,61 @@ export function PhoneController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsConnected, joinedPlayerId, room]);
 
-  // Notify the player if they inherit Host Remote Control mid-session
+  // Auto-clear stale ready-check error messages whenever the room ready condition or status changes
+  const unreadyIdsKey = room?.readyGate?.unreadyHumanIds?.join(',') ?? '';
+  useEffect(() => {
+    setErrorMsg(null);
+  }, [room?.status, room?.readyGate?.allHumansReady, unreadyIdsKey, room?.players.length]);
+
+  // Notify the player if they inherit Host Remote Control mid-session, including the reason
   useEffect(() => {
     const isHostNow = Boolean(room && joinedPlayerId && room.hostPlayerId === joinedPlayerId);
     const wasHost = prevIsHostRef.current;
     prevIsHostRef.current = isHostNow;
 
     if (!wasHost && isHostNow && room && room.status !== 'SETUP') {
-      setHostToast(
-        lang === 'zh'
-          ? '你已成为新房主！现在由你使用遥控器控制大屏。'
-          : 'You are now the Room Host! Use this remote to control the TV.'
-      );
+      const transfer =
+        room.hostTransfer && room.hostTransfer.toPlayerId === joinedPlayerId
+          ? room.hostTransfer
+          : null;
+      const fromName = transfer?.fromPlayerName;
+      let message: string;
+      if (transfer?.reason === 'disconnect-timeout') {
+        message =
+          lang === 'zh'
+            ? `你已成为新房主！（原房主 ${fromName || ''} 离线满 15 秒，按 P1→P2 顺序移交）`
+            : `You are now the Room Host! (${fromName || 'Previous host'} offline 15s · passed in slot order)`;
+      } else if (transfer?.reason === 'player-left') {
+        message =
+          lang === 'zh'
+            ? `你已成为新房主！（原房主 ${fromName || ''} 已离开房间）`
+            : `You are now the Room Host! (${fromName || 'Previous host'} left the room)`;
+      } else if (transfer?.reason === 'kicked') {
+        message =
+          lang === 'zh'
+            ? `你已成为新房主！（原房主 ${fromName || ''} 已被移出房间）`
+            : `You are now the Room Host! (${fromName || 'Previous host'} was removed)`;
+      } else if (transfer?.reason === 'real-phone-priority') {
+        message =
+          lang === 'zh'
+            ? '你已成为新房主！（真实手机优先于测试手柄接管大屏遥控器）'
+            : 'You are now the Room Host! (Real phone prioritized over Test Controller)';
+      } else if (transfer?.reason === 'manual' && fromName) {
+        message =
+          lang === 'zh'
+            ? `${fromName} 已将房主遥控权移交给你！`
+            : `${fromName} passed Host Remote Control to you!`;
+      } else {
+        message =
+          lang === 'zh'
+            ? '你已成为新房主！现在由你使用遥控器控制大屏。'
+            : 'You are now the Room Host! Use this remote to control the TV.';
+      }
+      setHostToast(message);
       if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
-      hostToastTimerRef.current = setTimeout(() => setHostToast(null), 4200);
+      hostToastTimerRef.current = setTimeout(() => setHostToast(null), 5000);
     }
-  }, [room?.hostPlayerId, room?.status, joinedPlayerId, lang]);
+  }, [room?.hostPlayerId, room?.hostTransfer?.seq, room?.status, joinedPlayerId, lang]);
 
   // Keep container/session warm during long controller play sessions
   useEffect(() => {
@@ -585,12 +689,15 @@ export function PhoneController({
           code: codeNow,
           name: playerNameRef.current.trim() || 'Player',
           playerId: storedPlayerIdRef.current,
+          deviceId: getDeviceId(codeNow),
+          isTestController: embedded,
           preferredColorId: preferredColorRef.current,
           avatarId: selectedAvatarIdRef.current,
         });
       }
     }, 1_400);
     return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsConnected, joinedPlayerId, room]);
 
   // Manage WebSocket connection
@@ -598,7 +705,13 @@ export function PhoneController({
     const socket = new ManagedWebSocket({
       onOpen: () => {
         setWsConnected(true);
-        const savedRoom = !embedded ? sessionStorage.getItem(roomCodeSessionKey) || '' : '';
+        setSocketStatus('connected');
+        let savedRoom = '';
+        try {
+          savedRoom = sessionStorage.getItem(roomCodeSessionKey) || '';
+        } catch {
+          // Ignore storage error
+        }
         const codeNow = (roomRef.current?.code || roomCodeRef.current || savedRoom).trim().toUpperCase();
         if (storedPlayerIdRef.current && codeNow.length === 4) {
           socket.send({
@@ -606,14 +719,20 @@ export function PhoneController({
             code: codeNow,
             name: playerNameRef.current.trim() || 'Player',
             playerId: storedPlayerIdRef.current,
+            deviceId: getDeviceId(codeNow),
+            isTestController: embedded,
             preferredColorId: preferredColorRef.current,
             avatarId: selectedAvatarIdRef.current,
           });
         } else if (autoJoin && initialRoomCode.length === 4) {
+          const cleanInit = initialRoomCode.toUpperCase();
           socket.send({
             type: 'room:join',
-            code: initialRoomCode.toUpperCase(),
+            code: cleanInit,
             name: playerNameRef.current.trim() || 'Player',
+            playerId: storedPlayerIdRef.current,
+            deviceId: getDeviceId(cleanInit),
+            isTestController: embedded,
             preferredColorId: preferredColorRef.current,
             avatarId: selectedAvatarIdRef.current,
           });
@@ -623,6 +742,7 @@ export function PhoneController({
         setWsConnected(false);
       },
       onStatusChange: (status) => {
+        setSocketStatus(status);
         setWsConnected(status === 'connected');
       },
       onMessage: (msg: ServerMessage) => {
@@ -633,12 +753,14 @@ export function PhoneController({
             roomRef.current = msg.room;
             roomCodeRef.current = msg.room.code;
             setRoomCode(msg.room.code);
-            if (!embedded) {
+            try {
               sessionStorage.setItem(sessionKey, msg.playerId);
               sessionStorage.setItem(roomCodeSessionKey, msg.room.code);
-              if (!userExitedPhoneFsRef.current) {
-                enterFullscreenAndLandscape();
-              }
+            } catch {
+              // Ignore storage error
+            }
+            if (!embedded && !userExitedPhoneFsRef.current) {
+              enterFullscreenAndLandscape();
             }
             if (manualReconnectTimerRef.current) {
               clearTimeout(manualReconnectTimerRef.current);
@@ -664,9 +786,11 @@ export function PhoneController({
             storedPlayerIdRef.current = undefined;
             joinedPlayerIdRef.current = null;
             roomRef.current = null;
-            if (!embedded) {
+            try {
               sessionStorage.removeItem(sessionKey);
               sessionStorage.removeItem(roomCodeSessionKey);
+            } catch {
+              // Ignore storage error
             }
             setManualReconnecting(false);
             setClosedReason(msg.reason);
@@ -680,9 +804,11 @@ export function PhoneController({
               storedPlayerIdRef.current = undefined;
               joinedPlayerIdRef.current = null;
               roomRef.current = null;
-              if (!embedded) {
+              try {
                 sessionStorage.removeItem(sessionKey);
                 sessionStorage.removeItem(roomCodeSessionKey);
+              } catch {
+                // Ignore storage error
               }
               setJoinedPlayerId(null);
               setRoom(null);
@@ -931,6 +1057,8 @@ export function PhoneController({
       code: cleaned,
       name: playerName.trim() || 'Player',
       playerId: storedPlayerIdRef.current,
+      deviceId: getDeviceId(cleaned),
+      isTestController: embedded,
       preferredColorId: preferredColor,
       avatarId: selectedAvatarId,
     });
@@ -967,9 +1095,13 @@ export function PhoneController({
     storedPlayerIdRef.current = undefined;
     joinedPlayerIdRef.current = null;
     roomRef.current = null;
-    if (!embedded) {
+    try {
       sessionStorage.removeItem(sessionKey);
       sessionStorage.removeItem(roomCodeSessionKey);
+    } catch {
+      // Ignore storage error
+    }
+    if (!embedded) {
       try {
         const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
         orientation?.unlock?.();
@@ -1269,7 +1401,12 @@ export function PhoneController({
     const ws = wsRef.current;
     if (!ws) return;
 
-    const savedRoom = !embedded ? sessionStorage.getItem(roomCodeSessionKey) || '' : '';
+    let savedRoom = '';
+    try {
+      savedRoom = sessionStorage.getItem(roomCodeSessionKey) || '';
+    } catch {
+      // Ignore storage error
+    }
     const codeNow = (roomRef.current?.code || roomCodeRef.current || savedRoom).trim().toUpperCase();
 
     if (ws.isConnected() && codeNow.length === 4 && storedPlayerIdRef.current) {
@@ -1279,7 +1416,10 @@ export function PhoneController({
         code: codeNow,
         name: playerNameRef.current.trim() || 'Player',
         playerId: storedPlayerIdRef.current,
+        deviceId: getDeviceId(codeNow),
+        isTestController: embedded,
         preferredColorId: preferredColorRef.current,
+        avatarId: selectedAvatarIdRef.current,
       });
       // If server doesn't confirm re-join within 900ms, force a clean WebSocket reset
       window.setTimeout(() => {
@@ -1467,6 +1607,8 @@ export function PhoneController({
   // STATE 2: JOIN ROOM FORM (Not yet joined)
   // =====================================================================
   if (!room || !me || !gameMeta) {
+    const isDisconnectedAfterAttempt =
+      socketStatus === 'reconnecting' || socketStatus === 'closed';
     return (
       <div
         className={`${
@@ -1491,9 +1633,19 @@ export function PhoneController({
               <LanguageToggle compact />
               <span className="text-xs font-medium text-[#9CA3AF] flex items-center gap-1.5">
                 <span
-                  className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#10D98B]' : 'bg-[#FFB800]'}`}
+                  className={`w-2 h-2 rounded-full ${
+                    wsConnected
+                      ? 'bg-[#10D98B]'
+                      : isDisconnectedAfterAttempt
+                      ? 'bg-[#FFB800]'
+                      : 'bg-[#00C2FF] animate-pulse'
+                  }`}
                 />
-                {wsConnected ? t('Live', '已连接') : t('Connecting', '连接中')}
+                {wsConnected
+                  ? t('Live', '已连接')
+                  : isDisconnectedAfterAttempt
+                  ? t('Reconnecting', '重连中')
+                  : t('Connecting...', '连接中...')}
               </span>
             </div>
           </div>
@@ -1597,7 +1749,7 @@ export function PhoneController({
               </div>
             </div>
 
-            {!wsConnected && (
+            {isDisconnectedAfterAttempt && (
               <div className="p-3 rounded-xl bg-[#FFB800]/15 border border-[#FFB800]/45 flex items-center justify-between gap-3 text-xs text-[#FDE68A]">
                 <span className="inline-flex items-center gap-2 font-semibold">
                   <WifiOff className="w-4 h-4 text-[#FFB800] shrink-0" />
@@ -1628,7 +1780,9 @@ export function PhoneController({
             >
               {wsConnected
                 ? t('Join Room & Open Gamepad', '加入房间并打开手柄')
-                : t('Reconnecting to Server...', '正在连接服务器...')}
+                : isDisconnectedAfterAttempt
+                ? t('Reconnecting to Server...', '正在重新连接服务器...')
+                : t('Connecting to Server...', '正在连接服务器...')}
             </button>
           </form>
         </div>
@@ -1647,6 +1801,7 @@ export function PhoneController({
 
   const isRoomHost = room.hostPlayerId === me.id;
   const connectedHumans = room.players.filter((p) => !p.isBot && p.connected);
+  const otherHumans = room.players.filter((p) => !p.isBot && p.id !== me.id);
   const otherConnectedHumans = connectedHumans.filter((p) => p.id !== me.id);
   const readyHumans = connectedHumans.filter((p) => p.ready);
   const unreadyHumans = connectedHumans.filter((p) => !p.ready);
@@ -1663,6 +1818,11 @@ export function PhoneController({
     if (!isRoomHost) return;
     wsRef.current?.send({ type: 'room:set-host-player', playerId: targetPlayerId });
     setPassHostOpen(false);
+  };
+
+  const handleKickPlayer = (targetPlayerId: string) => {
+    if (!isRoomHost) return;
+    wsRef.current?.send({ type: 'room:kick-player', playerId: targetPlayerId });
   };
 
   const handleConfirmCloseRoom = () => {
@@ -1721,7 +1881,7 @@ export function PhoneController({
         <div className="flex items-center gap-2">
           <Crown className="w-5 h-5 text-[#FFB800]" />
           <span className="font-display text-lg font-extrabold text-white">
-            {t('Pass Host Remote Control', '移交房主遥控权')}
+            {t('Pass Host / Manage Players', '移交房主 / 管理玩家')}
           </span>
         </div>
         <button
@@ -1735,30 +1895,55 @@ export function PhoneController({
       </div>
 
       <div className="flex-1 overflow-y-auto arcade-scrollbar my-3 pr-1">
-        {otherConnectedHumans.length === 0 ? (
+        {otherHumans.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-sm text-[#9CA3AF]">
-            {t('No other human players are connected right now.', '目前没有其他在线玩家。')}
+            {t('No other human players are in the room right now.', '目前房间里没有其他真人玩家。')}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {otherConnectedHumans.map((p) => (
-              <button
+            {otherHumans.map((p) => (
+              <div
                 key={p.id}
-                type="button"
-                onClick={() => handlePassHost(p.id)}
-                className="tactile-btn min-h-[54px] px-4 py-2.5 rounded-xl bg-[#1A1E26] hover:bg-[#242A36] border border-[#2A303D] flex items-center justify-between gap-3 text-left cursor-pointer"
+                className="min-h-[54px] px-3.5 py-2.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] flex items-center justify-between gap-2.5 text-left"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <PlayerAvatar avatarId={p.avatarId} colorHex={p.color.hex} size="sm" />
-                  <span className="font-display font-bold text-base text-white truncate">
-                    {p.name}
-                  </span>
+                  <div className="min-w-0">
+                    <div className="font-display font-bold text-sm text-white truncate">
+                      {p.name}
+                    </div>
+                    <div className="text-[10px] font-semibold text-[#9CA3AF]">
+                      P{p.slotIndex + 1} ·{' '}
+                      {p.connected ? (
+                        <span className="text-[#10D98B]">{t('Online', '在线')}</span>
+                      ) : (
+                        <span className="text-[#FF4D2E]">{t('Offline', '离线')}</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <span className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] text-xs font-extrabold inline-flex items-center gap-1 shrink-0">
-                  <Crown className="w-3.5 h-3.5" />
-                  {t('Make Host', '设为房主')}
-                </span>
-              </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {p.connected && (
+                    <button
+                      type="button"
+                      onClick={() => handlePassHost(p.id)}
+                      className="tactile-btn px-2.5 py-1.5 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[#14120B] text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Crown className="w-3.5 h-3.5" />
+                      {t('Host', '设房主')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleKickPlayer(p.id)}
+                    title={t(`Kick ${p.name}`, `移出 ${p.name}`)}
+                    className="tactile-btn px-2.5 py-1.5 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/50 text-[#FF9B8A] hover:text-white text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    {t('Kick', '踢出')}
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -2085,7 +2270,9 @@ export function PhoneController({
   // STATE 3B: GAME ROOM — HOST BECOMES TV REMOTE / OTHERS GET READY PAD
   // =====================================================================
   if (room.status === 'LOBBY') {
-    const allHumansReady = unreadyHumans.length === 0;
+    const allHumansReady = room.readyGate
+      ? room.readyGate.allHumansReady
+      : unreadyHumans.length === 0;
     const focusInfo = describeRemoteTarget();
 
     // --- HOST TV REMOTE CONTROL ---
@@ -2138,7 +2325,7 @@ export function PhoneController({
                   <SlidersHorizontal className="w-3.5 h-3.5" />
                 </button>
               )}
-              {otherConnectedHumans.length > 0 && (
+              {otherHumans.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setPassHostOpen(true)}
@@ -2325,14 +2512,14 @@ export function PhoneController({
                 </p>
               )}
 
-              {otherConnectedHumans.length > 0 && (
+              {otherHumans.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setPassHostOpen(true)}
                   className="h-10 w-full rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                  <span>{t('Pass Host', '移交房主')}</span>
+                  <span>{t('Pass Host / Manage Players', '移交房主 / 管理玩家')}</span>
                 </button>
               )}
             </div>

@@ -92,6 +92,13 @@ export class ManagedWebSocket {
     if (this.closedManually) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     this.reconnectDelay = INITIAL_RECONNECT_MS;
+    if (
+      this.ws &&
+      this.ws.readyState === WebSocket.CONNECTING &&
+      Date.now() - this.connectStartedAt < CONNECT_TIMEOUT_MS
+    ) {
+      return;
+    }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.reconnectNow(false);
     } else {
@@ -284,12 +291,12 @@ export class ManagedWebSocket {
     }
     this.reconnectDelay = INITIAL_RECONNECT_MS;
 
-    // Avoid aborting a fresh in-flight handshake started <1200ms ago unless forced after stall
+    // Never abort an in-flight handshake that is still within CONNECT_TIMEOUT_MS unless explicitly forced
     if (
       !force &&
       this.ws &&
       this.ws.readyState === WebSocket.CONNECTING &&
-      Date.now() - this.connectStartedAt < 1_200
+      Date.now() - this.connectStartedAt < CONNECT_TIMEOUT_MS
     ) {
       return;
     }

@@ -239,6 +239,7 @@ export interface PlayerSummary {
   connected: boolean;
   ready: boolean;
   isBot?: boolean;
+  isTestController?: boolean;
   botDifficulty?: BotDifficulty;
   score: number;
   alive: boolean;
@@ -2530,6 +2531,34 @@ export interface TournamentState {
   completed: boolean;
 }
 
+export interface RoomReadyGate {
+  totalPlayers: number;
+  connectedHumanCount: number;
+  readyHumanCount: number;
+  unreadyHumanIds: string[];
+  unreadyHumanNames: string[];
+  offlineHumanIds: string[];
+  offlineHumanNames: string[];
+  allHumansReady: boolean;
+  canStart: boolean;
+}
+
+export type HostTransferReason =
+  | 'disconnect-timeout'
+  | 'player-left'
+  | 'kicked'
+  | 'manual'
+  | 'real-phone-priority';
+
+export interface HostTransferNotice {
+  seq: number;
+  toPlayerId: string;
+  toPlayerName: string;
+  toSlotIndex: number;
+  fromPlayerName?: string;
+  reason: HostTransferReason;
+}
+
 export interface RoomSnapshot {
   code: string;
   status: RoomStatus;
@@ -2540,6 +2569,8 @@ export interface RoomSnapshot {
   teamMode: TeamMode;
   teamRankings: TeamStanding[];
   hostPlayerId: string | null;
+  hostTransfer?: HostTransferNotice | null;
+  readyGate: RoomReadyGate;
   lobbyFilter: PlayerFilterMode;
   remoteFocus: RemoteFocusState;
   activeMutator: MutatorId;
@@ -2561,11 +2592,14 @@ export type ClientMessage =
       code: string;
       name: string;
       playerId?: string;
+      deviceId?: string;
+      isTestController?: boolean;
       preferredColorId?: string;
       avatarId?: string;
     }
   | { type: 'room:add-bot'; difficulty?: BotDifficulty }
   | { type: 'room:remove-bot'; botId: string }
+  | { type: 'room:kick-player'; playerId: string }
   | { type: 'room:set-bot-difficulty'; difficulty: BotDifficulty; botId?: string }
   | { type: 'room:set-team-mode'; teamMode: TeamMode }
   | { type: 'room:set-player-team'; playerId: string; teamId: TeamId }

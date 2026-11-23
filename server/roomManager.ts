@@ -11,6 +11,8 @@ import {
   type FrenzyState,
   type GameId,
   type GameSnapshot,
+  type HostTransferNotice,
+  type HostTransferReason,
   type PlayerColorSpec,
   type PlayerFilterMode,
   type PlayerMatchStats,
@@ -18,6 +20,7 @@ import {
   type RankingEntry,
   type RemoteDirection,
   type RemoteFocusState,
+  type RoomReadyGate,
   type RoomSnapshot,
   type RoomStatus,
   type ServerMessage,
@@ -56,6 +59,10 @@ import { computeBotInput, createBotMemory, type BotMemory } from './games/botCon
 const VALID_TEAM_MODES = new Set<TeamMode>(['ffa', 'teams-2', 'teams-3', 'teams-4', 'one-vs-all']);
 const CUP_VOTE_SECONDS = 15;
 
+function isSimDeviceId(deviceId?: string): boolean {
+  return Boolean(deviceId && /^sim_device_[A-Z0-9]{4}_P[12]$/i.test(deviceId.trim()));
+}
+
 interface ConnectedPlayer {
   id: string;
   slotIndex: number;
@@ -67,6 +74,8 @@ interface ConnectedPlayer {
   connected: boolean;
   ready: boolean;
   isBot: boolean;
+  deviceId?: string;
+  isTestController?: boolean;
   botDifficulty?: BotDifficulty;
   botMemory?: BotMemory;
   score: number;
@@ -148,6 +157,8 @@ interface RoomRecord {
   hostWs: WebSocket | null;
   hostDisconnectedAt: number | null;
   hostPlayerId: string | null;
+  hostTransfer: HostTransferNotice | null;
+  hostTransferSeq: number;
   botDifficulty: BotDifficulty;
   teamMode: TeamMode;
   teamRankings: TeamStanding[];
@@ -198,7 +209,9 @@ const BOT_CALLSIGNS = [
 const VALID_DIFFICULTIES = new Set<BotDifficulty>(['chill', 'arcade', 'spicy']);
 const ALLOWED_EMOTES = new Set(['🔥', '😂', '⚡', '👑', '🎉', '🤖', '👏', '😎']);
 const TICK_MS = 33; // ~30Hz authoritative server tick
-const PLAYER_RECONNECT_GRACE_MS = 10 * 60_000;
+const LOBBY_DISCONNECT_GRACE_MS = 45_000; // 45s auto-prune in SETUP / LOBBY so offline players never block the lobby
+const PLAYER_RECONNECT_GRACE_MS = 10 * 60_000; // 10m reconnect grace during active match phases
+const HOST_PLAYER_MIGRATION_GRACE_MS = 15_000; // 15s grace before migrating hostPlayerId on disconnect
 const HOST_RECONNECT_GRACE_MS = 15 * 60_000;
 const IDLE_ROOM_TTL_MS = 90 * 60_000;
 const WS_HEARTBEAT_INTERVAL_MS = 10_000;
@@ -213,7 +226,7 @@ export class RoomManager {
   private heartbeatInterval: ReturnType<typeof setInterval>;
 
   constructor() {
-    this.cleanupInterval = setInterval(() => this.pruneExpired(), 5_000);
+    this.cleanupInterval = setInterval(() => this.pruneExpired(), 2_000);
     this.heartbeatInterval = setInterval(() => this.checkHeartbeats(), WS_HEARTBEAT_INTERVAL_MS);
   }
 
@@ -334,18 +347,89 @@ export class RoomManager {
     }
   }
 
-  private ensureHostPlayer(room: RoomRecord): void {
+  private ensureHostPlayer(
+    room: RoomRecord,
+    opts?: {
+      forceMigrate?: boolean;
+      reason?: HostTransferReason;
+      prevHostName?: string;
+    }
+  ): void {
+    const connectedHumans = [...room.players.values()]
+      .filter((p) => !p.isBot && p.connected)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+    const connectedPhones = connectedHumans.filter((p) => !p.isTestController);
+
     if (room.hostPlayerId) {
       const current = room.players.get(room.hostPlayerId);
-      if (current && !current.isBot && current.connected) return;
+      if (current && !current.isBot) {
+        if (current.connected) {
+          // Test Controllers must never remain hostPlayerId if any real phone player is connected
+          if (current.isTestController && connectedPhones.length > 0) {
+            const nextHost = connectedPhones[0];
+            room.hostPlayerId = nextHost.id;
+            room.hostTransferSeq += 1;
+            room.hostTransfer = {
+              seq: room.hostTransferSeq,
+              toPlayerId: nextHost.id,
+              toPlayerName: nextHost.name,
+              toSlotIndex: nextHost.slotIndex,
+              fromPlayerName: current.name,
+              reason: 'real-phone-priority',
+            };
+            this.dispatchHapticToPlayer(room, nextHost.id, {
+              pattern: [45, 30, 85],
+              reason: 'host-transfer',
+              event: 'host-transfer',
+              label: 'HOST REMOTE ACTIVE',
+              intensity: 'medium',
+              minGapMs: 0,
+            });
+          }
+          return;
+        }
+
+        // Disconnected host: if not forced (e.g. not left/kicked), hold hostPlayerId during the 15s grace window
+        // unless current was a Test Controller and a real phone is connected.
+        if (!opts?.forceMigrate) {
+          const isTestYieldingToPhone = current.isTestController && connectedPhones.length > 0;
+          const withinGrace =
+            current.disconnectedAt !== null &&
+            Date.now() - current.disconnectedAt < HOST_PLAYER_MIGRATION_GRACE_MS;
+          if (!isTestYieldingToPhone && withinGrace) {
+            return;
+          }
+        }
+      }
     }
-    const candidates = [...room.players.values()].filter((p) => !p.isBot && p.connected);
-    if (candidates.length === 0) {
+
+    // Prefer connected real phones in deterministic slot order (P1 -> P2 -> ...);
+    // fall back to Test Controllers only when 0 real phone players are connected.
+    const pool = connectedPhones.length > 0 ? connectedPhones : connectedHumans;
+    if (pool.length === 0) {
       room.hostPlayerId = null;
       return;
     }
-    const picked = candidates[Math.floor(Math.random() * candidates.length)];
+
+    const prevHostId = room.hostPlayerId;
+    const prevHost = prevHostId ? room.players.get(prevHostId) : null;
+    const fromName = opts?.prevHostName ?? prevHost?.name;
+
+    const picked = pool[0];
     room.hostPlayerId = picked.id;
+
+    if ((prevHostId !== null && prevHostId !== picked.id) || opts?.reason) {
+      room.hostTransferSeq += 1;
+      room.hostTransfer = {
+        seq: room.hostTransferSeq,
+        toPlayerId: picked.id,
+        toPlayerName: picked.name,
+        toSlotIndex: picked.slotIndex,
+        fromPlayerName: fromName,
+        reason: opts?.reason ?? 'disconnect-timeout',
+      };
+    }
+
     this.dispatchHapticToPlayer(room, picked.id, {
       pattern: [45, 30, 85],
       reason: 'host-transfer',
@@ -354,6 +438,31 @@ export class RoomManager {
       intensity: 'medium',
       minGapMs: 0,
     });
+  }
+
+  private computeRoomReadyGate(room: RoomRecord): RoomReadyGate {
+    const sorted = [...room.players.values()].sort((a, b) => a.slotIndex - b.slotIndex);
+    const humans = sorted.filter((p) => !p.isBot);
+    const bots = sorted.filter((p) => p.isBot);
+    const connectedHumans = humans.filter((p) => p.connected);
+    const offlineHumans = humans.filter((p) => !p.connected);
+    const readyHumans = connectedHumans.filter((p) => p.ready);
+    const unreadyHumans = connectedHumans.filter((p) => !p.ready);
+    const allHumansReady = unreadyHumans.length === 0;
+    const activeParticipantCount = connectedHumans.length + bots.length;
+    const canStart = activeParticipantCount > 0 && allHumansReady;
+
+    return {
+      totalPlayers: sorted.length,
+      connectedHumanCount: connectedHumans.length,
+      readyHumanCount: readyHumans.length,
+      unreadyHumanIds: unreadyHumans.map((p) => p.id),
+      unreadyHumanNames: unreadyHumans.map((p) => p.name),
+      offlineHumanIds: offlineHumans.map((p) => p.id),
+      offlineHumanNames: offlineHumans.map((p) => p.name),
+      allHumansReady,
+      canStart,
+    };
   }
 
   private dispatchHapticToPlayer(
@@ -408,8 +517,8 @@ export class RoomManager {
 
   private checkBriefingReadyAdvance(room: RoomRecord): boolean {
     if (room.status !== 'BRIEFING') return false;
-    const connectedHumans = [...room.players.values()].filter((p) => !p.isBot && p.connected);
-    if (connectedHumans.length > 0 && connectedHumans.every((p) => p.ready)) {
+    const gate = this.computeRoomReadyGate(room);
+    if (gate.connectedHumanCount > 0 && gate.allHumansReady) {
       this.beginCountdown(room);
       return true;
     }
@@ -429,6 +538,7 @@ export class RoomManager {
         connected: p.connected,
         ready: p.ready,
         isBot: p.isBot,
+        isTestController: p.isTestController,
         botDifficulty: p.isBot ? p.botDifficulty ?? room.botDifficulty : undefined,
         score: p.score,
         alive: p.alive,
@@ -457,6 +567,8 @@ export class RoomManager {
       teamMode: room.teamMode,
       teamRankings: liveTeamRankings,
       hostPlayerId: room.hostPlayerId,
+      hostTransfer: room.hostTransfer ? { ...room.hostTransfer } : null,
+      readyGate: this.computeRoomReadyGate(room),
       lobbyFilter: room.lobbyFilter,
       remoteFocus: { ...room.remoteFocus },
       activeMutator: room.activeMutator,
@@ -664,6 +776,8 @@ export class RoomManager {
           hostWs: ws,
           hostDisconnectedAt: null,
           hostPlayerId: null,
+          hostTransfer: null,
+          hostTransferSeq: 0,
           botDifficulty: 'arcade',
           teamMode: 'ffa',
           teamRankings: [],
@@ -764,37 +878,88 @@ export class RoomManager {
         }
 
         const cleanName = (msg.name || '').trim().slice(0, 14) || `Player ${room.players.size + 1}`;
+        const cleanDeviceId =
+          typeof msg.deviceId === 'string' && msg.deviceId.trim()
+            ? msg.deviceId.trim().slice(0, 80)
+            : undefined;
+        const isSimController = isSimDeviceId(cleanDeviceId);
         room.lastActivityAt = Date.now();
 
-        // Idempotent reconnect by playerId (humans only)
-        if (msg.playerId && room.players.has(msg.playerId)) {
-          const existing = room.players.get(msg.playerId)!;
-          if (!existing.isBot) {
-            this.detachSocket(ws);
-            existing.ws = ws;
-            existing.connected = true;
-            existing.disconnectedAt = null;
-            existing.name = cleanName;
-            if (isValidAvatarId(msg.avatarId)) {
-              existing.avatarId = msg.avatarId;
-            }
-            this.ensureHostPlayer(room);
-            this.bindings.set(ws, { role: 'player', roomCode: code, playerId: existing.id });
-            this.send(ws, {
-              type: 'room:joined',
-              playerId: existing.id,
-              room: this.buildRoomSnapshot(room),
-            });
-            if (room.gameState && (room.status === 'PLAYING' || room.status === 'COUNTDOWN' || room.status === 'PAUSED')) {
-              const engine = SERVER_GAMES[room.selectedGameId];
-              const states = engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room));
-              if (states && states[existing.id]) {
-                this.send(ws, { type: 'player:card-state', cardState: states[existing.id] });
+        // 1. Reclaim by exact playerId
+        let existing: ConnectedPlayer | undefined =
+          msg.playerId && room.players.has(msg.playerId)
+            ? room.players.get(msg.playerId)
+            : undefined;
+        if (existing?.isBot) {
+          existing = undefined;
+        }
+
+        // 2. Reclaim by persistent deviceId (same device/session re-joining)
+        if (!existing && cleanDeviceId) {
+          existing = [...room.players.values()].find(
+            (p) => !p.isBot && p.deviceId && p.deviceId === cleanDeviceId
+          );
+        }
+
+        // 3. Name-match fallback is allowed ONLY for deterministic Test Controller IDs (sim_device_..._P1 / P2)
+        if (!existing && isSimController) {
+          const normName = cleanName.toLowerCase();
+          existing = [...room.players.values()].find(
+            (p) =>
+              !p.isBot &&
+              (p.isTestController || p.name.toLowerCase().startsWith('test p')) &&
+              p.name.toLowerCase() === normName
+          );
+        }
+
+        if (existing && !existing.isBot) {
+          this.detachSocket(ws);
+          // Kill any stale socket previously bound to this player slot so zombie connections never linger
+          const stalePlayerWs = existing.ws;
+          if (stalePlayerWs && stalePlayerWs !== ws) {
+            this.bindings.delete(stalePlayerWs);
+            this.cleanupSocketTracking(stalePlayerWs);
+            try {
+              if (stalePlayerWs.readyState === 1 || stalePlayerWs.readyState === 0) {
+                stalePlayerWs.close();
               }
+            } catch {
+              // Ignore close errors on stale socket
             }
-            this.broadcastRoom(room);
-            return;
           }
+
+          existing.ws = ws;
+          existing.connected = true;
+          existing.disconnectedAt = null;
+          existing.name = cleanName;
+          if (cleanDeviceId) {
+            existing.deviceId = cleanDeviceId;
+          }
+          if (isSimController || msg.isTestController) {
+            existing.isTestController = isSimController || Boolean(msg.isTestController);
+          }
+          if (isValidAvatarId(msg.avatarId)) {
+            existing.avatarId = msg.avatarId;
+          }
+          this.ensureHostPlayer(room);
+          this.bindings.set(ws, { role: 'player', roomCode: code, playerId: existing.id });
+          this.send(ws, {
+            type: 'room:joined',
+            playerId: existing.id,
+            room: this.buildRoomSnapshot(room),
+          });
+          if (
+            room.gameState &&
+            (room.status === 'PLAYING' || room.status === 'COUNTDOWN' || room.status === 'PAUSED')
+          ) {
+            const engine = SERVER_GAMES[room.selectedGameId];
+            const states = engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room));
+            if (states && states[existing.id]) {
+              this.send(ws, { type: 'player:card-state', cardState: states[existing.id] });
+            }
+          }
+          this.broadcastRoom(room);
+          return;
         }
 
         if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
@@ -829,6 +994,8 @@ export class RoomManager {
           connected: true,
           ready: false,
           isBot: false,
+          deviceId: cleanDeviceId,
+          isTestController: isSimController || Boolean(msg.isTestController),
           score: 0,
           rawGameScore: 0,
           bonusScore: 0,
@@ -893,7 +1060,11 @@ export class RoomManager {
       }
 
       case 'room:remove-bot': {
-        const room = this.getPrivilegedRoom(ws);
+        const binding = this.bindings.get(ws);
+        const room =
+          binding?.role === 'host'
+            ? this.rooms.get(binding.roomCode) ?? null
+            : this.getPrivilegedRoom(ws);
         if (!room) return;
         if (room.status !== 'SETUP' && room.status !== 'LOBBY') return;
         const target = room.players.get(msg.botId);
@@ -903,6 +1074,56 @@ export class RoomManager {
           this.assignBalancedTeams(room, false);
         }
         room.lastActivityAt = Date.now();
+        this.broadcastRoom(room);
+        return;
+      }
+
+      case 'room:kick-player': {
+        const binding = this.bindings.get(ws);
+        if (!binding) return;
+        const room =
+          binding.role === 'host'
+            ? this.rooms.get(binding.roomCode) ?? null
+            : this.getPrivilegedRoom(ws);
+        if (!room) return;
+        const target = room.players.get(msg.playerId);
+        if (!target) return;
+
+        if (target.ws) {
+          this.send(target.ws, {
+            type: 'room:closed',
+            reason: 'You were removed from the room by the host.',
+          });
+          this.bindings.delete(target.ws);
+          this.cleanupSocketTracking(target.ws);
+          try {
+            if (target.ws.readyState === 1 || target.ws.readyState === 0) {
+              target.ws.close();
+            }
+          } catch {
+            // Ignore close errors
+          }
+          target.ws = null;
+        }
+
+        const wasHost = room.hostPlayerId === target.id;
+        room.players.delete(target.id);
+        if (room.teamMode === 'one-vs-all' && target.teamId === 'boss') {
+          this.assignBalancedTeams(room, false);
+        }
+        if (wasHost) {
+          room.hostPlayerId = null;
+          this.ensureHostPlayer(room, {
+            forceMigrate: true,
+            reason: 'kicked',
+            prevHostName: target.name,
+          });
+        } else {
+          this.ensureHostPlayer(room);
+        }
+        room.lastActivityAt = Date.now();
+        if (this.checkBriefingReadyAdvance(room)) return;
+        if (this.checkCupVoteEarlyLock(room)) return;
         this.broadcastRoom(room);
         return;
       }
@@ -968,7 +1189,11 @@ export class RoomManager {
       }
 
       case 'room:set-host-player': {
-        const room = this.getPrivilegedRoom(ws);
+        const binding = this.bindings.get(ws);
+        const room =
+          binding?.role === 'host'
+            ? this.rooms.get(binding.roomCode) ?? null
+            : this.getPrivilegedRoom(ws);
         if (!room) return;
         const target = room.players.get(msg.playerId);
         if (!target || target.isBot || !target.connected) {
@@ -978,7 +1203,17 @@ export class RoomManager {
           });
           return;
         }
+        const prevHost = room.hostPlayerId ? room.players.get(room.hostPlayerId) : null;
         room.hostPlayerId = target.id;
+        room.hostTransferSeq += 1;
+        room.hostTransfer = {
+          seq: room.hostTransferSeq,
+          toPlayerId: target.id,
+          toPlayerName: target.name,
+          toSlotIndex: target.slotIndex,
+          fromPlayerName: prevHost?.name,
+          reason: 'manual',
+        };
         room.lastActivityAt = Date.now();
         this.playHostSound(room, 'confirm');
         if (target.ws) {
@@ -1212,12 +1447,22 @@ export class RoomManager {
         const room = this.rooms.get(binding.roomCode);
         if (!room) return;
         const leavingPlayer = room.players.get(binding.playerId);
+        const wasHost = leavingPlayer && room.hostPlayerId === leavingPlayer.id;
         room.players.delete(binding.playerId);
         this.bindings.delete(ws);
         if (leavingPlayer && room.teamMode === 'one-vs-all' && leavingPlayer.teamId === 'boss') {
           this.assignBalancedTeams(room, false);
         }
-        this.ensureHostPlayer(room);
+        if (wasHost && leavingPlayer) {
+          room.hostPlayerId = null;
+          this.ensureHostPlayer(room, {
+            forceMigrate: true,
+            reason: 'player-left',
+            prevHostName: leavingPlayer.name,
+          });
+        } else {
+          this.ensureHostPlayer(room);
+        }
         room.lastActivityAt = Date.now();
         if (this.checkBriefingReadyAdvance(room)) return;
         if (this.checkCupVoteEarlyLock(room)) return;
@@ -1624,7 +1869,9 @@ export class RoomManager {
   }
 
   private attemptStartMatch(room: RoomRecord, senderWs: WebSocket): boolean {
-    if (room.players.size === 0) {
+    const gate = this.computeRoomReadyGate(room);
+    const hasBots = [...room.players.values()].some((p) => p.isBot);
+    if (gate.connectedHumanCount === 0 && !hasBots) {
       this.send(senderWs, {
         type: 'error',
         message: 'Connect at least 1 player (or add a robot) before starting.',
@@ -1632,13 +1879,9 @@ export class RoomManager {
       return false;
     }
 
-    // Strict Ready Gate: every connected human player MUST press Ready on their phone controller
-    const unreadyHumans = [...room.players.values()]
-      .filter((p) => !p.isBot && p.connected && !p.ready)
-      .sort((a, b) => a.slotIndex - b.slotIndex);
-
-    if (unreadyHumans.length > 0) {
-      const names = unreadyHumans.map((p) => p.name).join(', ');
+    // Strict Ready Gate (single source of truth): every connected human player MUST press Ready on their phone controller
+    if (!gate.allHumansReady) {
+      const names = gate.unreadyHumanNames.join(', ');
       this.send(senderWs, {
         type: 'error',
         code: 'PLAYERS_NOT_READY',
@@ -1679,7 +1922,9 @@ export class RoomManager {
   }
 
   private attemptStartTournament(room: RoomRecord, senderWs: WebSocket): boolean {
-    if (room.players.size === 0) {
+    const gate = this.computeRoomReadyGate(room);
+    const hasBots = [...room.players.values()].some((p) => p.isBot);
+    if (gate.connectedHumanCount === 0 && !hasBots) {
       this.send(senderWs, {
         type: 'error',
         message: 'Connect at least 1 player (or add a robot) before starting.',
@@ -1687,12 +1932,8 @@ export class RoomManager {
       return false;
     }
 
-    const unreadyHumans = [...room.players.values()]
-      .filter((p) => !p.isBot && p.connected && !p.ready)
-      .sort((a, b) => a.slotIndex - b.slotIndex);
-
-    if (unreadyHumans.length > 0) {
-      const names = unreadyHumans.map((p) => p.name).join(', ');
+    if (!gate.allHumansReady) {
+      const names = gate.unreadyHumanNames.join(', ');
       this.send(senderWs, {
         type: 'error',
         code: 'PLAYERS_NOT_READY',
@@ -3514,20 +3755,62 @@ export class RoomManager {
 
   private pruneExpired(): void {
     const now = Date.now();
-    for (const [code, room] of this.rooms.entries()) {
+    for (const [, room] of this.rooms.entries()) {
       let changed = false;
 
-      // Prune long-disconnected human players (never prune manually assigned bots)
+      // 1. Check 15-second host migration grace period for disconnected hostPlayerId
+      if (room.hostPlayerId) {
+        const curHost = room.players.get(room.hostPlayerId);
+        if (
+          curHost &&
+          !curHost.isBot &&
+          !curHost.connected &&
+          curHost.disconnectedAt !== null &&
+          now - curHost.disconnectedAt >= HOST_PLAYER_MIGRATION_GRACE_MS
+        ) {
+          const prevHostId = room.hostPlayerId;
+          this.ensureHostPlayer(room, {
+            forceMigrate: true,
+            reason: 'disconnect-timeout',
+            prevHostName: curHost.name,
+          });
+          if (room.hostPlayerId !== prevHostId) {
+            changed = true;
+          }
+        }
+      }
+
+      // 2. Auto-prune disconnected human players after 45s in SETUP/LOBBY (keep 10m grace during active match phases)
+      const isLobbyOrSetup = room.status === 'SETUP' || room.status === 'LOBBY';
+      const disconnectGraceMs = isLobbyOrSetup
+        ? LOBBY_DISCONNECT_GRACE_MS
+        : PLAYER_RECONNECT_GRACE_MS;
+
       for (const [pid, p] of room.players.entries()) {
-        if (!p.isBot && !p.connected && p.disconnectedAt && now - p.disconnectedAt > PLAYER_RECONNECT_GRACE_MS) {
+        if (!p.isBot && !p.connected && p.disconnectedAt && now - p.disconnectedAt > disconnectGraceMs) {
+          const wasHost = room.hostPlayerId === pid;
           room.players.delete(pid);
+          if (room.teamMode === 'one-vs-all' && p.teamId === 'boss') {
+            this.assignBalancedTeams(room, false);
+          }
+          if (wasHost) {
+            room.hostPlayerId = null;
+            this.ensureHostPlayer(room, {
+              forceMigrate: true,
+              reason: 'disconnect-timeout',
+              prevHostName: p.name,
+            });
+          }
           changed = true;
         }
       }
 
       if (changed) {
         this.ensureHostPlayer(room);
-        this.broadcastRoom(room);
+        if (!this.checkBriefingReadyAdvance(room)) {
+          this.checkCupVoteEarlyLock(room);
+          this.broadcastRoom(room);
+        }
       }
 
       const hostGone =

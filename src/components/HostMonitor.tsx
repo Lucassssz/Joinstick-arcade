@@ -681,7 +681,13 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     }
   }, [room?.status]);
 
-  // Announce whenever Host transfers control or falls back to Mouse control
+  // Auto-clear stale ready-check error messages whenever the room ready condition or status changes
+  const hostUnreadyIdsKey = room?.readyGate?.unreadyHumanIds?.join(',') ?? '';
+  useEffect(() => {
+    setErrorMsg(null);
+  }, [room?.status, room?.readyGate?.allHumansReady, hostUnreadyIdsKey, room?.players.length]);
+
+  // Announce whenever Host transfers control or falls back to Mouse control, with explicit reason
   useEffect(() => {
     if (!room) return;
     const prevHost = prevHostIdRef.current;
@@ -691,19 +697,47 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
     if (prevHost && room.hostPlayerId && prevHost !== room.hostPlayerId) {
       const nextHost = room.players.find((p) => p.id === room.hostPlayerId);
-      const prevHostNow = room.players.find((p) => p.id === prevHost);
-      const prevHostWasPresent = prevPlayers.some((p) => p.id === prevHost);
-      const wasDisconnect = prevHostWasPresent && (!prevHostNow || !prevHostNow.connected);
+      const transfer =
+        room.hostTransfer && room.hostTransfer.toPlayerId === room.hostPlayerId
+          ? room.hostTransfer
+          : null;
+      const fromName =
+        transfer?.fromPlayerName ||
+        prevPlayers.find((p) => p.id === prevHost)?.name ||
+        (lang === 'zh' ? '原房主' : 'Previous host');
       if (nextHost) {
-        showBannerToast(
-          wasDisconnect
-            ? lang === 'zh'
-              ? `原房主已断线 — 遥控权已随机移交给 ${nextHost.name}！`
-              : `Host disconnected — remote control randomly passed to ${nextHost.name}!`
-            : lang === 'zh'
-            ? `房主遥控权限已移交给 ${nextHost.name}！现在由 TA 的手机遥控大屏。`
-            : `Host control passed to ${nextHost.name}! Their phone is now the TV Remote.`
-        );
+        const slotTag = `P${nextHost.slotIndex + 1} ${nextHost.name}`;
+        if (transfer?.reason === 'disconnect-timeout') {
+          showBannerToast(
+            lang === 'zh'
+              ? `房主 ${fromName} 已离线满 15 秒 — 遥控权已按座位顺序移交给 ${slotTag}！`
+              : `Host ${fromName} was offline for 15s — remote control passed in slot order to ${slotTag}!`
+          );
+        } else if (transfer?.reason === 'player-left') {
+          showBannerToast(
+            lang === 'zh'
+              ? `房主 ${fromName} 已离开房间 — 遥控权已按座位顺序移交给 ${slotTag}！`
+              : `Host ${fromName} left the room — remote control passed in slot order to ${slotTag}!`
+          );
+        } else if (transfer?.reason === 'kicked') {
+          showBannerToast(
+            lang === 'zh'
+              ? `房主 ${fromName} 已被移出房间 — 遥控权已按座位顺序移交给 ${slotTag}！`
+              : `Host ${fromName} was removed — remote control passed in slot order to ${slotTag}!`
+          );
+        } else if (transfer?.reason === 'real-phone-priority') {
+          showBannerToast(
+            lang === 'zh'
+              ? `真实手机优先于测试手柄 — 房主遥控权已移交给 ${slotTag}！`
+              : `Real phone prioritized over Test Controller — remote control passed to ${slotTag}!`
+          );
+        } else {
+          showBannerToast(
+            lang === 'zh'
+              ? `房主遥控权限已由 ${fromName} 移交给 ${slotTag}！现在由 TA 的手机遥控大屏。`
+              : `Host control passed from ${fromName} to ${slotTag}! Their phone is now the TV Remote.`
+          );
+        }
       }
     } else if (prevHost && !room.hostPlayerId) {
       showBannerToast(
@@ -716,12 +750,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       if (nextHost) {
         showBannerToast(
           lang === 'zh'
-            ? `${nextHost.name} 已连接 — 已切换为手机遥控大屏！`
-            : `${nextHost.name} connected — Phone Remote control active!`
+            ? `P${nextHost.slotIndex + 1} ${nextHost.name} 已连接 — 已切换为手机遥控大屏！`
+            : `P${nextHost.slotIndex + 1} ${nextHost.name} connected — Phone Remote control active!`
         );
       }
     }
-  }, [room?.hostPlayerId, room?.status, room?.players, lang]);
+  }, [room?.hostPlayerId, room?.hostTransfer?.seq, room?.status, room?.players, lang]);
 
   // Sync 3D card flip direction & proactively warm adjacent cards' renderers + thumbnails in LOBBY
   useEffect(() => {
@@ -868,6 +902,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const handleRemoveBot = (botId: string) => {
     setErrorMsg(null);
     wsRef.current?.send({ type: 'room:remove-bot', botId });
+  };
+
+  const handleKickPlayer = (playerId: string) => {
+    setErrorMsg(null);
+    wsRef.current?.send({ type: 'room:kick-player', playerId });
   };
 
   const handleSetBotDifficulty = (difficulty: BotDifficulty, botId?: string) => {
@@ -1098,7 +1137,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const bots = room.players.filter((p) => p.isBot);
   const readyHumans = connectedHumans.filter((p) => p.ready);
   const unreadyHumans = connectedHumans.filter((p) => !p.ready);
-  const canStartMatch = room.players.length > 0 && unreadyHumans.length === 0;
+  const canStartMatch = room.readyGate
+    ? room.readyGate.canStart
+    : room.players.length > 0 && unreadyHumans.length === 0;
   const isRoomFull = room.players.length >= MAX_PLAYERS_PER_ROOM;
   const activeHostPlayer =
     room.players.find((p) => p.id === room.hostPlayerId && !p.isBot && p.connected) ?? null;
@@ -1690,23 +1731,36 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                                   <X className="w-4 h-4" />
                                 </button>
                               </div>
-                            ) : isHost ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] text-xs font-extrabold">
-                                <Crown className="w-3.5 h-3.5" />
-                                {t('Host', '房主')}
-                              </span>
-                            ) : player.connected ? (
-                              <button
-                                type="button"
-                                onClick={() => handleSetHostPlayer(player.id)}
-                                className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#FFB800] hover:text-[#14120B] text-[11px] font-bold text-white transition-colors cursor-pointer"
-                              >
-                                {t('Make Host', '设为房主')}
-                              </button>
                             ) : (
-                              <span className="text-xs font-bold text-[#FFB800]">
-                                {t('Offline', '离线')}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {isHost ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] text-xs font-extrabold">
+                                    <Crown className="w-3.5 h-3.5" />
+                                    {t('Host', '房主')}
+                                  </span>
+                                ) : player.connected ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetHostPlayer(player.id)}
+                                    className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#FFB800] hover:text-[#14120B] text-[11px] font-bold text-white transition-colors cursor-pointer"
+                                  >
+                                    {t('Make Host', '设为房主')}
+                                  </button>
+                                ) : (
+                                  <span className="text-xs font-bold text-[#FFB800]">
+                                    {t('Offline', '离线')}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  aria-label={t(`Kick ${player.name}`, `移出 ${player.name}`)}
+                                  title={t(`Kick ${player.name}`, `移出 ${player.name}`)}
+                                  onClick={() => handleKickPlayer(player.id)}
+                                  className="h-7 w-7 rounded-lg bg-[#101217] hover:bg-[#FF4D2E] border border-[#262C38] text-[#9CA3AF] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
                             )}
                           </div>
 
@@ -2541,22 +2595,38 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                             {getLocalizedDifficulty(botDiff, lang).label} · {t('Ready', '已准备')}
                           </span>
                         ) : (
-                          <span
-                            className={`text-xs font-bold inline-flex items-center gap-1 ${
-                              !player.connected
-                                ? 'text-[#FFB800]'
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`text-xs font-bold inline-flex items-center gap-1 ${
+                                !player.connected
+                                  ? 'text-[#FFB800]'
+                                  : player.ready
+                                  ? 'text-[#10D98B]'
+                                  : 'text-[#FFB800]'
+                              }`}
+                            >
+                              {player.connected && player.ready && <Check className="w-3.5 h-3.5" />}
+                              {!player.connected
+                                ? t('Offline', '离线')
                                 : player.ready
-                                ? 'text-[#10D98B]'
-                                : 'text-[#FFB800]'
-                            }`}
-                          >
-                            {player.connected && player.ready && <Check className="w-3.5 h-3.5" />}
-                            {!player.connected
-                              ? t('Offline', '离线')
-                              : player.ready
-                              ? t('Ready', '已准备')
-                              : t('Not Ready', '未准备')}
-                          </span>
+                                ? t('Ready', '已准备')
+                                : t('Not Ready', '未准备')}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={t(`Kick ${player.name}`, `移出 ${player.name}`)}
+                              title={t(`Kick ${player.name} from room`, `将 ${player.name} 移出房间`)}
+                              onClick={() => handleKickPlayer(player.id)}
+                              className={`h-6 rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
+                                !player.connected
+                                  ? 'px-1.5 bg-[#2A191B] hover:bg-[#FF4D2E] border-[#FF4D2E]/50 text-[#FF9B8A] hover:text-white text-[10px] font-extrabold gap-0.5'
+                                  : 'w-6 bg-[#101217] hover:bg-[#FF4D2E] border-[#262C38] text-[#9CA3AF] hover:text-white'
+                              }`}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              {!player.connected && <span>{t('Kick', '踢出')}</span>}
+                            </button>
+                          </div>
                         )}
                       </div>
                     </motion.div>
@@ -3567,10 +3637,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                           <span>{p.name}</span>
                           {isReady ? (
                             <Check className="w-3.5 h-3.5 text-[#10D98B]" />
+                          ) : !p.connected ? (
+                            <span className="text-[10px] text-[#FF9B8A]">
+                              {t('Offline', '离线')}
+                            </span>
                           ) : (
                             <span className="text-[10px] text-[#FFB800]">
                               {t('Reading...', '阅读中...')}
                             </span>
+                          )}
+                          {!p.isBot && (
+                            <button
+                              type="button"
+                              aria-label={t(`Kick ${p.name}`, `移出 ${p.name}`)}
+                              title={t(`Kick ${p.name}`, `移出 ${p.name}`)}
+                              onClick={() => handleKickPlayer(p.id)}
+                              className="ml-0.5 h-4 w-4 rounded bg-[#101217]/80 hover:bg-[#FF4D2E] text-[#9CA3AF] hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
                           )}
                         </motion.div>
                       );
