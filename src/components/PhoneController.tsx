@@ -19,6 +19,7 @@ import {
   Footprints,
   Gamepad2,
   Gauge,
+  Loader2,
   LogOut,
   Maximize2,
   Minimize2,
@@ -192,6 +193,7 @@ export function PhoneController({
   const [repositionMode, setRepositionMode] = useState(false);
   const [cardState, setCardState] = useState<CardPrivateState | null>(null);
   const [manualReconnecting, setManualReconnecting] = useState(false);
+  const [joiningRoom, setJoiningRoom] = useState(false);
   const [autoTapPinned, setAutoTapPinned] = useState(false);
   const [emoteDrawerOpen, setEmoteDrawerOpen] = useState(false);
   const [connectedGamepadName, setConnectedGamepadName] = useState<string | null>(null);
@@ -728,6 +730,7 @@ export function PhoneController({
           });
         } else if (autoJoin && initialRoomCode.length === 4) {
           const cleanInit = initialRoomCode.toUpperCase();
+          setJoiningRoom(true);
           socket.send({
             type: 'room:join',
             code: cleanInit,
@@ -742,6 +745,7 @@ export function PhoneController({
       },
       onClose: () => {
         setWsConnected(false);
+        setJoiningRoom(false);
       },
       onStatusChange: (status) => {
         setSocketStatus(status);
@@ -769,6 +773,7 @@ export function PhoneController({
               manualReconnectTimerRef.current = null;
             }
             setManualReconnecting(false);
+            setJoiningRoom(false);
             setJoinedPlayerId(msg.playerId);
             setRoom(msg.room);
             setCardState(null);
@@ -795,6 +800,7 @@ export function PhoneController({
               // Ignore storage error
             }
             setManualReconnecting(false);
+            setJoiningRoom(false);
             setClosedReason(msg.reason);
             setRoom(null);
             setCardState(null);
@@ -802,6 +808,7 @@ export function PhoneController({
             break;
           case 'error':
             setManualReconnecting(false);
+            setJoiningRoom(false);
             if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
               storedPlayerIdRef.current = undefined;
               joinedPlayerIdRef.current = null;
@@ -1053,6 +1060,7 @@ export function PhoneController({
       return;
     }
     setErrorMsg(null);
+    setJoiningRoom(true);
     enterFullscreenAndLandscape();
     wsRef.current?.send({
       type: 'room:join',
@@ -1463,22 +1471,28 @@ export function PhoneController({
               style={{ touchAction: 'manipulation' }}
               className="max-w-sm w-full rounded-2xl bg-[#1A1E26] border-2 border-[#FF4D2E] p-5 text-center shadow-2xl"
             >
-              <div className="w-12 h-12 rounded-2xl bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF4D2E] flex items-center justify-center mx-auto animate-pulse">
-                <WifiOff className="w-6 h-6" />
+              <div className="relative w-12 h-12 rounded-2xl bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF4D2E] flex items-center justify-center mx-auto">
+                <WifiOff className="w-6 h-6" aria-hidden="true" />
+                <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#1A1E26] border border-[#FFB800]/70 flex items-center justify-center">
+                  <Loader2 className="w-3 h-3 text-[#FFB800] animate-spin" aria-hidden="true" />
+                </span>
               </div>
               <h3 className="mt-3 font-display text-xl font-extrabold text-white">
                 {t('Controller Disconnected!', '手柄连接已断开！')}
               </h3>
-              <p className="mt-1.5 text-xs text-[#D1D5DB] leading-relaxed">
-                {manualReconnecting
-                  ? t(
-                      'Establishing fresh link to the game room...',
-                      '正在快速建立新连接并恢复您的座位...'
-                    )
-                  : t(
-                      'Signal dropped — your button taps are paused while we reconnect.',
-                      '网络信号中断 — 正在自动重连，重连前按键暂不生效。'
-                    )}
+              <p className="mt-1.5 text-xs text-[#D1D5DB] leading-relaxed inline-flex items-center justify-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+                <span>
+                  {manualReconnecting
+                    ? t(
+                        'Establishing fresh link to the game room...',
+                        '正在快速建立新连接并恢复您的座位...'
+                      )
+                    : t(
+                        'Signal dropped — your button taps are paused while we reconnect.',
+                        '网络信号中断 — 正在自动重连，重连前按键暂不生效。'
+                      )}
+                </span>
               </p>
               <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2.5">
                 <button
@@ -1491,7 +1505,11 @@ export function PhoneController({
                   onClick={handleManualReconnect}
                   className="tactile-btn pointer-events-auto w-full sm:w-auto h-11 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] active:scale-95 text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  {manualReconnecting ? (
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  )}
                   <span>
                     {manualReconnecting
                       ? t('Reconnecting...', '正在重连...')
@@ -1634,15 +1652,16 @@ export function PhoneController({
             <div className="flex items-center gap-2.5">
               <LanguageToggle compact />
               <span className="text-xs font-medium text-[#9CA3AF] flex items-center gap-1.5">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    wsConnected
-                      ? 'bg-[#10D98B]'
-                      : isDisconnectedAfterAttempt
-                      ? 'bg-[#FFB800]'
-                      : 'bg-[#00C2FF] animate-pulse'
-                  }`}
-                />
+                {wsConnected ? (
+                  <span className="w-2 h-2 rounded-full bg-[#10D98B]" />
+                ) : (
+                  <Loader2
+                    className={`w-3.5 h-3.5 animate-spin ${
+                      isDisconnectedAfterAttempt ? 'text-[#FFB800]' : 'text-[#00C2FF]'
+                    }`}
+                    aria-hidden="true"
+                  />
+                )}
                 {wsConnected
                   ? t('Live', '已连接')
                   : isDisconnectedAfterAttempt
@@ -1754,17 +1773,22 @@ export function PhoneController({
             {isDisconnectedAfterAttempt && (
               <div className="p-3 rounded-xl bg-[#FFB800]/15 border border-[#FFB800]/45 flex items-center justify-between gap-3 text-xs text-[#FDE68A]">
                 <span className="inline-flex items-center gap-2 font-semibold">
-                  <WifiOff className="w-4 h-4 text-[#FFB800] shrink-0" />
-                  {t('Disconnected from server — reconnecting...', '未连接到服务器 — 正在尝试重连...')}
+                  <Loader2 className="w-4 h-4 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+                  <span>
+                    {t('Disconnected from server — reconnecting...', '未连接到服务器 — 正在尝试重连...')}
+                  </span>
                 </span>
                 <button
                   type="button"
                   style={{ touchAction: 'manipulation' }}
                   onPointerUp={handleManualReconnect}
                   onClick={handleManualReconnect}
-                  className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-bold shrink-0 cursor-pointer active:scale-95"
+                  className="px-2.5 py-1 rounded-lg bg-[#FFB800] text-[#14120B] font-bold shrink-0 cursor-pointer active:scale-95 inline-flex items-center gap-1.5"
                 >
-                  {manualReconnecting ? t('Retrying...', '重试中...') : t('Retry', '重试')}
+                  {manualReconnecting && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+                  )}
+                  <span>{manualReconnecting ? t('Retrying...', '重试中...') : t('Retry', '重试')}</span>
                 </button>
               </div>
             )}
@@ -1777,14 +1801,21 @@ export function PhoneController({
 
             <button
               type="submit"
-              disabled={!wsConnected}
-              className="tactile-btn w-full h-13 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-50 text-white font-bold text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
+              disabled={!wsConnected || joiningRoom}
+              className="tactile-btn w-full h-13 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-50 text-white font-bold text-base shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
             >
-              {wsConnected
-                ? t('Join Room & Open Gamepad', '加入房间并打开手柄')
-                : isDisconnectedAfterAttempt
-                ? t('Reconnecting to Server...', '正在重新连接服务器...')
-                : t('Connecting to Server...', '正在连接服务器...')}
+              {(!wsConnected || joiningRoom) && (
+                <Loader2 className="w-5 h-5 animate-spin shrink-0" aria-hidden="true" />
+              )}
+              <span>
+                {!wsConnected
+                  ? isDisconnectedAfterAttempt
+                    ? t('Reconnecting to Server...', '正在重新连接服务器...')
+                    : t('Connecting to Server...', '正在连接服务器...')
+                  : joiningRoom
+                  ? t('Joining Room...', '正在加入房间...')
+                  : t('Join Room & Open Gamepad', '加入房间并打开手柄')}
+              </span>
             </button>
           </form>
         </div>
@@ -2247,6 +2278,7 @@ export function PhoneController({
               </>
             ) : (
               <div className="p-4 rounded-xl bg-[#1A1E26] border border-[#2A303D] text-center">
+                <Loader2 className="w-5 h-5 text-[#00C2FF] animate-spin mx-auto mb-2" aria-hidden="true" />
                 <div className="text-sm font-bold text-white">{t("You're In!", '加入成功！')}</div>
                 <p className="text-xs text-[#9CA3AF] mt-1 leading-relaxed">
                   {t('Waiting for', '等待')}{' '}
@@ -3049,12 +3081,15 @@ export function PhoneController({
             )}
           </div>
         ) : (
-          <p className="text-xs text-[#9CA3AF]">
-            {t('Waiting for', '等待')}{' '}
-            <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
-            {activeTournament
-              ? t("'s remote for next tournament game.", ' 遥控进入下一局锦标赛。')
-              : t("'s remote to play again or switch games.", ' 遥控选择再来一局或切换游戏。')}
+          <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 text-[#00C2FF] animate-spin shrink-0" aria-hidden="true" />
+            <span>
+              {t('Waiting for', '等待')}{' '}
+              <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+              {activeTournament
+                ? t("'s remote for next tournament game.", ' 遥控进入下一局锦标赛。')
+                : t("'s remote to play again or switch games.", ' 遥控选择再来一局或切换游戏。')}
+            </span>
           </p>
         )}
       </div>
@@ -3139,9 +3174,12 @@ export function PhoneController({
             )}
           </div>
         ) : (
-          <p className="text-xs text-[#9CA3AF]">
-            {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
-            <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+          <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+            <span>
+              {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
+              <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+            </span>
           </p>
         )}
       </div>
@@ -3343,16 +3381,21 @@ export function PhoneController({
               </span>
             </button>
 
-            <p className="text-[11px] text-center text-[#A5AEBD] leading-snug">
-              {me.ready
-                ? t(
-                    `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
-                    `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
-                  )
-                : t(
-                    'Read the rules at your own pace — game starts once everyone taps Ready!',
-                    '慢慢看规则 — 所有人点击「我准备好了」后即刻开始！'
-                  )}
+            <p className="text-[11px] text-center text-[#A5AEBD] leading-snug inline-flex items-center justify-center gap-1.5">
+              {me.ready && (
+                <Loader2 className="w-3.5 h-3.5 text-[#10D98B] animate-spin shrink-0" aria-hidden="true" />
+              )}
+              <span>
+                {me.ready
+                  ? t(
+                      `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
+                      `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
+                    )
+                  : t(
+                      'Read the rules at your own pace — game starts once everyone taps Ready!',
+                      '慢慢看规则 — 所有人点击「我准备好了」后即刻开始！'
+                    )}
+              </span>
             </p>
           </div>
         </div>
@@ -3637,8 +3680,9 @@ export function PhoneController({
               </button>
             )}
             {!wsConnected && (
-              <span className="text-[11px] font-semibold text-[#FFB800]">
-                {t('Reconnecting...', '正在重连...')}
+              <span className="text-[11px] font-semibold text-[#FFB800] inline-flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+                <span>{t('Reconnecting...', '正在重连...')}</span>
               </span>
             )}
             {!embedded && (

@@ -188,10 +188,31 @@ function drawInstantStudioFallback(
   ctx.textBaseline = 'middle';
   ctx.fillText('P1', p1x, p1y + 2);
 
-  // Subtle loading indicator text
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  // Circular loading spinner + subtle loading indicator text
+  const labelText = isZh ? '实机画面加载中…' : 'Loading live game scene…';
   ctx.font = '700 22px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(isZh ? '实机画面加载中…' : 'Loading live game scene…', W / 2, H - 56);
+  const textWidth = ctx.measureText(labelText).width;
+  const spinnerR = 11;
+  const groupX = W / 2 - textWidth / 2 - 18;
+  const groupY = H - 56;
+  const spinAngle = progress * Math.PI * 4;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.arc(groupX, groupY, spinnerR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = accentHex;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(groupX, groupY, spinnerR, spinAngle, spinAngle + Math.PI * 1.35);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.68)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(labelText, groupX + 20, groupY);
   ctx.restore();
 }
 

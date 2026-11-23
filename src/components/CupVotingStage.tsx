@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Clock, Crown, Play, Sparkles, Trophy, Vote, Users } from 'lucide-react';
+import { Check, Clock, Crown, Loader2, Play, Sparkles, Trophy, Vote, Users } from 'lucide-react';
 import { getGameMeta } from '../shared/games';
 import { getTeamSpec, TEAM_MODE_OPTIONS } from '../shared/party';
 import type { GameId, RoomSnapshot } from '../shared/types';
@@ -164,15 +164,22 @@ export function CupVotingStage({
             )}
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-[#9CA3AF]">
-            {isLocked
-              ? t(
-                  'Launching rules briefing in a moment...',
-                  '正在进入玩法说明，请准备就绪...'
-                )
-              : t(
-                  'All 3 candidates are playing live 5-second gameplay previews — tap your favorite on your phone!',
-                  '3 款候选游戏均在实时播放 5 秒实机画面 — 在手机上点击你最想玩的一款！'
-                )}
+            {isLocked ? (
+              <span className="inline-flex items-center justify-center gap-1.5 text-[#6EE7B7] font-semibold">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+                <span>
+                  {t(
+                    'Launching rules briefing in a moment...',
+                    '正在进入玩法说明，请准备就绪...'
+                  )}
+                </span>
+              </span>
+            ) : (
+              t(
+                'All 3 candidates are playing live 5-second gameplay previews — tap your favorite on your phone!',
+                '3 款候选游戏均在实时播放 5 秒实机画面 — 在手机上点击你最想玩的一款！'
+              )
+            )}
           </p>
         </div>
 

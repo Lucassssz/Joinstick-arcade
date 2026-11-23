@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Flame,
   Gamepad2,
+  Loader2,
   Lock,
   Maximize2,
   Minimize2,
@@ -1151,10 +1152,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   if (!room) {
     return (
       <div className="min-h-screen bg-[#121419] text-[#F4F6FA] flex flex-col items-center justify-center p-6">
-        <div className="font-display text-2xl font-bold">
+        <div className="relative mb-5 flex items-center justify-center" role="status" aria-live="polite">
+          <div
+            aria-hidden="true"
+            className="w-14 h-14 rounded-full border-4 border-[#262C38] border-t-[#00C2FF] border-r-[#00C2FF]/35 animate-spin"
+          />
+          <span className="sr-only">{t('Loading', '加载中')}</span>
+        </div>
+        <div className="font-display text-2xl font-bold text-center">
           {t('Creating Game Room...', '正在创建游戏房间...')}
         </div>
-        <p className="mt-2 text-sm text-[#9CA3AF]">
+        <p className="mt-2 text-sm text-[#9CA3AF] text-center">
           {t('Connecting to live multiplayer server', '正在连接实时多人服务器')}
         </p>
       </div>
@@ -1332,18 +1340,19 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 {t('JoinStick Party Stage', 'JoinStick 派对舞台')}
               </span>
               <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF] shrink-0">
-                <span
-                  className={`w-2 h-2 rounded-full ${!showDisconnectBanner ? 'bg-[#10D98B]' : 'bg-[#FFB800] animate-pulse'}`}
-                />
                 {!showDisconnectBanner ? (
-                  t('Live Room Open', '房间已开启')
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-[#10D98B]" />
+                    {t('Live Room Open', '房间已开启')}
+                  </>
                 ) : (
                   <button
                     type="button"
                     onClick={() => wsRef.current?.reconnectNow(true)}
-                    className="text-[#FFB800] hover:text-white underline underline-offset-2 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-[#FFB800] hover:text-white underline underline-offset-2 cursor-pointer"
                   >
-                    {t('Reconnecting... Tap to retry', '正在重连... 点击重试')}
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+                    <span>{t('Reconnecting... Tap to retry', '正在重连... 点击重试')}</span>
                   </button>
                 )}
               </span>
@@ -1472,7 +1481,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       className="w-full h-full object-contain"
                     />
                   ) : (
-                    <div className="text-xs text-[#6B7280]">{t('Loading QR...', '加载二维码...')}</div>
+                    <div className="flex flex-col items-center gap-2 text-xs text-[#6B7280]">
+                      <Loader2 className="w-6 h-6 text-[#00C2FF] animate-spin" aria-hidden="true" />
+                      <span>{t('Loading QR...', '加载二维码...')}</span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1633,8 +1645,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 >
                   <Smartphone className="w-8 h-8" />
                 </motion.div>
-                <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
-                  {t('Waiting for players to join...', '等待玩家加入...')}
+                <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white inline-flex items-center justify-center gap-2.5">
+                  <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 text-[#00C2FF] animate-spin shrink-0" aria-hidden="true" />
+                  <span>{t('Waiting for players to join...', '等待玩家加入...')}</span>
                 </h2>
                 <p className="mt-2 text-sm text-[#A5AEBD]">
                   {t(
@@ -1812,7 +1825,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                                 {player.isBot
                                   ? t('AI Robot · Always Ready', 'AI 机器人 · 自动准备')
                                   : !player.connected
-                                  ? t('Disconnected · Reconnecting...', '已断开 · 等待重连中...')
+                                  ? (
+                                    <span className="inline-flex items-center gap-1 text-[#FFB800]">
+                                      <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden="true" />
+                                      <span>{t('Disconnected · Reconnecting...', '已断开 · 等待重连中...')}</span>
+                                    </span>
+                                  )
                                   : isHost
                                   ? t('Room Host · Can start games', '房主 · 可遥控选游并开始')
                                   : t('Phone Controller Connected', '手机手柄已连接')}
@@ -1902,7 +1920,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 onClick={() => wsRef.current?.reconnectNow(true)}
                 className="inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
               >
-                <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" />
+                <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+                <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" aria-hidden="true" />
                 <span className="text-[#FF9B8A]">
                   {t('Reconnecting... Click to retry', '服务器重连中... 点击重试')}
                 </span>
@@ -2484,7 +2503,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   onClick={() => wsRef.current?.reconnectNow(true)}
                   className="inline-flex items-center gap-1.5 text-[#FF9B8A] truncate cursor-pointer"
                 >
-                  <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" />
+                  <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+                  <WifiOff className="w-3.5 h-3.5 text-[#FF4D2E] shrink-0" aria-hidden="true" />
                   <span>{t('Reconnecting... Tap to retry', '重连中... 点击重试')}</span>
                 </button>
               ) : activeHostPlayer ? (
@@ -2723,12 +2743,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               </div>
 
               {unreadyHumans.length > 0 && (
-                <div className="mt-2.5 p-2.5 rounded-xl bg-[#FFB800]/12 border border-[#FFB800]/35 text-[11px] text-[#FDE68A] leading-snug shrink-0">
-                  {t('Waiting for', '等待')}{' '}
-                  <strong className="text-white">
-                    {unreadyHumans.map((p) => p.name).join(lang === 'zh' ? '、' : ', ')}
-                  </strong>{' '}
-                  {t('to press Ready on their phone.', '在手机上点击「准备」。')}
+                <div className="mt-2.5 p-2.5 rounded-xl bg-[#FFB800]/12 border border-[#FFB800]/35 text-[11px] text-[#FDE68A] leading-snug shrink-0 flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+                  <span>
+                    {t('Waiting for', '等待')}{' '}
+                    <strong className="text-white">
+                      {unreadyHumans.map((p) => p.name).join(lang === 'zh' ? '、' : ', ')}
+                    </strong>{' '}
+                    {t('to press Ready on their phone.', '在手机上点击「准备」。')}
+                  </span>
                 </div>
               )}
 
@@ -3004,7 +3027,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               onClick={() => wsRef.current?.reconnectNow(true)}
               className="h-8 px-2.5 rounded-lg bg-[#FF4D2E]/20 border border-[#FF4D2E]/50 text-[#FF9B8A] hover:text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
-              <WifiOff className="w-3.5 h-3.5" />
+              <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+              <WifiOff className="w-3.5 h-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">{t('Reconnect', '点击重连')}</span>
             </button>
           )}
