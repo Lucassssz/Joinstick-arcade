@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { ARENA_HEIGHT, ARENA_WIDTH, type GameId, type GameSnapshot } from '../shared/types';
 import { ensureGameRendererLoaded } from '../games/rendererRegistry';
 import { createRenderFxState, renderGameSnapshot } from '../games/renderers';
@@ -13,8 +14,9 @@ interface DemoClipPayload {
 }
 
 // Strict browser LRU clip cache so browsing 150 games never leaks RAM
-const MAX_CLIENT_CLIP_CACHE = 14;
+const MAX_CLIENT_CLIP_CACHE = 18;
 const clipCache = new Map<GameId, DemoClipPayload>();
+const inflightClips = new Map<GameId, Promise<DemoClipPayload | null>>();
 
 function getCachedClip(gameId: GameId): DemoClipPayload | null {
   const hit = clipCache.get(gameId);
@@ -42,21 +44,43 @@ async function fetchDemoClip(
   const cached = getCachedClip(gameId);
   if (cached) return cached;
 
-  try {
-    const [resp] = await Promise.all([
-      fetch(`/api/demo-clip/${encodeURIComponent(gameId)}`, { signal }),
-      ensureGameRendererLoaded(gameId),
-    ]);
-    if (!resp.ok || signal?.aborted) return null;
-    const data = (await resp.json()) as DemoClipPayload;
-    if (!data || !Array.isArray(data.frames) || data.frames.length === 0) {
-      return null;
-    }
-    putCachedClip(gameId, data);
-    return data;
-  } catch {
-    return null;
+  let task = inflightClips.get(gameId);
+  if (!task) {
+    task = (async () => {
+      try {
+        const [resp] = await Promise.all([
+          fetch(`/api/demo-clip/${encodeURIComponent(gameId)}`),
+          ensureGameRendererLoaded(gameId),
+        ]);
+        if (!resp.ok) return null;
+        const data = (await resp.json()) as DemoClipPayload;
+        if (!data || !Array.isArray(data.frames) || data.frames.length === 0) {
+          return null;
+        }
+        putCachedClip(gameId, data);
+        return data;
+      } catch {
+        return null;
+      } finally {
+        inflightClips.delete(gameId);
+      }
+    })();
+    inflightClips.set(gameId, task);
   }
+
+  const result = await task;
+  if (signal?.aborted) return null;
+  return result;
+}
+
+export function isDemoClipReady(gameId: GameId): boolean {
+  return clipCache.has(gameId);
+}
+
+export async function preloadDemoClip(gameId: GameId): Promise<boolean> {
+  if (getCachedClip(gameId)) return true;
+  const loaded = await fetchDemoClip(gameId);
+  return Boolean(loaded);
 }
 
 interface GameHoverPreviewProps {
@@ -235,6 +259,29 @@ export function GameHoverPreview({
           showCanvas ? 'opacity-100' : 'opacity-0'
         }`}
       />
+
+      {/* Buffering Progress Sweep while active 5s clip streams in */}
+      {active && !showCanvas && (
+        <>
+          <div
+            className={`pointer-events-none absolute z-10 px-2 py-0.5 rounded-md bg-[#0B0E16]/85 backdrop-blur-xs border border-white/15 font-mono text-[10px] font-bold text-[#00C2FF] inline-flex items-center gap-1 shadow ${
+              timecodePosition === 'bottom-right' ? 'bottom-3 right-3' : 'top-3 right-3'
+            }`}
+          >
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span>{lang === 'zh' ? '加载实机演示' : 'Loading 5s clip'}</span>
+          </div>
+
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-1 bg-black/60 overflow-hidden">
+            <div
+              className="h-full w-1/2 rounded-full card-loading-sweep"
+              style={{
+                background: `linear-gradient(90deg, transparent, ${accentHex}, #00C2FF, transparent)`,
+              }}
+            />
+          </div>
+        </>
+      )}
 
       {/* Sleek 5-Second Preview Timecode + Progress Bar */}
       {showCanvas && (

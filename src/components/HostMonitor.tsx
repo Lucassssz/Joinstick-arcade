@@ -44,8 +44,9 @@ import {
   PLAYER_FILTER_OPTIONS,
 } from '../shared/games';
 import { getPadTutorialGuide } from '../shared/padProfiles';
-import { GameHoverPreview } from './GameHoverPreview';
+import { GameHoverPreview, preloadDemoClip } from './GameHoverPreview';
 import { GameThumbnail } from './GameThumbnail';
+import { preloadRuleClips } from './WatchAndPlayCardCanvas';
 import { BriefingTutorialCard } from './BriefingTutorialCard';
 import { GameTutorialOverlay } from './GameTutorialOverlay';
 import { CupVotingStage } from './CupVotingStage';
@@ -802,6 +803,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       if (!neighbor) continue;
       preloadGameRenderer(neighbor.id);
       void getStylizedGameThumbnail(neighbor.id, neighbor.accentHex, getGameGenre(neighbor.id));
+      void preloadDemoClip(neighbor.id);
+      void preloadRuleClips(neighbor.id);
     }
   }, [room?.status, room?.lobbyFilter, room?.selectedGameId]);
 

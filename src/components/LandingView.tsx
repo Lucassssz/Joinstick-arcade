@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowRight,
-  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Dices,
   Gamepad2,
-  Info,
   Lock,
+  Pause,
   Play,
   QrCode,
   Search,
@@ -13,7 +14,6 @@ import {
   Users,
   X,
   Zap,
-  Sparkles,
 } from 'lucide-react';
 import {
   filterGamesByPlayerMode,
@@ -31,26 +31,45 @@ import {
   useLanguage,
 } from '../lib/i18n';
 import { preloadGameRenderer } from '../games/rendererRegistry';
-import { GameHoverPreview } from './GameHoverPreview';
-import { GameThumbnail } from './GameThumbnail';
-import { GameTutorialOverlay } from './GameTutorialOverlay';
+import { getStylizedGameThumbnail } from '../games/thumbnailGenerator';
+import { GameHoverPreview, preloadDemoClip } from './GameHoverPreview';
+import { preloadRuleClips } from './WatchAndPlayCardCanvas';
+import { RuleAnimationCard } from './RuleAnimationCard';
+import { GameShowcaseCard } from './GameShowcaseCard';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
   onJoinController: (initialCode?: string) => void;
 }
 
-const GAMES_PAGE_SIZE = 18;
-
 export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) {
   const { lang, t } = useLanguage();
   const [quickCode, setQuickCode] = useState('');
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [visibleCount, setVisibleCount] = useState(GAMES_PAGE_SIZE);
   const [previewGameId, setPreviewGameId] = useState<GameId | null>(null);
-  const [showTutorialOverlay, setShowTutorialOverlay] = useState(false);
   const [hoveredGameId, setHoveredGameId] = useState<GameId | null>(null);
+
+  // Horizontal Auto-Scrolling Games Rail State
+  const gamesRailRef = useRef<HTMLDivElement | null>(null);
+  const [railRootEl, setRailRootEl] = useState<HTMLDivElement | null>(null);
+  const setGamesRailNode = useCallback((node: HTMLDivElement | null) => {
+    gamesRailRef.current = node;
+    setRailRootEl((prev) => (prev === node ? prev : node));
+  }, []);
+  const virtualScrollLeftRef = useRef(0);
+  const manualPauseUntilRef = useRef(0);
+  const endDwellUntilRef = useRef(0);
+  const isHoveringRailRef = useRef(false);
+  const pointerDragRef = useRef<{
+    active: boolean;
+    startX: number;
+    startScrollLeft: number;
+    moved: boolean;
+  }>({ active: false, startX: 0, startScrollLeft: 0, moved: false });
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [manualPaused, setManualPaused] = useState(false);
+  const [activeScrollIdx, setActiveScrollIdx] = useState(0);
 
   // PIN Protection State for Host / Create Room
   const [showPinModal, setShowPinModal] = useState(false);
@@ -244,20 +263,162 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
       .map((item) => item.loc);
   }, [playerFilter, searchQuery, lang]);
 
+  const syncActiveCardFromRail = useCallback(() => {
+    const el = gamesRailRef.current;
+    if (!el) return;
+    const cards = el.querySelectorAll<HTMLElement>('[data-game-card-idx]');
+    if (cards.length === 0) return;
+
+    const viewportCenter = el.scrollLeft + el.clientWidth * 0.5;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      const cardCenter = card.offsetLeft + card.offsetWidth * 0.5;
+      const d = Math.abs(cardCenter - viewportCenter);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    setActiveScrollIdx((prev) => (prev === bestIdx ? prev : bestIdx));
+  }, []);
+
+  // Reset rail position when category filter or search changes
   useEffect(() => {
-    setVisibleCount(GAMES_PAGE_SIZE);
+    setActiveScrollIdx(0);
+    setHoveredGameId(null);
+    virtualScrollLeftRef.current = 0;
+    endDwellUntilRef.current = 0;
+    const el = gamesRailRef.current;
+    if (el) {
+      el.scrollLeft = 0;
+    }
   }, [playerFilter, searchQuery]);
 
-  const visibleGames = useMemo(
-    () => filteredGames.slice(0, visibleCount),
-    [filteredGames, visibleCount]
-  );
+  // Predictive warming while scrolling — mirrors HostMonitor's game-chooser preloader
+  // so the next coming games already have their thumbnail, 5s demo clip, and rule clips ready
+  useEffect(() => {
+    if (filteredGames.length === 0) return;
+    const hoveredIdx = hoveredGameId
+      ? filteredGames.findIndex((g) => g.id === hoveredGameId)
+      : -1;
+    const pivot = hoveredIdx >= 0 ? hoveredIdx : Math.min(activeScrollIdx, filteredGames.length - 1);
+    const total = filteredGames.length;
+    const offsets = [0, 1, 2, 3, -1];
+    const seen = new Set<GameId>();
+
+    for (const offset of offsets) {
+      const idx = ((pivot + offset) % total + total) % total;
+      const target = filteredGames[idx];
+      if (!target || seen.has(target.id)) continue;
+      seen.add(target.id);
+      preloadGameRenderer(target.id);
+      void getStylizedGameThumbnail(target.id, target.accentHex, getGameGenre(target.id));
+      preloadDemoClip(target.id);
+      preloadRuleClips(target.id);
+    }
+  }, [filteredGames, activeScrollIdx, hoveredGameId]);
+
+  // Smooth automatic horizontal scrolling when no manual scroll or interaction is detected
+  useEffect(() => {
+    if (!autoScrollEnabled || filteredGames.length <= 1 || previewGameId) return;
+    const reducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) return;
+
+    let rafId = 0;
+    let lastTs = performance.now();
+    let syncAccumulator = 0;
+
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, Math.max(0, (now - lastTs) / 1000));
+      lastTs = now;
+
+      const el = gamesRailRef.current;
+      const isPaused =
+        !el ||
+        document.hidden ||
+        isHoveringRailRef.current ||
+        pointerDragRef.current.active ||
+        now < manualPauseUntilRef.current;
+
+      if (isPaused) {
+        if (el) virtualScrollLeftRef.current = el.scrollLeft;
+        const shouldShowManualPause =
+          isHoveringRailRef.current || pointerDragRef.current.active || now < manualPauseUntilRef.current;
+        setManualPaused((prev) => (prev === shouldShowManualPause ? prev : shouldShowManualPause));
+      } else {
+        setManualPaused((prev) => (prev ? false : prev));
+        const maxScroll = el.scrollWidth - el.clientWidth;
+        if (maxScroll > 8) {
+          if (now < endDwellUntilRef.current) {
+            rafId = requestAnimationFrame(tick);
+            return;
+          }
+          if (virtualScrollLeftRef.current >= maxScroll - 1) {
+            virtualScrollLeftRef.current = 0;
+            el.scrollLeft = 0;
+            syncActiveCardFromRail();
+          } else {
+            virtualScrollLeftRef.current = Math.min(
+              maxScroll,
+              virtualScrollLeftRef.current + 54 * dt
+            );
+            el.scrollLeft = virtualScrollLeftRef.current;
+            if (virtualScrollLeftRef.current >= maxScroll - 1) {
+              endDwellUntilRef.current = now + 1200;
+            }
+          }
+          syncAccumulator += dt;
+          if (syncAccumulator >= 0.12) {
+            syncAccumulator = 0;
+            syncActiveCardFromRail();
+          }
+        }
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [autoScrollEnabled, filteredGames.length, previewGameId, syncActiveCardFromRail]);
+
+  const markManualScroll = (pauseMs = 2800) => {
+    manualPauseUntilRef.current = performance.now() + pauseMs;
+    setManualPaused(true);
+  };
+
+  const scrollRailByCards = (dir: -1 | 1) => {
+    const el = gamesRailRef.current;
+    if (!el) return;
+    markManualScroll(4000);
+    const step = Math.min(el.clientWidth * 0.85, 680);
+    const targetLeft = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, el.scrollLeft + dir * step));
+    virtualScrollLeftRef.current = targetLeft;
+    el.scrollTo({ left: targetLeft, behavior: 'smooth' });
+  };
+
+  const handleOpenCardDetails = useCallback((gameId: GameId) => {
+    if (pointerDragRef.current.moved) {
+      pointerDragRef.current.moved = false;
+      return;
+    }
+    preloadGameRenderer(gameId);
+    void preloadDemoClip(gameId);
+    void preloadRuleClips(gameId);
+    setPreviewGameId(gameId);
+  }, []);
 
   const handleSurpriseMe = () => {
     const pool = filteredGames.length > 0 ? filteredGames : GAME_CATALOG;
     if (pool.length === 0) return;
     const pick = pool[Math.floor(Math.random() * pool.length)];
     preloadGameRenderer(pick.id);
+    void preloadDemoClip(pick.id);
+    void preloadRuleClips(pick.id);
     setPreviewGameId(pick.id);
   };
 
@@ -269,6 +430,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
   useEffect(() => {
     if (!previewGameId) return;
     preloadGameRenderer(previewGameId);
+    preloadDemoClip(previewGameId);
+    preloadRuleClips(previewGameId);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setPreviewGameId(null);
@@ -781,109 +944,142 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             </div>
           ) : (
             <>
-              {/* Uniform Card Grid for the Main Catalogue */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                {visibleGames.map((game) => {
+              {/* Rail Controls & Spotlight Counter */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3 text-xs text-[#9CA3AF]">
+                  <span className="font-mono font-bold text-white tabular-nums">
+                    {String(Math.min(activeScrollIdx + 1, filteredGames.length)).padStart(2, '0')} /{' '}
+                    {String(filteredGames.length).padStart(2, '0')}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {autoScrollEnabled && !manualPaused
+                      ? t('Auto-scrolling · Hover or scroll manually to pause', '自动横向滚动中 · 悬停或手动滑动即暂停')
+                      : manualPaused && autoScrollEnabled
+                      ? t('Paused during manual browse · Preloading next games', '手动浏览暂停中 · 正在预加载后续游戏')
+                      : t('Auto-scroll paused · Click a card for rules & animated demo', '自动滚动已暂停 · 点击卡片查看规则与动画演示')}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setAutoScrollEnabled((prev) => !prev)}
+                    className="h-9 px-3 rounded-xl bg-[#141A26] hover:bg-[#1E2636] border border-[#222B3B] text-xs font-semibold text-[#D1D5DB] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+                  >
+                    {autoScrollEnabled ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5 text-[#00C2FF]" />
+                        <span>{t('Pause Scroll', '暂停滚动')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 text-[#10D98B] fill-current" />
+                        <span>{t('Auto Scroll', '自动滚动')}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => scrollRailByCards(-1)}
+                    aria-label={t('Scroll games left', '向左滚动游戏')}
+                    className="h-9 w-9 rounded-xl bg-[#141A26] hover:bg-[#1E2636] border border-[#222B3B] text-white inline-flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => scrollRailByCards(1)}
+                    aria-label={t('Scroll games right', '向右滚动游戏')}
+                    className="h-9 w-9 rounded-xl bg-[#141A26] hover:bg-[#1E2636] border border-[#222B3B] text-white inline-flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Horizontal Auto-Scrolling Game Rail (Zero Play Buttons on Cards) */}
+              <div
+                ref={setGamesRailNode}
+                onMouseEnter={() => {
+                  isHoveringRailRef.current = true;
+                }}
+                onMouseLeave={() => {
+                  isHoveringRailRef.current = false;
+                  pointerDragRef.current.active = false;
+                  setHoveredGameId(null);
+                }}
+                onScroll={() => {
+                  const el = gamesRailRef.current;
+                  if (!el) return;
+                  if (Math.abs(el.scrollLeft - virtualScrollLeftRef.current) > 3.5) {
+                    virtualScrollLeftRef.current = el.scrollLeft;
+                    markManualScroll(2800);
+                  }
+                  syncActiveCardFromRail();
+                }}
+                onWheel={(e) => {
+                  if (Math.abs(e.deltaX) > 2 || e.shiftKey) {
+                    markManualScroll(2800);
+                  }
+                }}
+                onTouchStart={() => markManualScroll(3200)}
+                onPointerDown={(e) => {
+                  const el = gamesRailRef.current;
+                  if (!el || e.button !== 0) return;
+                  pointerDragRef.current = {
+                    active: true,
+                    startX: e.clientX,
+                    startScrollLeft: el.scrollLeft,
+                    moved: false,
+                  };
+                }}
+                onPointerMove={(e) => {
+                  const el = gamesRailRef.current;
+                  const drag = pointerDragRef.current;
+                  if (!el || !drag.active) return;
+                  const dx = e.clientX - drag.startX;
+                  if (Math.abs(dx) > 6) {
+                    drag.moved = true;
+                    markManualScroll(3000);
+                    const nextLeft = drag.startScrollLeft - dx;
+                    el.scrollLeft = nextLeft;
+                    virtualScrollLeftRef.current = el.scrollLeft;
+                    syncActiveCardFromRail();
+                  }
+                }}
+                onPointerUp={() => {
+                  pointerDragRef.current.active = false;
+                }}
+                className="flex gap-5 overflow-x-auto pb-4 pt-1 select-none arcade-scrollbar cursor-grab active:cursor-grabbing"
+              >
+                {filteredGames.map((game, idx) => {
                   const isCardHovered = hoveredGameId === game.id;
-                  const padGuide = getPadTutorialGuide(game.id, lang);
+                  const isSpotlight = hoveredGameId ? isCardHovered : idx === activeScrollIdx;
+                  const isNearSpotlight = Math.abs(idx - activeScrollIdx) <= 4;
+
                   return (
-                    <article
+                    <GameShowcaseCard
                       key={game.id}
-                      onMouseEnter={() => {
-                        preloadGameRenderer(game.id);
-                        setHoveredGameId(game.id);
+                      game={game}
+                      index={idx}
+                      isSpotlight={isSpotlight}
+                      isNearSpotlight={isNearSpotlight}
+                      railRoot={railRootEl}
+                      onHoverChange={(id) => {
+                        if (id) {
+                          setHoveredGameId(id);
+                        } else {
+                          setHoveredGameId((prev) => (prev === game.id ? null : prev));
+                        }
                       }}
-                      onMouseLeave={() => {
-                        setHoveredGameId((prev) => (prev === game.id ? null : prev));
-                      }}
-                      className="group rounded-2xl bg-[#141A26] border border-[#20293B] overflow-hidden flex flex-col justify-between transition-all hover:border-[#00C2FF]/60 hover:-translate-y-1 shadow-lg"
-                    >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setPreviewGameId(game.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setPreviewGameId(game.id);
-                          }
-                        }}
-                        aria-label={t(`View rules for ${game.name}`, `查看 ${game.name} 规则`)}
-                        className="cursor-pointer focus:outline-none"
-                      >
-                        <div className="relative aspect-video w-full bg-[#0B0E14] overflow-hidden">
-                          <GameHoverPreview
-                            gameId={game.id}
-                            gameName={game.name}
-                            accentHex={game.accentHex}
-                            fallbackSrc={game.coverImage}
-                            alt={game.name}
-                            active={isCardHovered}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          />
-                          <span className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-[#0B0E14]/85 text-[#00C2FF] font-mono text-[10px] font-extrabold uppercase border border-[#00C2FF]/30">
-                            {getLocalizedFilterLabel(getGameGenre(game.id), lang, true)}
-                          </span>
-                        </div>
-
-                        <div className="p-5">
-                          <div className="text-xs font-medium text-[#9CA3AF] flex items-center gap-2">
-                            <span>{game.category}</span>
-                            <span aria-hidden="true">·</span>
-                            <span className="text-[#D1D5DB] tabular-nums">{game.playerModeLabel}</span>
-                          </div>
-
-                          <h3 className="mt-1 font-display text-xl font-bold text-white group-hover:text-[#00C2FF] transition-colors">
-                            {game.name}
-                          </h3>
-
-                          <p className="mt-1.5 text-xs text-[#9CA3AF] line-clamp-2">
-                            {game.description}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="px-5 pb-5 pt-2 border-t border-[#1F2633] flex items-center justify-between gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setPreviewGameId(game.id)}
-                          className="text-xs font-semibold text-[#9CA3AF] hover:text-white inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Info className="w-3.5 h-3.5" />
-                          <span>{t('Details', '详情')}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => requestHost(game.id)}
-                          className="tactile-btn h-9 px-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold text-xs shadow-[0_2px_0_#B82E17] inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>{t('Play', '游玩')}</span>
-                        </button>
-                      </div>
-                    </article>
+                      onOpenDetails={handleOpenCardDetails}
+                    />
                   );
                 })}
               </div>
-
-              {visibleCount < filteredGames.length && (
-                <div className="mt-10 text-center">
-                  <button
-                    type="button"
-                    onClick={() => setVisibleCount((prev) => prev + GAMES_PAGE_SIZE)}
-                    className="tactile-btn h-11 px-6 rounded-xl bg-[#151B26] hover:bg-[#1E2636] border border-[#2A354A] text-sm font-bold text-white inline-flex items-center gap-2 cursor-pointer shadow"
-                  >
-                    <ChevronDown className="w-4 h-4 text-[#00C2FF]" />
-                    <span>
-                      {t(
-                        `Show More Games (${filteredGames.length - visibleCount} remaining)`,
-                        `加载更多游戏（还有 ${filteredGames.length - visibleCount} 款）`
-                      )}
-                    </span>
-                  </button>
-                </div>
-              )}
             </>
           )}
         </section>
@@ -1059,35 +1255,47 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
         </div>
       )}
 
-      {/* Game Details & Rules Preview Modal */}
+      {/* Unified Game Details, Live 5s Preview & Animated Rules Modal */}
       {previewGame && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="game-intro-title"
           onClick={() => setPreviewGameId(null)}
-          className="fixed inset-0 z-50 bg-[#0B0E14]/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-[#0B0E14]/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-w-3xl w-full rounded-3xl bg-[#151B26] border-2 border-[#2A354A] shadow-2xl overflow-hidden my-auto"
+            className="max-w-5xl w-full rounded-3xl bg-[#151B26] border-2 border-[#2A354A] shadow-2xl overflow-hidden my-auto"
           >
-            <div className="relative flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6 border-b border-[#20293B] bg-[#10141D]">
-              <div className="w-full sm:w-44 aspect-video rounded-xl overflow-hidden bg-[#0B0E14] border border-[#222B3B] shrink-0">
-                <GameThumbnail
+            {/* Header with Live 5s Gameplay Preview */}
+            <div className="relative flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5 border-b border-[#20293B] bg-[#10141D]">
+              <div className="w-full sm:w-52 aspect-video rounded-xl overflow-hidden bg-[#0B0E14] border border-[#222B3B] shrink-0">
+                <GameHoverPreview
                   gameId={previewGame.id}
                   gameName={previewGame.name}
                   accentHex={previewGame.accentHex}
                   fallbackSrc={previewGame.coverImage}
                   alt={previewGame.name}
-                  className="w-full h-full object-cover"
+                  active={true}
                   eager
+                  immediate
+                  timecodePosition="bottom-right"
+                  className="w-full h-full object-cover"
                 />
               </div>
 
-              <div className="min-w-0 flex-1 pr-8">
-                <div className="text-xs font-bold uppercase tracking-wider text-[#00C2FF]">
-                  {previewGame.category} · {previewGame.playerModeLabel}
+              <div className="min-w-0 flex-1 pr-9">
+                <div className="text-xs font-semibold text-[#00C2FF] flex items-center gap-2 flex-wrap">
+                  <span>{previewGame.category}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="tabular-nums">{previewGame.playerModeLabel}</span>
+                  {previewPadGuide && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span style={{ color: previewPadGuide.accentHex }}>{previewPadGuide.padTitle}</span>
+                    </>
+                  )}
                 </div>
                 <h2
                   id="game-intro-title"
@@ -1095,7 +1303,9 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                 >
                   {previewGame.name}
                 </h2>
-                <p className="text-sm text-[#D1D5DB] mt-1">{previewGame.tagline}</p>
+                <p className="text-xs sm:text-sm text-[#D1D5DB] mt-1 line-clamp-2">
+                  {previewGame.description}
+                </p>
               </div>
 
               <button
@@ -1108,71 +1318,17 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
               </button>
             </div>
 
-            <div className="p-5 sm:p-6 space-y-5 max-h-[68vh] overflow-y-auto">
-              <div className="rounded-2xl bg-[#0B0E14] border border-[#20293B] p-4 space-y-3">
-                <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-[#00C2FF] mb-1.5">
-                    {t('Game Introduction', '游戏简介')}
-                  </div>
-                  <p className="text-sm text-[#E5E7EB] leading-relaxed">
-                    {previewGame.description}
-                  </p>
-                </div>
-
-                {previewPadGuide && (
-                  <div className="pt-3 border-t border-[#1E2636] space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span
-                        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md font-display text-xs font-extrabold border"
-                        style={{
-                          color: previewPadGuide.accentHex,
-                          borderColor: `${previewPadGuide.accentHex}55`,
-                          backgroundColor: `${previewPadGuide.accentHex}18`,
-                        }}
-                      >
-                        <Gamepad2 className="w-3.5 h-3.5 shrink-0" />
-                        <span>{previewPadGuide.padTitle}</span>
-                      </span>
-                      <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-[#9CA3AF]">
-                        {previewPadGuide.presetTag}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#C7D0DE] leading-relaxed">
-                      <strong className="text-white">{t('Pad Usage:', '手柄适配：')}</strong>{' '}
-                      {previewPadGuide.tutorialText}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
-                    {t('How to Play', '玩法规则')}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowTutorialOverlay(true)}
-                    className="tactile-btn h-8 px-3 rounded-xl bg-[#00C2FF]/15 hover:bg-[#00C2FF]/25 border border-[#00C2FF]/50 text-[#00C2FF] font-display text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer shadow"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                    <span>{t('Watch Animated Tutorial', '观看动画教程 (5s)')}</span>
-                  </button>
-                </div>
-                <ul className="space-y-2.5 text-sm text-white">
-                  {previewGame.rules.map((rule, idx) => (
-                    <li key={idx} className="flex items-start gap-2.5 leading-snug">
-                      <span className="w-6 h-6 rounded-md font-mono text-xs font-black bg-[#1E2636] text-[#00C2FF] flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <span>{rule}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            {/* Single-Screen Rules List Beside Live 2s Rule Animation & 3s Phone Controller Demo */}
+            <div className="p-4 sm:p-5 max-h-[72vh] overflow-y-auto arcade-scrollbar">
+              <RuleAnimationCard
+                gameId={previewGame.id}
+                gameName={previewGame.name}
+                accentHex={previewGame.accentHex}
+                rules={previewGame.rules}
+              />
             </div>
 
-            <div className="px-5 sm:px-6 py-4 bg-[#10141D] border-t border-[#20293B] flex items-center justify-between gap-3">
+            <div className="px-4 sm:px-5 py-3.5 bg-[#10141D] border-t border-[#20293B] flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs text-[#9CA3AF]">
                 <span>{previewGame.settingLabel}: </span>
                 <strong className="text-white font-mono">
@@ -1184,7 +1340,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                 <button
                   type="button"
                   onClick={() => setPreviewGameId(null)}
-                  className="h-11 px-5 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-sm font-bold text-white cursor-pointer"
+                  className="h-10 px-5 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-sm font-bold text-white cursor-pointer"
                 >
                   {t('Close', '关闭')}
                 </button>
@@ -1195,31 +1351,15 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                     setPreviewGameId(null);
                     requestHost(targetId);
                   }}
-                  className="tactile-btn h-11 px-6 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
+                  className="tactile-btn h-10 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
                 >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>{t('Play (PIN)', '开始游玩 (需密码)')}</span>
+                  <Lock className="w-4 h-4" />
+                  <span>{t('Host Room (PIN)', '创建房间开玩')}</span>
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
-
-      {showTutorialOverlay && previewGame && (
-        <GameTutorialOverlay
-          gameId={previewGame.id}
-          gameName={previewGame.name}
-          accentHex={previewGame.accentHex}
-          rules={previewGame.rules}
-          onClose={() => setShowTutorialOverlay(false)}
-          onPlayNow={() => {
-            setShowTutorialOverlay(false);
-            const targetId = previewGame.id;
-            setPreviewGameId(null);
-            requestHost(targetId);
-          }}
-        />
       )}
     </div>
   );

@@ -12,8 +12,9 @@ interface RuleClipsPayload {
   segments: GameSnapshot[][];
 }
 
-const MAX_CLIENT_RULE_CLIP_CACHE = 16;
+const MAX_CLIENT_RULE_CLIP_CACHE = 18;
 const ruleClipCache = new Map<GameId, RuleClipsPayload>();
+const inflightRuleClips = new Map<GameId, Promise<RuleClipsPayload | null>>();
 
 function getCachedRuleClips(gameId: GameId): RuleClipsPayload | null {
   const hit = ruleClipCache.get(gameId);
@@ -40,21 +41,43 @@ async function fetchRuleClips(
   const cached = getCachedRuleClips(gameId);
   if (cached) return cached;
 
-  try {
-    const [resp] = await Promise.all([
-      fetch(`/api/rule-clips/${encodeURIComponent(gameId)}`, { signal }),
-      ensureGameRendererLoaded(gameId),
-    ]);
-    if (!resp.ok || signal?.aborted) return null;
-    const data = (await resp.json()) as RuleClipsPayload;
-    if (!data || !Array.isArray(data.segments) || data.segments.length === 0) {
-      return null;
-    }
-    putCachedRuleClips(gameId, data);
-    return data;
-  } catch {
-    return null;
+  let task = inflightRuleClips.get(gameId);
+  if (!task) {
+    task = (async () => {
+      try {
+        const [resp] = await Promise.all([
+          fetch(`/api/rule-clips/${encodeURIComponent(gameId)}`),
+          ensureGameRendererLoaded(gameId),
+        ]);
+        if (!resp.ok) return null;
+        const data = (await resp.json()) as RuleClipsPayload;
+        if (!data || !Array.isArray(data.segments) || data.segments.length === 0) {
+          return null;
+        }
+        putCachedRuleClips(gameId, data);
+        return data;
+      } catch {
+        return null;
+      } finally {
+        inflightRuleClips.delete(gameId);
+      }
+    })();
+    inflightRuleClips.set(gameId, task);
   }
+
+  const result = await task;
+  if (signal?.aborted) return null;
+  return result;
+}
+
+export function isRuleClipsReady(gameId: GameId): boolean {
+  return ruleClipCache.has(gameId);
+}
+
+export async function preloadRuleClips(gameId: GameId): Promise<boolean> {
+  if (getCachedRuleClips(gameId)) return true;
+  const loaded = await fetchRuleClips(gameId);
+  return Boolean(loaded);
 }
 
 interface WatchAndPlayCardCanvasProps {
