@@ -22,6 +22,8 @@ interface InternalFusePlayer extends FusePlayerState {
   shieldTimer: number;
   speedBuffTimer: number;
   padCd: number;
+  holdTicks: number;
+  caughtAt: number;
 }
 
 interface InternalPopup {
@@ -101,6 +103,8 @@ function spawnPlayers(
       shieldTimer: 0,
       speedBuffTimer: 0,
       padCd: 0,
+      holdTicks: 0,
+      caughtAt: 0,
       sprintCd: 0,
       lungeCd: 0,
       cooldownA: 0,
@@ -242,6 +246,8 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
       shieldTimer: 0,
       speedBuffTimer: 0,
       padCd: 0,
+      holdTicks: 0,
+      caughtAt: 0,
       sprintCd: 0,
       lungeCd: 0,
       cooldownA: 0,
@@ -258,6 +264,7 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
     const sounds: SoundEvent[] = [];
     const haptics: HapticTrigger[] = [];
     const inputMap = new Map(inputPlayers.map((p) => [p.id, p]));
+    const now = Date.now();
 
     for (let i = state.explosions.length - 1; i >= 0; i--) {
       const e = state.explosions[i];
@@ -464,6 +471,14 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
       // Check bomb pass collisions
       const holder = state.players.find((p) => p.id === state.bombHolderId && p.alive);
       if (holder) {
+        // Daredevil risk bonus while carrying the live bomb
+        holder.holdTicks += dt;
+        if (holder.holdTicks >= 0.9) {
+          holder.holdTicks -= 0.9;
+          holder.score += 6;
+          state.popups.push({ x: holder.x, y: holder.y - 34, text: '+6 DARE', colorHex: '#FF8A00', alpha: 0.9 });
+        }
+
         const reachBonus = holder.lungeTimer > 0 ? 18 : 0;
         for (const target of state.players) {
           if (!target.alive || target.id === holder.id || target.immuneTimer > 0) continue;
@@ -487,16 +502,22 @@ export const fusePassModule: ServerGameModule<FusePassInternalState> = {
             }
 
             const clutchPass = state.bombTimer <= 2.2;
-            const passPts = clutchPass ? 65 : 35;
+            const instantRebound = holder.caughtAt > 0 && now - holder.caughtAt < 1350;
+            const passPts = (clutchPass ? 65 : 35) + (instantRebound ? 20 : 0);
             holder.hasBomb = false;
+            holder.holdTicks = 0;
             holder.immuneTimer = PASS_IMMUNITY;
             holder.passes += 1;
             holder.score += passPts;
             if (clutchPass) {
-              state.popups.push({ x: holder.x, y: holder.y - 30, text: 'CLUTCH PASS! +65', colorHex: '#FFB800', alpha: 1 });
+              state.popups.push({ x: holder.x, y: holder.y - 30, text: `CLUTCH PASS! +${passPts}`, colorHex: '#FFB800', alpha: 1 });
+            } else if (instantRebound) {
+              state.popups.push({ x: holder.x, y: holder.y - 30, text: `REBOUND! +${passPts}`, colorHex: '#00C2FF', alpha: 1 });
             }
 
             target.hasBomb = true;
+            target.holdTicks = 0;
+            target.caughtAt = now;
             state.bombHolderId = target.id;
             if (state.bombTimer < 1.6) state.bombTimer = 1.6;
 

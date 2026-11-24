@@ -190,19 +190,24 @@ export const hoopBlitzModule: CompactGameModule<HoopState, HoopBlitzSnapshot> = 
       b.x += b.vx * dt;
       b.vy += 740 * dt;
       b.y += b.vy * dt;
-      if (!b.scored && b.vy > 0 && dist(b.x, b.y, state.hoopX, state.hoopY) < 44) {
+      const hoopDist = dist(b.x, b.y, state.hoopX, state.hoopY);
+      if (!b.scored && b.vy > 0 && hoopDist < 44) {
         b.scored = true;
         const owner = state.players.find((pl) => pl.id === b.ownerId);
         if (owner) {
           owner.made += 1;
           owner.streak += 1;
-          const pts = (b.moneyBall ? 160 : 100) + Math.min(4, owner.streak - 1) * 25;
+          const perfectSwish = hoopDist < 19;
+          const pts =
+            (b.moneyBall ? 160 : 100) +
+            Math.min(6, owner.streak - 1) * 30 +
+            (perfectSwish ? 30 : 0);
           owner.score += pts * mult;
           state.popups.push({
             x: state.hoopX,
             y: state.hoopY - 25,
-            text: `${b.moneyBall ? 'MONEY ' : 'SWISH '}+${pts * mult}!`,
-            colorHex: b.moneyBall ? '#FACC15' : owner.colorHex,
+            text: `${perfectSwish ? 'PERFECT ' : b.moneyBall ? 'MONEY ' : 'SWISH '}+${pts * mult}!`,
+            colorHex: perfectSwish ? '#10D98B' : b.moneyBall ? '#FACC15' : owner.colorHex,
             alpha: 1,
           });
           state.banner = owner.streak >= 3 ? `${owner.name} ON FIRE (${owner.streak}×)!` : `${owner.name} SWISH!`;

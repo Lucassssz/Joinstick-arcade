@@ -20,6 +20,7 @@ interface InternalPaintPlayer extends PaintPlayerState {
   wideTimer: number;
   turboTimer: number;
   bonusPts: number;
+  stealAccum: number;
 }
 
 interface PaintRushInternalState {
@@ -55,27 +56,30 @@ function paintCircle(
   cy: number,
   radiusPx: number,
   slotIndex: number
-): number {
+): { flipped: number; stolen: number } {
   const minCol = Math.max(0, Math.floor((cx - radiusPx) / CELL_W));
   const maxCol = Math.min(GRID_COLS - 1, Math.floor((cx + radiusPx) / CELL_W));
   const minRow = Math.max(0, Math.floor((cy - radiusPx) / CELL_H));
   const maxRow = Math.min(GRID_ROWS - 1, Math.floor((cy + radiusPx) / CELL_H));
 
   let flipped = 0;
+  let stolen = 0;
   for (let r = minRow; r <= maxRow; r++) {
     const cellCenterY = (r + 0.5) * CELL_H;
     for (let c = minCol; c <= maxCol; c++) {
       const cellCenterX = (c + 0.5) * CELL_W;
       if (Math.hypot(cellCenterX - cx, cellCenterY - cy) <= radiusPx) {
         const idx = r * GRID_COLS + c;
-        if (grid[idx] !== slotIndex) {
+        const prevOwner = grid[idx];
+        if (prevOwner !== slotIndex) {
+          if (prevOwner >= 0) stolen += 1;
           grid[idx] = slotIndex;
           flipped += 1;
         }
       }
     }
   }
-  return flipped;
+  return { flipped, stolen };
 }
 
 function recountTiles(state: PaintRushInternalState): void {
@@ -110,6 +114,7 @@ function spawnPaintPlayer(p: ServerPlayerInputState, idx: number, total: number)
     wideTimer: 0,
     turboTimer: 0,
     bonusPts: 0,
+    stealAccum: 0,
     splashCd: 0,
     slideCd: 0,
     cooldownA: 0,
@@ -286,7 +291,15 @@ export const paintRushModule: ServerGameModule<PaintRushInternalState> = {
         if (a && !src.prevA && p.splashCd <= 0) {
           p.splashCd = SPLASH_COOLDOWN;
           const splashRad = p.wideTimer > 0 ? SPLASH_RADIUS_PX * 1.25 : SPLASH_RADIUS_PX;
-          paintCircle(state.grid, p.x, p.y, splashRad, p.slotIndex);
+          const splashRes = paintCircle(state.grid, p.x, p.y, splashRad, p.slotIndex);
+          p.stealAccum += splashRes.stolen;
+          if (p.stealAccum >= 10) {
+            const batches = Math.floor(p.stealAccum / 10);
+            p.stealAccum %= 10;
+            const pts = batches * 15;
+            p.bonusPts += pts;
+            state.popups.push({ x: p.x, y: p.y - 24, text: `STEAL +${pts}!`, colorHex: '#FF8A00', alpha: 1 });
+          }
           state.splashes.push({
             x: p.x,
             y: p.y,
@@ -340,9 +353,19 @@ export const paintRushModule: ServerGameModule<PaintRushInternalState> = {
       p.x = Math.max(PLAYER_RADIUS, Math.min(ARENA_WIDTH - PLAYER_RADIUS, p.x + p.vx * dt));
       p.y = Math.max(PLAYER_RADIUS, Math.min(ARENA_HEIGHT - PLAYER_RADIUS, p.y + p.vy * dt));
 
-      // Paint cells under roller brush
+      // Paint cells under roller brush & reward turf steals from rivals
       const brushRadius = (p.slideTimer > 0 ? 52 : 38) * (p.wideTimer > 0 ? 1.65 : 1);
-      paintCircle(state.grid, p.x, p.y, brushRadius, p.slotIndex);
+      const rollRes = paintCircle(state.grid, p.x, p.y, brushRadius, p.slotIndex);
+      if (rollRes.stolen > 0) {
+        p.stealAccum += rollRes.stolen;
+        if (p.stealAccum >= 10) {
+          const batches = Math.floor(p.stealAccum / 10);
+          p.stealAccum %= 10;
+          const pts = batches * 15;
+          p.bonusPts += pts;
+          state.popups.push({ x: p.x, y: p.y - 22, text: `STEAL +${pts}!`, colorHex: '#FF8A00', alpha: 1 });
+        }
+      }
 
       // Check Golden Bonus Cells
       for (let bi = state.bonusCells.length - 1; bi >= 0; bi--) {

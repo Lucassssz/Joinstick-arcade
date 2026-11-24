@@ -6,6 +6,7 @@ import {
   type BotDifficulty,
   type CardPrivateState,
   type ClientMessage,
+  type CompetitiveSnapshot,
   type ControllerInput,
   type CupVoteState,
   type FrenzyState,
@@ -55,6 +56,12 @@ import {
 } from '../src/shared/modifiers.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
 import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
+import {
+  biasBotInputForCompetitiveDrops,
+  createCompetitiveState,
+  stepCompetitiveLayer,
+  type CompetitiveLayerState,
+} from './games/competitiveLayer.ts';
 
 const VALID_TEAM_MODES = new Set<TeamMode>(['ffa', 'teams-2', 'teams-3', 'teams-4', 'one-vs-all']);
 const CUP_VOTE_SECONDS = 15;
@@ -179,6 +186,8 @@ interface RoomRecord {
   players: Map<string, ConnectedPlayer>;
   gameState: unknown | null;
   lastSnapshot: GameSnapshot | null;
+  competitiveState: CompetitiveLayerState | null;
+  lastCompetitiveSnapshot: CompetitiveSnapshot | null;
   lastCardStateHashes: Map<string, string>;
   hapticTracker: HostHapticTracker;
   rankings: RankingEntry[];
@@ -615,8 +624,15 @@ export class RoomManager {
     }
   }
 
-  private broadcastTick(room: RoomRecord, snapshot: GameSnapshot, sounds: SoundEvent[]): void {
-    const msg: ServerMessage = { type: 'game:tick', snapshot, sounds };
+  private broadcastTick(
+    room: RoomRecord,
+    snapshot: GameSnapshot,
+    sounds: SoundEvent[],
+    competitive?: CompetitiveSnapshot | null
+  ): void {
+    const msg: ServerMessage = competitive
+      ? { type: 'game:tick', snapshot, competitive, sounds }
+      : { type: 'game:tick', snapshot, sounds };
     this.send(room.hostWs, msg);
   }
 
@@ -804,6 +820,8 @@ export class RoomManager {
           players: new Map(),
           gameState: null,
           lastSnapshot: null,
+          competitiveState: null,
+          lastCompetitiveSnapshot: null,
           lastCardStateHashes: new Map(),
           hapticTracker: createHostHapticTracker(),
           rankings: [],
@@ -2861,6 +2879,8 @@ export class RoomManager {
     room.hapticTracker = createHostHapticTracker();
     room.gameState = engine.createState(playerList, room.gameSettingValue);
     room.lastSnapshot = engine.getSnapshot(room.gameState);
+    room.competitiveState = createCompetitiveState(room.selectedGameId);
+    room.lastCompetitiveSnapshot = null;
     if (room.lastSnapshot) {
       this.seedHostHapticTracker(room, room.lastSnapshot);
     }
@@ -3006,12 +3026,20 @@ export class RoomManager {
       for (const p of room.players.values()) {
         if (p.isBot) {
           if (!p.botMemory) p.botMemory = createBotMemory();
-          p.input = computeBotInput(
+          const botDiff = p.botDifficulty ?? room.botDifficulty;
+          const baseInput = computeBotInput(
             room.lastSnapshot,
             p.id,
-            p.botDifficulty ?? room.botDifficulty,
+            botDiff,
             dt,
             p.botMemory
+          );
+          p.input = biasBotInputForCompetitiveDrops(
+            room.competitiveState,
+            room.lastSnapshot,
+            p.id,
+            botDiff,
+            baseInput
           );
         }
       }
@@ -3089,6 +3117,47 @@ export class RoomManager {
         this.trackCardSnapshotStats(room, prevSnapshot, result.snapshot, now);
       }
 
+      // Step Universal Competitive Layer (Golden Relics, 2x Hot Zones, Bounty Dethrones, Streaks)
+      let compSnap: CompetitiveSnapshot | null = room.lastCompetitiveSnapshot;
+      const tickSounds: SoundEvent[] = [...result.sounds];
+      const tickHaptics = [...result.haptics];
+      if (room.competitiveState && !result.finished) {
+        const feed = [...room.players.values()].map((p) => ({
+          id: p.id,
+          name: p.name,
+          rawScore: p.rawGameScore,
+          score: p.score,
+          alive: p.alive,
+          colorHex: p.color.hex,
+        }));
+        const compRes = stepCompetitiveLayer(
+          room.competitiveState,
+          feed,
+          result.snapshot,
+          simDt,
+          room.frenzy.active,
+          isTurnPacedGame
+        );
+        compSnap = compRes.snapshot;
+        room.lastCompetitiveSnapshot = compSnap;
+        if (compRes.bonusAwards.size > 0) {
+          for (const [pid, extraPts] of compRes.bonusAwards.entries()) {
+            const target = room.players.get(pid);
+            if (target && extraPts > 0) {
+              const prevTotal = target.score;
+              target.bonusScore += extraPts;
+              target.score = target.rawGameScore + target.bonusScore;
+              if (target.statText.includes(`${prevTotal}`)) {
+                target.statText = target.statText.replace(`${prevTotal}`, `${target.score}`);
+              }
+              liveScoreOrAliveChanged = true;
+            }
+          }
+        }
+        if (compRes.sounds.length > 0) tickSounds.push(...compRes.sounds);
+        if (compRes.haptics.length > 0) tickHaptics.push(...compRes.haptics);
+      }
+
       room.lastSnapshot = result.snapshot;
 
       // Check whether Frenzy Mode should erupt right now!
@@ -3105,7 +3174,7 @@ export class RoomManager {
           triggerCount: 1,
         };
         freezeBroadcastCounter = 0;
-        this.broadcastTick(room, result.snapshot, [...result.sounds, { type: 'frenzy' }]);
+        this.broadcastTick(room, result.snapshot, [...tickSounds, { type: 'frenzy' }], compSnap);
         for (const p of room.players.values()) {
           if (p.connected && !p.isBot && p.ws) {
             this.send(p.ws, {
@@ -3122,7 +3191,7 @@ export class RoomManager {
         return;
       }
 
-      this.broadcastTick(room, result.snapshot, result.sounds);
+      this.broadcastTick(room, result.snapshot, tickSounds, compSnap);
 
       if (result.privateStates) {
         this.pushCardStates(room, result.privateStates);
@@ -3130,9 +3199,9 @@ export class RoomManager {
 
       // Coalesce & dispatch targeted phone haptics from game engine (human phones only)
       const playersWithEngineHaptic = new Set<string>();
-      if (result.haptics.length > 0) {
+      if (tickHaptics.length > 0) {
         const strongestByPlayer = new Map<string, { pattern: number | number[]; reason?: string; weight: number }>();
-        for (const h of result.haptics) {
+        for (const h of tickHaptics) {
           const weight = Array.isArray(h.pattern)
             ? h.pattern.reduce((sum, n) => sum + n, 0) + 1000
             : h.pattern;
@@ -3688,6 +3757,8 @@ export class RoomManager {
       clearInterval(room.tickInterval);
       room.tickInterval = null;
     }
+    room.competitiveState = null;
+    room.lastCompetitiveSnapshot = null;
     this.clearVoteTimers(room);
   }
 

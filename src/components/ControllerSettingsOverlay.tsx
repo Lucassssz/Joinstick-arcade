@@ -52,6 +52,7 @@ export interface ControllerPrefs {
   floatingStick: boolean;
   deadzone: number;
   stickRadius: number;
+  stickSensitivity: number;
 }
 
 export const DEFAULT_CONTROLLER_PREFS: ControllerPrefs = {
@@ -81,8 +82,9 @@ export const DEFAULT_CONTROLLER_PREFS: ControllerPrefs = {
   buttonGap: 12,
   swapAB: false,
   floatingStick: false,
-  deadzone: 0.08,
-  stickRadius: 54,
+  deadzone: 0.1,
+  stickRadius: 58,
+  stickSensitivity: 0.86,
 };
 
 const STORAGE_KEY = 'joinstick_controller_prefs_v1';
@@ -256,6 +258,15 @@ export function clampControllerPrefs(raw: Partial<ControllerPrefs>): ControllerP
         38,
         68
       )
+    ),
+    stickSensitivity: Number(
+      clamp(
+        typeof raw.stickSensitivity === 'number'
+          ? raw.stickSensitivity
+          : DEFAULT_CONTROLLER_PREFS.stickSensitivity,
+        0.65,
+        1.15
+      ).toFixed(2)
     ),
   };
 }
@@ -640,6 +651,24 @@ export function ControllerSettingsOverlay({
                   value={prefs.deadzone}
                   onChange={(e) => update({ deadzone: Number(e.target.value) })}
                   className="w-full h-2 rounded-lg bg-[#101217] accent-[#FFB800] cursor-pointer"
+                />
+              </label>
+
+              <label className="block space-y-1 col-span-2">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-[#9CA3AF]">{t('Stick Sensitivity', '摇杆灵敏度')}</span>
+                  <span className="font-mono text-white tabular-nums">
+                    {Math.round(prefs.stickSensitivity * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.65}
+                  max={1.15}
+                  step={0.02}
+                  value={prefs.stickSensitivity}
+                  onChange={(e) => update({ stickSensitivity: Number(e.target.value) })}
+                  className="w-full h-2 rounded-lg bg-[#101217] accent-[#00C2FF] cursor-pointer"
                 />
               </label>
             </div>

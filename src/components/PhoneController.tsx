@@ -1220,7 +1220,7 @@ export function PhoneController({
   // --- Multi-touch Analog Joystick Pointer Handlers (Rotation-Aware + Calibrated!) ---
   const updateStickFromPointer = (clientX: number, clientY: number) => {
     const activePrefs = controllerPrefsRef.current;
-    const maxStickRadius = embedded ? 38 : activePrefs.stickRadius;
+    const maxStickRadius = embedded ? 41 : activePrefs.stickRadius;
     const dxScreen = clientX - stickCenterRef.current.x;
     const dyScreen = clientY - stickCenterRef.current.y;
 
@@ -1237,8 +1237,11 @@ export function PhoneController({
     const oy = Math.sin(angle) * clamped;
 
     const normMag = clamped / maxStickRadius;
-    const deadzone = embedded ? 0.08 : activePrefs.deadzone;
-    const adjMag = normMag < deadzone ? 0 : (normMag - deadzone) / (1 - deadzone);
+    const deadzone = embedded ? 0.1 : activePrefs.deadzone;
+    const sensitivity = embedded ? 0.86 : activePrefs.stickSensitivity;
+    const linearMag = normMag < deadzone ? 0 : (normMag - deadzone) / (1 - deadzone);
+    const adjMag =
+      linearMag === 0 ? 0 : Math.min(1, Math.pow(linearMag, 1.15) * sensitivity);
 
     inputRef.current.dx = Math.cos(angle) * adjMag;
     inputRef.current.dy = Math.sin(angle) * adjMag;

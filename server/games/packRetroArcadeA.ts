@@ -74,6 +74,7 @@ interface MazeState {
     dashTimer: number;
     score: number;
     ghostsEaten: number;
+    ghostCombo: number;
     cdA: number;
     cdB: number;
     prevA: boolean;
@@ -143,6 +144,7 @@ export const mazeChomperModule: CompactGameModule<MazeState, MazeChomperSnapshot
         dashTimer: 0,
         score: 0,
         ghostsEaten: 0,
+        ghostCombo: 0,
         cdA: 0,
         cdB: 0,
         prevA: false,
@@ -165,6 +167,7 @@ export const mazeChomperModule: CompactGameModule<MazeState, MazeChomperSnapshot
       p.cdA = Math.max(0, p.cdA - dt);
       p.cdB = Math.max(0, p.cdB - dt);
       p.powerTimer = Math.max(0, p.powerTimer - dt);
+      if (p.powerTimer <= 0) p.ghostCombo = 0;
       p.stunTimer = Math.max(0, p.stunTimer - dt);
       p.dashTimer = Math.max(0, p.dashTimer - dt);
       if (p.stunTimer > 0) continue;
@@ -244,11 +247,13 @@ export const mazeChomperModule: CompactGameModule<MazeState, MazeChomperSnapshot
         if (dist(p.x, p.y, g.x, g.y) < 0.65) {
           if (g.scaredTimer > 0 || p.powerTimer > 0) {
             p.ghostsEaten += 1;
-            p.score += 120 * mult;
+            p.ghostCombo = Math.min(4, p.ghostCombo + 1);
+            const comboPts = [120, 200, 300, 450][p.ghostCombo - 1] ?? 450;
+            p.score += comboPts * mult;
             g.x = 9.5;
             g.y = 5.5;
             g.scaredTimer = 0;
-            state.banner = `${p.name} CHOMPED A GHOST (+${120 * mult})!`;
+            state.banner = `${p.name} ${p.ghostCombo > 1 ? `${p.ghostCombo}× ` : ''}GHOST CHOMP (+${comboPts * mult})!`;
             sounds.push({ type: 'score', playerId: p.id });
           } else {
             p.stunTimer = 1.6;

@@ -45,6 +45,7 @@ interface HexDropInternalState {
   roundTimer: number;
   roundElapsed: number;
   meteorTimer: number;
+  goldBeaconTimer: number;
   betweenRoundTimer: number;
   roundBanner: string | null;
   tiles: InternalHexTile[];
@@ -256,6 +257,7 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
       roundTimer: ROUND_TIME_LIMIT,
       roundElapsed: 0,
       meteorTimer: 6.5,
+      goldBeaconTimer: 9.0,
       betweenRoundTimer: 0,
       roundBanner: null,
       tiles,
@@ -331,6 +333,7 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
           state.roundTimer = ROUND_TIME_LIMIT;
           state.roundElapsed = 0;
           state.meteorTimer = 6.0;
+          state.goldBeaconTimer = 9.0;
           state.roundBanner = null;
           state.tiles = buildHexGrid();
           const prevMap = new Map(
@@ -359,6 +362,28 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
               pick.timer = 0;
               pick.progress = 0;
             }
+          }
+        }
+      }
+
+      // Periodic Golden Beacon tile promotion near center to contest risky territory
+      state.goldBeaconTimer -= dt;
+      if (state.goldBeaconTimer <= 0) {
+        state.goldBeaconTimer = 8.5;
+        const activeGolds = state.tiles.filter((t) => t.kind === 'gold' && !t.bonusClaimed && t.state === 'solid');
+        if (activeGolds.length < 2) {
+          const candidates = state.tiles
+            .filter((t) => t.state === 'solid' && t.kind === 'normal')
+            .sort(
+              (a, b) =>
+                Math.hypot(a.x - ARENA_WIDTH / 2, a.y - ARENA_HEIGHT / 2) -
+                Math.hypot(b.x - ARENA_WIDTH / 2, b.y - ARENA_HEIGHT / 2)
+            );
+          const pick = candidates[Math.floor(Math.random() * Math.min(8, candidates.length))];
+          if (pick) {
+            pick.kind = 'gold';
+            pick.bonusClaimed = false;
+            state.popups.push({ x: pick.x, y: pick.y - 16, text: 'GOLD TILE!', colorHex: '#FFB800', alpha: 1 });
           }
         }
       }
@@ -463,6 +488,8 @@ export const hexDropModule: ServerGameModule<HexDropInternalState> = {
                 other.vy += (oy / dist) * push;
                 other.lastShovedBy = p.id;
                 other.lastShovedAt = now;
+                p.score += 15;
+                state.popups.push({ x: other.x, y: other.y - 26, text: '+15 SHOVE!', colorHex: p.colorHex, alpha: 0.95 });
                 haptics.push({ playerId: other.id, pattern: 68, reason: 'knockback' });
               }
             }

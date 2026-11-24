@@ -2639,6 +2639,62 @@ export type ClientMessage =
     }
   | { type: 'ping' };
 
+export type CompetitiveDropKind = 'relic' | 'surge' | 'crown';
+
+export interface CompetitiveDrop {
+  id: string;
+  kind: CompetitiveDropKind;
+  x: number;
+  y: number;
+  value: number;
+  ttl: number;
+  maxTtl: number;
+}
+
+export interface CompetitiveHotZone {
+  x: number;
+  y: number;
+  radius: number;
+  remaining: number;
+  duration: number;
+  holderId: string | null;
+  holderColorHex: string | null;
+}
+
+export interface CompetitivePopup {
+  id: string;
+  x: number;
+  y: number;
+  textEn: string;
+  textZh: string;
+  colorHex: string;
+  alpha: number;
+}
+
+export interface CompetitivePlayerMeta {
+  id: string;
+  streak: number;
+  bounty: number;
+  isLeader: boolean;
+  x?: number;
+  y?: number;
+  colorHex: string;
+}
+
+export interface CompetitiveSnapshot {
+  spatialActive: boolean;
+  leaderId: string | null;
+  leaderBounty: number;
+  drops: CompetitiveDrop[];
+  hotZone: CompetitiveHotZone | null;
+  popups: CompetitivePopup[];
+  playerMeta: CompetitivePlayerMeta[];
+  bannerEn: string | null;
+  bannerZh: string | null;
+  bannerColor: string | null;
+  bannerAlpha: number;
+}
+
 export type ServerMessage =
   | { type: 'room:created'; code: string; hostToken: string; room: RoomSnapshot }
   | { type: 'room:joined'; playerId: string; room: RoomSnapshot }
@@ -2651,7 +2707,12 @@ export type ServerMessage =
       colorHex: string;
       emoji: string;
     }
-  | { type: 'game:tick'; snapshot: GameSnapshot; sounds: SoundEvent[] }
+  | {
+      type: 'game:tick';
+      snapshot: GameSnapshot;
+      competitive?: CompetitiveSnapshot;
+      sounds: SoundEvent[];
+    }
   | { type: 'player:card-state'; cardState: CardPrivateState | null }
   | {
       type: 'player:haptic';
@@ -2664,4 +2725,5 @@ export type ServerMessage =
   | { type: 'room:closed'; reason: string }
   | { type: 'error'; message: string; code?: string }
   | { type: 'pong' };
+
 

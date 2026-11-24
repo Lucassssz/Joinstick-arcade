@@ -3,6 +3,7 @@ import {
   ARENA_WIDTH,
   AstroBlasterSnapshot,
   BumperBrawlSnapshot,
+  CompetitiveSnapshot,
   GameSnapshot,
   TurboDriftSnapshot,
 } from '../shared/types';
@@ -72,6 +73,7 @@ import {
   prepareArcadeFrame,
   setActiveArcadeMotion,
 } from './arcadeMotion';
+import { renderCompetitiveOverlay } from './competitiveOverlay';
 
 export { drawNameplate, drawPopupTexts, tCanvas };
 
@@ -1050,7 +1052,8 @@ export function renderGameSnapshot(
   ctx: CanvasRenderingContext2D,
   rawSnap: GameSnapshot,
   fx: RenderFxState,
-  lang: Language = 'en'
+  lang: Language = 'en',
+  competitive?: CompetitiveSnapshot | null
 ): void {
   setActiveCanvasLang(lang);
   const snap = prepareArcadeFrame(rawSnap, fx.arcade);
@@ -1173,6 +1176,7 @@ export function renderGameSnapshot(
         break;
     }
 
+    renderCompetitiveOverlay(ctx, competitive, lang);
     drawArcadeFrontFX(ctx, fx.arcade);
   } finally {
     setActiveArcadeMotion(null);

@@ -66,6 +66,7 @@ import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
   BotDifficulty,
+  CompetitiveSnapshot,
   GameId,
   GameSnapshot,
   MAX_PLAYERS_PER_ROOM,
@@ -168,6 +169,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const wsRef = useRef<ManagedWebSocket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latestSnapshotRef = useRef<GameSnapshot | null>(null);
+  const latestCompetitiveRef = useRef<CompetitiveSnapshot | null>(null);
   const fxRef = useRef(createRenderFxState());
   const prevStatusRef = useRef<string | null>(null);
   const prevHostIdRef = useRef<string | null>(null);
@@ -402,6 +404,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           case 'game:tick':
             if (msg.snapshot) {
               latestSnapshotRef.current = msg.snapshot;
+              latestCompetitiveRef.current = msg.competitive ?? null;
               const snap = msg.snapshot;
               if (CARD_GAME_IDS.has(snap.gameId)) {
                 const sAny = snap as unknown as {
@@ -581,7 +584,13 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       if (canvas && snap) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          renderGameSnapshot(ctx, snap, fxRef.current, langRef.current);
+          renderGameSnapshot(
+            ctx,
+            snap,
+            fxRef.current,
+            langRef.current,
+            latestCompetitiveRef.current
+          );
         }
       }
       rafId = requestAnimationFrame(renderLoop);

@@ -525,6 +525,7 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
         if (!bp.alive) continue;
         const distFromCenter = Math.hypot(bp.x - state.ringCenterX, bp.y - state.ringCenterY);
         if (distFromCenter > state.ringRadius + bp.radius * 0.35) {
+          const victimHadStreak = bp.streak >= 1 || bp.kos >= 2;
           bp.alive = false;
           bp.streak = 0;
           sounds.push({ type: 'ko', playerId: bp.id });
@@ -535,13 +536,21 @@ export const bumperBrawlModule: ServerGameModule<BumperInternalState> = {
             if (attacker) {
               attacker.kos += 1;
               attacker.streak += 1;
-              const bonus = attacker.streak >= 2 ? 50 : 0;
-              attacker.score += 100 + bonus;
+              const chainBonus = attacker.streak >= 2 ? 50 : 0;
+              const shutdownBonus = victimHadStreak ? 45 : 0;
+              const totalPts = 100 + chainBonus + shutdownBonus;
+              attacker.score += totalPts;
+              const label =
+                shutdownBonus > 0
+                  ? `SHUTDOWN KO! +${totalPts}`
+                  : attacker.streak >= 2
+                  ? `${attacker.streak}x KO! +${totalPts}`
+                  : 'RING OUT! +100';
               state.popups.push({
                 x: attacker.x,
                 y: attacker.y - 34,
-                text: attacker.streak >= 2 ? `${attacker.streak}x KO! +${100 + bonus}` : 'RING OUT! +100',
-                colorHex: attacker.colorHex,
+                text: label,
+                colorHex: shutdownBonus > 0 ? '#FFB800' : attacker.colorHex,
                 alpha: 1,
               });
               haptics.push({ playerId: attacker.id, pattern: [35, 25, 60], reason: 'score' });

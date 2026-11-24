@@ -145,8 +145,9 @@ export const laserJumpRopeModule: CompactGameModule<LaserJumpState, LaserJumpRop
         p.respawnTimer -= dt;
         if (p.respawnTimer <= 0) {
           p.alive = true;
-          p.z = 24;
+          p.z = 26;
           p.vz = 0;
+          p.shieldTimer = 1.1;
         }
         continue;
       }
@@ -206,7 +207,12 @@ export const laserJumpRopeModule: CompactGameModule<LaserJumpState, LaserJumpRop
             if (p.z > 18) {
               if (p.cdA < 0.06) {
                 p.jumpsCleared += 1;
-                p.score += 30 * mult;
+                const streakExtra = p.jumpsCleared % 3 === 0 ? 25 : 0;
+                p.score += (30 + streakExtra) * mult;
+                if (streakExtra > 0) {
+                  state.banner = `${p.name} ${p.jumpsCleared}× JUMP STREAK!`;
+                  sounds.push({ type: 'score', playerId: p.id });
+                }
               }
             } else if (p.shieldTimer > 0) {
               p.shieldTimer = 0;
