@@ -26,6 +26,7 @@ import {
   Move,
   Paintbrush,
   Pause,
+  Play,
   Power,
   RefreshCw,
   Repeat,
@@ -38,6 +39,8 @@ import {
   Trash2,
   Trophy,
   Users,
+  Volume2,
+  VolumeX,
   Vote,
   Waves,
   WifiOff,
@@ -54,6 +57,8 @@ import {
   saveControllerPrefs,
 } from './ControllerSettingsOverlay';
 import { EasyArrowsDeck, SwipeTrackpadDeck } from './GamePadDecks';
+import { PocketArenaCanvas } from './PocketArenaCanvas';
+import { PocketLobbyView } from './PocketLobbyView';
 import {
   ArcadePadMode,
   getGamePadProfile,
@@ -78,12 +83,16 @@ import {
 } from '../shared/party';
 import { CardControllerDeck } from './CardControllerDeck';
 import { PhoneControllerDemo } from './PhoneControllerDemo';
+import { createRenderFxState } from '../games/renderers';
+import { arcadeAudio } from '../lib/audio';
 import {
   ActionButtonSpec,
   CardClientAction,
   CardPrivateState,
+  CompetitiveSnapshot,
   ControllerInput,
   GameId,
+  GameSnapshot,
   PLAYER_PALETTE,
   RemoteDirection,
   RoomSnapshot,
@@ -102,11 +111,22 @@ import {
 
 export interface PhoneControllerProps {
   initialRoomCode?: string;
+  initialMode?: 'join' | 'pocket';
+  preferredGameId?: GameId;
   defaultName?: string;
   autoJoin?: boolean;
   embedded?: boolean;
   keyboardProfile?: 'wasd' | 'arrows' | 'none';
   onExit?: () => void;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return `rgba(24, 28, 36, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 const CALLSIGNS = [
@@ -153,6 +173,8 @@ function ActionIcon({ icon, className }: { icon: ActionButtonSpec['icon']; class
 
 export function PhoneController({
   initialRoomCode = '',
+  initialMode = 'join',
+  preferredGameId,
   defaultName,
   autoJoin = false,
   embedded = false,
@@ -160,6 +182,20 @@ export function PhoneController({
   onExit,
 }: PhoneControllerProps) {
   const { lang, t } = useLanguage();
+  const [entryMode, setEntryMode] = useState<'join' | 'pocket'>(() =>
+    initialRoomCode.trim().length === 4 ? 'join' : initialMode
+  );
+  const [pocketPinUnlocked, setPocketPinUnlocked] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.sessionStorage.getItem('joystick_host_pin_unlocked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [pocketPinInput, setPocketPinInput] = useState('');
+  const [pocketPinError, setPocketPinError] = useState(false);
+
   const [roomCode, setRoomCode] = useState(initialRoomCode.toUpperCase());
   const [playerName, setPlayerName] = useState(
     () => defaultName || CALLSIGNS[Math.floor(Math.random() * CALLSIGNS.length)]
@@ -201,6 +237,16 @@ export function PhoneController({
     x: 0,
     y: 0,
   });
+  const [pocketTickVersion, setPocketTickVersion] = useState(0);
+  const [pocketMuted, setPocketMuted] = useState(false);
+  const [pocketCardTableExpanded, setPocketCardTableExpanded] = useState(false);
+
+  const latestSnapshotRef = useRef<GameSnapshot | null>(null);
+  const latestCompetitiveRef = useRef<CompetitiveSnapshot | null>(null);
+  const fxRef = useRef(createRenderFxState());
+  const hasPocketSnapRef = useRef<boolean>(false);
+  const pocketAudioStartedRef = useRef<boolean>(false);
+
   const wasDisconnectedRef = useRef<boolean>(false);
   const prevIsHostRef = useRef<boolean>(false);
   const hostToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -281,6 +327,14 @@ export function PhoneController({
   useEffect(() => {
     controllerPrefsRef.current = controllerPrefs;
   }, [controllerPrefs]);
+
+  useEffect(() => {
+    if (initialRoomCode.trim().length === 4) {
+      setEntryMode('join');
+    } else {
+      setEntryMode(initialMode);
+    }
+  }, [initialMode, initialRoomCode]);
 
   const updateControllerPrefs = (next: ControllerPrefs) => {
     const clamped = clampControllerPrefs(next);
@@ -560,11 +614,49 @@ export function PhoneController({
     setCloseRoomConfirmOpen(false);
     setRepositionMode(false);
     setEmoteDrawerOpen(false);
-    if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN') {
+    if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN' && room?.status !== 'PAUSED') {
       setCardState(null);
+      latestSnapshotRef.current = null;
+      latestCompetitiveRef.current = null;
+      hasPocketSnapRef.current = false;
+      setPocketCardTableExpanded(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.status, room?.selectedGameId, room?.hostPlayerId]);
+
+  // Pocket Mode audio & BGM lifecycle
+  useEffect(() => {
+    if (room?.roomMode !== 'pocket') {
+      if (pocketAudioStartedRef.current) {
+        pocketAudioStartedRef.current = false;
+        arcadeAudio.setBgm(null);
+      }
+      return;
+    }
+    pocketAudioStartedRef.current = true;
+    arcadeAudio.setMuted(pocketMuted);
+    if (
+      room.status === 'SETUP' ||
+      room.status === 'LOBBY' ||
+      room.status === 'BRIEFING' ||
+      room.status === 'VOTING'
+    ) {
+      arcadeAudio.setBgm('lobby');
+    } else if (room.status === 'PLAYING' || room.status === 'COUNTDOWN') {
+      arcadeAudio.setBgm(room.frenzy.active ? 'frenzy' : 'battle');
+    } else {
+      arcadeAudio.setBgm(null);
+    }
+  }, [room?.roomMode, room?.status, room?.frenzy?.active, pocketMuted]);
+
+  useEffect(() => {
+    return () => {
+      if (pocketAudioStartedRef.current) {
+        pocketAudioStartedRef.current = false;
+        arcadeAudio.setBgm(null);
+      }
+    };
+  }, []);
 
   // Clear stuck touches if browser tab loses focus
   useEffect(() => {
@@ -768,6 +860,9 @@ export function PhoneController({
             if (!embedded && !userExitedPhoneFsRef.current) {
               enterFullscreenAndLandscape();
             }
+            if (msg.room.roomMode === 'pocket') {
+              arcadeAudio.unlock();
+            }
             if (manualReconnectTimerRef.current) {
               clearTimeout(manualReconnectTimerRef.current);
               manualReconnectTimerRef.current = null;
@@ -784,6 +879,23 @@ export function PhoneController({
             roomRef.current = msg.room;
             setRoom(msg.room);
             break;
+          case 'game:tick':
+            latestSnapshotRef.current = msg.snapshot;
+            latestCompetitiveRef.current = msg.competitive ?? null;
+            if (!hasPocketSnapRef.current) {
+              hasPocketSnapRef.current = true;
+              setPocketTickVersion((v) => v + 1);
+            }
+            if (roomRef.current?.roomMode === 'pocket') {
+              for (const s of msg.sounds) {
+                arcadeAudio.play(s);
+              }
+              const snapRecord = msg.snapshot as unknown as { shake?: number };
+              if (typeof snapRecord.shake === 'number' && snapRecord.shake > fxRef.current.shake) {
+                fxRef.current.shake = snapRecord.shake;
+              }
+            }
+            break;
           case 'player:card-state':
             setCardState(msg.cardState);
             break;
@@ -793,6 +905,9 @@ export function PhoneController({
             storedPlayerIdRef.current = undefined;
             joinedPlayerIdRef.current = null;
             roomRef.current = null;
+            latestSnapshotRef.current = null;
+            latestCompetitiveRef.current = null;
+            hasPocketSnapRef.current = false;
             try {
               sessionStorage.removeItem(sessionKey);
               sessionStorage.removeItem(roomCodeSessionKey);
@@ -813,6 +928,9 @@ export function PhoneController({
               storedPlayerIdRef.current = undefined;
               joinedPlayerIdRef.current = null;
               roomRef.current = null;
+              latestSnapshotRef.current = null;
+              latestCompetitiveRef.current = null;
+              hasPocketSnapRef.current = false;
               try {
                 sessionStorage.removeItem(sessionKey);
                 sessionStorage.removeItem(roomCodeSessionKey);
@@ -1049,6 +1167,42 @@ export function PhoneController({
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (entryMode === 'pocket') {
+      if (!pocketPinUnlocked) {
+        const cleanedPin = pocketPinInput.trim();
+        if (cleanedPin !== '1234' && cleanedPin !== '8888') {
+          setPocketPinError(true);
+          return;
+        }
+        try {
+          sessionStorage.setItem('joystick_host_pin_unlocked', 'true');
+        } catch {
+          // Ignore storage error
+        }
+        setPocketPinUnlocked(true);
+        setPocketPinError(false);
+      }
+
+      setErrorMsg(null);
+      setJoiningRoom(true);
+      storedPlayerIdRef.current = undefined;
+      joinedPlayerIdRef.current = null;
+      latestSnapshotRef.current = null;
+      latestCompetitiveRef.current = null;
+      hasPocketSnapRef.current = false;
+      arcadeAudio.unlock();
+      enterFullscreenAndLandscape();
+      wsRef.current?.send({
+        type: 'room:create-pocket',
+        preferredGameId,
+        name: playerName.trim() || 'Host',
+        deviceId: getDeviceId('POCKET'),
+        preferredColorId: preferredColor,
+        avatarId: selectedAvatarId,
+      });
+      return;
+    }
+
     const cleaned = roomCode.trim().toUpperCase();
     if (cleaned.length !== 4) {
       setErrorMsg(
@@ -1061,6 +1215,7 @@ export function PhoneController({
     }
     setErrorMsg(null);
     setJoiningRoom(true);
+    arcadeAudio.unlock();
     enterFullscreenAndLandscape();
     wsRef.current?.send({
       type: 'room:join',
@@ -1105,6 +1260,13 @@ export function PhoneController({
     storedPlayerIdRef.current = undefined;
     joinedPlayerIdRef.current = null;
     roomRef.current = null;
+    latestSnapshotRef.current = null;
+    latestCompetitiveRef.current = null;
+    hasPocketSnapRef.current = false;
+    if (pocketAudioStartedRef.current) {
+      pocketAudioStartedRef.current = false;
+      arcadeAudio.setBgm(null);
+    }
     try {
       sessionStorage.removeItem(sessionKey);
       sessionStorage.removeItem(roomCodeSessionKey);
@@ -1676,37 +1838,110 @@ export function PhoneController({
         )}
 
         <div className="max-w-md w-full mx-auto my-auto py-4">
+          {!embedded && (
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[#1A1E26] border border-[#2A303D] mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryMode('join');
+                  setErrorMsg(null);
+                }}
+                className={`h-9 rounded-lg text-xs font-extrabold whitespace-nowrap cursor-pointer transition-colors ${
+                  entryMode === 'join'
+                    ? 'bg-[#00C2FF] text-[#0B1219]'
+                    : 'text-[#9CA3AF] hover:text-white'
+                }`}
+              >
+                {t('Join Room', '输入房间码加入')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryMode('pocket');
+                  setErrorMsg(null);
+                }}
+                className={`h-9 rounded-lg text-xs font-extrabold whitespace-nowrap cursor-pointer transition-colors inline-flex items-center justify-center gap-1.5 ${
+                  entryMode === 'pocket'
+                    ? 'bg-[#FF4D2E] text-white'
+                    : 'text-[#9CA3AF] hover:text-white'
+                }`}
+              >
+                <Gamepad2 className="w-3.5 h-3.5" />
+                <span>{t('Pocket Mode (PIN)', '无大屏掌机建房')}</span>
+              </button>
+            </div>
+          )}
+
           <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
-            {t('Connect Your Controller', '连接手机手柄')}
+            {entryMode === 'pocket'
+              ? t('Pocket Party Room', '无大屏掌机联机房')
+              : t('Connect Your Controller', '连接手机手柄')}
           </h1>
           <p className="mt-1.5 text-sm text-[#9CA3AF]">
-            {t(
-              'Enter the 4-letter code on the game monitor. Your controller switches to full-screen landscape as soon as you join.',
-              '输入大屏上的 4 位房间码，加入后手机将自动切换为全屏横屏手柄。'
-            )}
+            {entryMode === 'pocket'
+              ? t(
+                  'No TV or laptop monitor required. Play together directly on your phones with integrated Mobile HUD controls.',
+                  '无需电视或电脑大屏！直接用手机开房，游戏画面与触控按键合二为一，随时随地开玩。'
+                )
+              : t(
+                  'Enter the 4-letter code on the game monitor. Your controller switches to full-screen landscape as soon as you join.',
+                  '输入大屏上的 4 位房间码，加入后手机将自动切换为全屏横屏手柄。'
+                )}
           </p>
 
           <form onSubmit={handleJoinSubmit} className="mt-6 space-y-5">
-            <div>
-              <label
-                htmlFor={`room-code-${sessionKey}`}
-                className="block text-xs font-semibold text-[#A5AEBD] mb-2"
-              >
-                {t('Room Code', '房间码')}
-              </label>
-              <input
-                id={`room-code-${sessionKey}`}
-                type="text"
-                maxLength={4}
-                autoComplete="off"
-                value={roomCode}
-                onChange={(e) =>
-                  setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
-                }
-                placeholder="ABCD"
-                className="w-full h-14 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none font-mono text-2xl font-bold tracking-[0.35em] text-center text-white uppercase"
-              />
-            </div>
+            {entryMode === 'join' ? (
+              <div>
+                <label
+                  htmlFor={`room-code-${sessionKey}`}
+                  className="block text-xs font-semibold text-[#A5AEBD] mb-2"
+                >
+                  {t('Room Code', '房间码')}
+                </label>
+                <input
+                  id={`room-code-${sessionKey}`}
+                  type="text"
+                  maxLength={4}
+                  autoComplete="off"
+                  value={roomCode}
+                  onChange={(e) =>
+                    setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+                  }
+                  placeholder="ABCD"
+                  className="w-full h-14 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none font-mono text-2xl font-bold tracking-[0.35em] text-center text-white uppercase"
+                />
+              </div>
+            ) : (
+              !pocketPinUnlocked && (
+                <div>
+                  <label
+                    htmlFor={`pocket-pin-${sessionKey}`}
+                    className="block text-xs font-semibold text-[#A5AEBD] mb-2"
+                  >
+                    {t('Host Master PIN (Default: 1234)', '房主管理密码（默认：1234）')}
+                  </label>
+                  <input
+                    id={`pocket-pin-${sessionKey}`}
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    autoComplete="off"
+                    value={pocketPinInput}
+                    onChange={(e) => {
+                      setPocketPinInput(e.target.value);
+                      setPocketPinError(false);
+                    }}
+                    placeholder="••••"
+                    className="w-full h-13 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#FF4D2E] focus:outline-none font-mono text-2xl font-bold tracking-[0.4em] text-center text-white"
+                  />
+                  {pocketPinError && (
+                    <p className="mt-1.5 text-xs font-semibold text-[#FF4D2E] text-center">
+                      {t('Incorrect PIN. Try 1234 or 8888.', '密码错误，请尝试 1234 或 8888。')}
+                    </p>
+                  )}
+                </div>
+              )
+            )}
 
             <div>
               <label
@@ -1816,7 +2051,11 @@ export function PhoneController({
                     ? t('Reconnecting to Server...', '正在重新连接服务器...')
                     : t('Connecting to Server...', '正在连接服务器...')
                   : joiningRoom
-                  ? t('Joining Room...', '正在加入房间...')
+                  ? entryMode === 'pocket'
+                    ? t('Creating Pocket Room...', '正在创建掌机房间...')
+                    : t('Joining Room...', '正在加入房间...')
+                  : entryMode === 'pocket'
+                  ? t('Create Pocket Room', '创建掌机房间并进入')
                   : t('Join Room & Open Gamepad', '加入房间并打开手柄')}
               </span>
             </button>
@@ -1825,15 +2064,22 @@ export function PhoneController({
 
         {!embedded && (
           <div className="max-w-md w-full mx-auto text-center text-xs text-[#6B7280] py-2">
-            {t(
-              'Full-screen landscape gamepad activates automatically once connected.',
-              '连接后自动切换为全屏横屏手柄。'
-            )}
+            {entryMode === 'pocket'
+              ? t(
+                  'Share your 4-letter code or QR code in the Pocket Lobby so friends can play alongside you.',
+                  '建房后可将 4 位房间码或二维码分享给身边的朋友，直接手机同屏开黑。'
+                )
+              : t(
+                  'Full-screen landscape gamepad activates automatically once connected.',
+                  '连接后自动切换为全屏横屏手柄。'
+                )}
           </div>
         )}
       </div>
     );
   }
+
+  const isPocketRoom = room.roomMode === 'pocket';
 
   const isRoomHost = room.hostPlayerId === me.id;
   const connectedHumans = room.players.filter((p) => !p.isBot && p.connected);
@@ -2130,6 +2376,73 @@ export function PhoneController({
       </div>
     </div>
   );
+
+  // =====================================================================
+  // STATE 3A / 3B POCKET MODE LOBBY (Phone-only direct game browser + roster)
+  // =====================================================================
+  if (isPocketRoom && (room.status === 'SETUP' || room.status === 'LOBBY')) {
+    return renderConnectedShell(
+      <PocketLobbyView
+        room={room}
+        me={me}
+        isRoomHost={isRoomHost}
+        isFullscreen={isFullscreen}
+        pocketMuted={pocketMuted}
+        errorMsg={errorMsg ? translateServerMessage(errorMsg, lang) : null}
+        quickEmotes={QUICK_EMOTES}
+        avatarPickerOverlay={avatarPickerOverlay}
+        passHostOverlay={passHostOverlay}
+        closeRoomOverlay={closeRoomOverlay}
+        onToggleMute={() => {
+          arcadeAudio.unlock();
+          setPocketMuted((m) => !m);
+        }}
+        onToggleFullscreen={toggleFullscreen}
+        onOpenAvatarPicker={() => setAvatarPickerOpen(true)}
+        onOpenSettings={() => {
+          resetControlsState();
+          setSettingsOpen(true);
+        }}
+        onOpenPassHost={() => setPassHostOpen(true)}
+        onOpenCloseRoom={() => setCloseRoomConfirmOpen(true)}
+        onLeave={handleLeave}
+        onToggleReady={() => {
+          arcadeAudio.unlock();
+          enterFullscreenAndLandscape();
+          setErrorMsg(null);
+          wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+        }}
+        onSelectGame={(gameId, settingValue) => {
+          setErrorMsg(null);
+          wsRef.current?.send({ type: 'game:select', gameId, settingValue });
+        }}
+        onChangeFilter={(filter) => {
+          wsRef.current?.send({ type: 'lobby:filter', filter });
+        }}
+        onStartMatch={() => {
+          arcadeAudio.unlock();
+          enterFullscreenAndLandscape();
+          setErrorMsg(null);
+          wsRef.current?.send({ type: 'game:start' });
+        }}
+        onStartTournament={() => {
+          arcadeAudio.unlock();
+          enterFullscreenAndLandscape();
+          setErrorMsg(null);
+          wsRef.current?.send({ type: 'tournament:start' });
+        }}
+        onAddBot={() => wsRef.current?.send({ type: 'room:add-bot' })}
+        onCycleBotDifficulty={(difficulty) =>
+          wsRef.current?.send({ type: 'room:set-bot-difficulty', difficulty })
+        }
+        onCycleTeamMode={(teamMode) => wsRef.current?.send({ type: 'room:set-team-mode', teamMode })}
+        onCycleMyTeam={(teamId) => wsRef.current?.send({ type: 'player:set-team', teamId })}
+        onShuffleTeams={() => wsRef.current?.send({ type: 'room:shuffle-teams' })}
+        onSpinMutator={() => wsRef.current?.send({ type: 'room:spin-mutator' })}
+        onSendEmote={handleSendQuickEmote}
+      />
+    );
+  }
 
   // =====================================================================
   // STATE 3A: ROOM SETUP SCREEN (Waiting for players / bots / host setup)
@@ -2917,10 +3230,15 @@ export function PhoneController({
         {/* Bottom Voting Hint */}
         <div className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF] shrink-0">
           <span>
-            {t(
-              'Watch all three 5-second live previews on the TV!',
-              '观看大屏上 3 个游戏的 5 秒实机视频，投出你的一票！'
-            )}
+            {isPocketRoom
+              ? t(
+                  'Vote for the next Pocket Cup game — match launches once votes lock!',
+                  '投票选出下一局掌机锦标赛游戏 — 锁定后即刻开战！'
+                )
+              : t(
+                  'Watch all three 5-second live previews on the TV!',
+                  '观看大屏上 3 个游戏的 5 秒实机视频，投出你的一票！'
+                )}
           </span>
           <span className="font-mono font-bold text-[#00C2FF] shrink-0 tabular-nums">
             {totalVotes}/{room.players.length} {t('Voted', '已投')}
@@ -3039,50 +3357,127 @@ export function PhoneController({
           )}
         </div>
 
+        {isPocketRoom && room.rankings.length > 0 && (
+          <div className="w-full max-w-lg rounded-2xl bg-[#171B24] border border-[#262E3E] p-2.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-left">
+            {room.rankings.slice(0, 4).map((r) => (
+              <div
+                key={r.playerId}
+                className={`px-2 py-1.5 rounded-xl border flex items-center gap-1.5 min-w-0 ${
+                  r.playerId === me.id
+                    ? 'bg-[#101A28] border-[#00C2FF]'
+                    : 'bg-[#10131A] border-[#222938]'
+                }`}
+              >
+                <span className="font-mono text-xs font-black text-[#FFB800] shrink-0">
+                  #{r.rank}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-bold text-white truncate">{r.name}</div>
+                  <div className="text-[10px] font-mono text-[#9CA3AF] tabular-nums">
+                    {r.score} {t('pts', '分')}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {isRoomHost ? (
-          <div className="w-full max-w-md space-y-2">
-            <div className="text-xs font-bold text-[#FFB800]">
-              {t('TV Highlighted:', '大屏当前选中：')}{' '}
-              <span className="text-white">{resultsOptionLabel}</span>
-            </div>
-            <div className="flex items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => sendRemote('left')}
-                aria-label={t('Remote Left', '遥控器左')}
-                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-              <button
-                type="button"
-                onClick={() => sendRemote('ok')}
-                className="tactile-btn h-12 px-7 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
-              >
-                OK · {resultsOptionLabel}
-              </button>
-              <button
-                type="button"
-                onClick={() => sendRemote('right')}
-                aria-label={t('Remote Right', '遥控器右')}
-                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </div>
-            {otherPlayers.length > 0 && (
-              <div className="flex items-center justify-center">
+          isPocketRoom ? (
+            <div className="w-full max-w-md space-y-2">
+              <div className="flex items-center justify-center gap-2.5">
+                {activeTournament ? (
+                  <button
+                    type="button"
+                    onClick={() => wsRef.current?.send({ type: 'tournament:next' })}
+                    className="tactile-btn flex-1 h-12 px-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-sm shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>
+                      {activeTournament.completed
+                        ? t('New 5-Game Cup', '再来一届锦标赛')
+                        : t(
+                            `Vote Next (${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames})`,
+                            `投票第 ${activeTournament.currentGameIndex + 2}/${activeTournament.totalGames} 局`
+                          )}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => wsRef.current?.send({ type: 'game:restart' })}
+                    className="tactile-btn flex-1 h-12 px-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-sm shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>{t('Play Again', '再来一局')}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setPassHostOpen(true)}
-                  className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
+                  className="tactile-btn h-12 px-4 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white font-display font-bold text-sm cursor-pointer"
                 >
-                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                  {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
+                  {t('Game Room', '返回游戏厅')}
                 </button>
               </div>
-            )}
-          </div>
+              {otherPlayers.length > 0 && (
+                <div className="flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setPassHostOpen(true)}
+                    className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                    {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="w-full max-w-md space-y-2">
+              <div className="text-xs font-bold text-[#FFB800]">
+                {t('TV Highlighted:', '大屏当前选中：')}{' '}
+                <span className="text-white">{resultsOptionLabel}</span>
+              </div>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => sendRemote('left')}
+                  aria-label={t('Remote Left', '遥控器左')}
+                  className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => sendRemote('ok')}
+                  className="tactile-btn h-12 px-7 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
+                >
+                  OK · {resultsOptionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => sendRemote('right')}
+                  aria-label={t('Remote Right', '遥控器右')}
+                  className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </div>
+              {otherPlayers.length > 0 && (
+                <div className="flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setPassHostOpen(true)}
+                    className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                    {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )
         ) : (
           <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
             <Loader2 className="w-3.5 h-3.5 text-[#00C2FF] animate-spin shrink-0" aria-hidden="true" />
@@ -3090,8 +3485,8 @@ export function PhoneController({
               {t('Waiting for', '等待')}{' '}
               <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
               {activeTournament
-                ? t("'s remote for next tournament game.", ' 遥控进入下一局锦标赛。')
-                : t("'s remote to play again or switch games.", ' 遥控选择再来一局或切换游戏。')}
+                ? t(' to launch the next Cup round.', ' 开启下一局锦标赛。')
+                : t(' to play again or pick another game.', ' 选择再来一局或切换游戏。')}
             </span>
           </p>
         )}
@@ -3100,7 +3495,7 @@ export function PhoneController({
   }
 
   // =====================================================================
-  // STATE 4C: PAUSED SCREEN ON PHONE (Host Remote Controls!)
+  // STATE 4C: PAUSED SCREEN ON PHONE (Direct Touch in Pocket / Remote on Monitor)
   // =====================================================================
   if (room.status === 'PAUSED') {
     const pauseLabels = [
@@ -3111,80 +3506,136 @@ export function PhoneController({
     const activePauseLabel = pauseLabels[room.remoteFocus.modalIndex] ?? pauseLabels[0];
 
     return renderConnectedShell(
-      <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3">
+      <div className="relative flex flex-col items-center justify-center h-full text-center px-4 gap-3 overflow-hidden">
+        {isPocketRoom && (
+          <div className="absolute inset-0 z-0 opacity-30 pointer-events-none">
+            <PocketArenaCanvas
+              gameId={room.selectedGameId}
+              status={room.status}
+              snapshotRef={latestSnapshotRef}
+              competitiveRef={latestCompetitiveRef}
+              fxRef={fxRef}
+              tickVersion={pocketTickVersion}
+            />
+          </div>
+        )}
         {passHostOverlay}
         {closeRoomOverlay}
-        <div className="absolute top-1 right-1 flex items-center gap-1.5">
-          {!embedded && <LanguageToggle compact />}
-          {isRoomHost && (
-            <button
-              type="button"
-              onClick={() => setCloseRoomConfirmOpen(true)}
-              aria-label={t('Close Entire Room', '关闭整个房间')}
-              title={t('Close Entire Room', '关闭整个房间')}
-              className="h-8 w-8 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
-            >
-              <Power className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-        <Pause className="w-10 h-10 text-[#FFB800]" />
-        <h2 className="font-display text-2xl font-extrabold text-white">
-          {t('Game Paused', '游戏已暂停')}
-        </h2>
-        {isRoomHost ? (
-          <div className="w-full max-w-md space-y-2.5">
-            <div className="text-xs font-bold text-[#FFB800]">
-              {t('TV Highlighted:', '大屏当前选中：')}{' '}
-              <span className="text-white">{activePauseLabel}</span>
-            </div>
-            <div className="flex items-center justify-center gap-3">
+        <div className="relative z-10 flex flex-col items-center gap-3 w-full">
+          <div className="absolute -top-8 right-0 flex items-center gap-1.5">
+            {!embedded && <LanguageToggle compact />}
+            {isRoomHost && (
               <button
                 type="button"
-                onClick={() => sendRemote('left')}
-                aria-label={t('Remote Left', '遥控器左')}
-                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+                onClick={() => setCloseRoomConfirmOpen(true)}
+                aria-label={t('Close Entire Room', '关闭整个房间')}
+                title={t('Close Entire Room', '关闭整个房间')}
+                className="h-8 w-8 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <Power className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => sendRemote('ok')}
-                className="tactile-btn h-12 px-7 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
-              >
-                OK · {activePauseLabel}
-              </button>
-              <button
-                type="button"
-                onClick={() => sendRemote('right')}
-                aria-label={t('Remote Right', '遥控器右')}
-                className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </div>
-            {otherPlayers.length > 0 && (
-              <div className="flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => setPassHostOpen(true)}
-                  className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
-                  {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
-                </button>
-              </div>
             )}
           </div>
-        ) : (
-          <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
-            <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
-            <span>
-              {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
-              <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
-            </span>
-          </p>
-        )}
+          <Pause className="w-10 h-10 text-[#FFB800]" />
+          <h2 className="font-display text-2xl font-extrabold text-white">
+            {t('Game Paused', '游戏已暂停')}
+          </h2>
+          {isRoomHost ? (
+            isPocketRoom ? (
+              <div className="w-full max-w-md space-y-2.5">
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => wsRef.current?.send({ type: 'game:pause', paused: false })}
+                    className="tactile-btn h-12 px-6 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-black text-sm shadow-[0_4px_0_#0A915D] inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>{t('Resume', '继续游戏')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => wsRef.current?.send({ type: 'game:restart' })}
+                    className="tactile-btn h-12 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-sm shadow-[0_4px_0_#B82E17] inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>{t('Restart', '重新开始')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => wsRef.current?.send({ type: 'game:return-lobby' })}
+                    className="tactile-btn h-12 px-5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white font-display font-bold text-sm cursor-pointer"
+                  >
+                    {t('Switch Game', '切换游戏')}
+                  </button>
+                </div>
+                {otherPlayers.length > 0 && (
+                  <div className="flex items-center justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setPassHostOpen(true)}
+                      className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                      {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="w-full max-w-md space-y-2.5">
+                <div className="text-xs font-bold text-[#FFB800]">
+                  {t('TV Highlighted:', '大屏当前选中：')}{' '}
+                  <span className="text-white">{activePauseLabel}</span>
+                </div>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => sendRemote('left')}
+                    aria-label={t('Remote Left', '遥控器左')}
+                    className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+                  >
+                    <ChevronLeft className="w-6 h-6" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendRemote('ok')}
+                    className="tactile-btn h-12 px-7 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-black text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
+                  >
+                    OK · {activePauseLabel}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendRemote('right')}
+                    aria-label={t('Remote Right', '遥控器右')}
+                    className="tactile-btn h-12 w-14 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer"
+                  >
+                    <ChevronRight className="w-6 h-6" />
+                  </button>
+                </div>
+                {otherPlayers.length > 0 && (
+                  <div className="flex items-center justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setPassHostOpen(true)}
+                      className="h-9 px-4 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#FFB800]/40 text-xs font-bold text-[#FFB800] inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Crown className="w-3.5 h-3.5 text-[#FFB800]" />
+                      {t('Kick Players / Pass Host', '踢出玩家 / 移交房主')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
+              <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+              <span>
+                {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
+                <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+              </span>
+            </p>
+          )}
+        </div>
       </div>
     );
   }
@@ -3440,16 +3891,27 @@ export function PhoneController({
   const schema = gameMeta.controllerSchema;
   const cdA = Math.max(0, Math.min(1, me.cooldownA));
   const cdB = Math.max(0, Math.min(1, me.cooldownB));
+  const hudOpacity = controllerPrefs.pocketHudOpacity;
 
   const firstAction: 'a' | 'b' = !embedded && controllerPrefs.swapAB ? 'b' : 'a';
   const secondAction: 'a' | 'b' = firstAction === 'a' ? 'b' : 'a';
 
-  const renderActionButton = (which: 'a' | 'b', extraClass = '') => {
+  const cyclePocketHudOpacity = () => {
+    const levels = [0.45, 0.62, 0.8];
+    const next = levels.find((l) => l > hudOpacity + 0.05) ?? levels[0];
+    updateControllerPrefs({ ...controllerPrefs, pocketHudOpacity: next });
+  };
+
+  const renderActionButton = (which: 'a' | 'b', extraClass = '', translucent = false) => {
     const isA = which === 'a';
     const spec = isA ? schema.actionA : schema.actionB;
     const pressed = isA ? pressedA : pressedB;
     const cd = isA ? cdA : cdB;
-    const sizeClass = embedded
+    const sizeClass = translucent
+      ? isA
+        ? 'w-[76px] h-[76px] sm:w-[88px] sm:h-[88px] text-xs sm:text-sm'
+        : 'w-[66px] h-[66px] sm:w-[76px] sm:h-[76px] text-[11px] sm:text-xs'
+      : embedded
       ? isA
         ? 'w-[74px] h-[74px] text-xs'
         : 'w-[66px] h-[66px] text-[11px]'
@@ -3470,9 +3932,13 @@ export function PhoneController({
           onPointerCancel={(e) => onActionUp(which, e)}
           onLostPointerCapture={(e) => onActionUp(which, e)}
           onContextMenu={(e) => e.preventDefault()}
-          className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${sizeClass}`}
+          className={`relative rounded-full flex flex-col items-center justify-center font-display font-extrabold touch-none select-none cursor-pointer ${sizeClass} ${
+            translucent ? 'border-2 border-white/35 backdrop-blur-[2px]' : ''
+          }`}
           style={{
-            backgroundColor: spec.colorHex,
+            backgroundColor: translucent
+              ? hexToRgba(spec.colorHex, Math.max(0.45, Math.min(0.92, hudOpacity + 0.16)))
+              : spec.colorHex,
             color: spec.textColor,
             transform: pressed ? 'translateY(4px) scale(0.96)' : 'translateY(0)',
             boxShadow: pressed
@@ -3498,18 +3964,449 @@ export function PhoneController({
             </span>
           )}
         </button>
-        <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
-          {spec.sublabel}
-        </span>
+        {!translucent && (
+          <span className="mt-1 text-[10px] sm:text-[11px] font-medium text-[#8B95A7] leading-none">
+            {spec.sublabel}
+          </span>
+        )}
       </div>
     );
   };
 
+  const useIntegratedHud = isPocketRoom && !isCardGame;
+
+  const topControlBar =
+    repositionMode && !embedded && !isCardGame ? (
+      <div className="relative z-30 flex items-center justify-between gap-2 h-10 shrink-0 px-2 rounded-xl bg-[#1A1E26]/95 border border-[#00C2FF]/60">
+        <div className="flex items-center gap-2 min-w-0">
+          <Move className="w-4 h-4 text-[#00C2FF] shrink-0" />
+          <span className="text-xs font-bold text-white truncate">
+            {t(
+              'Drag the joystick or A/B buttons to fit your thumbs',
+              '直接拖动摇杆或 A/B 按键到最顺手的位置'
+            )}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleResetControllerPrefs}
+            className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>{t('Reset', '重置')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRepositionMode(false);
+              setSettingsOpen(true);
+            }}
+            className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#00C2FF] inline-flex items-center gap-1 cursor-pointer"
+          >
+            <SlidersHorizontal className="w-3 h-3" />
+            <span>{t('Sliders', '详细设置')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRepositionMode(false)}
+            className="h-7 px-3 rounded-lg bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>{t('Done', '完成')}</span>
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div
+        className={`relative z-20 flex items-center justify-between gap-2 h-10 shrink-0 px-2 ${
+          useIntegratedHud
+            ? 'rounded-xl bg-[#0D1017]/75 border border-white/10 backdrop-blur-sm'
+            : ''
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+          <div className="min-w-0 leading-tight">
+            <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+              <span className="truncate">{me.name}</span>
+              {room.teamMode !== 'ffa' && (() => {
+                const spec = getTeamSpec(me.teamId);
+                return spec ? (
+                  <span
+                    className="px-1.5 py-0.2 rounded text-[9px] font-mono font-black shrink-0"
+                    style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
+                  >
+                    {spec.emoji} {lang === 'zh' ? spec.nameZh : spec.shortName}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+            <div className="text-[11px] font-mono text-[#9CA3AF] truncate tabular-nums">
+              {translateGameText(me.statText, lang)}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {room.frenzy.active && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FF4D2E]/25 border border-[#FF4D2E] text-[#FF9B8A] font-mono text-[10px] font-black animate-pulse">
+              <Flame className="w-3 h-3 text-[#FFB800]" />
+              <span>{t('2× FRENZY', '2× 狂热')}</span>
+            </span>
+          )}
+          {activeMutatorSpec.invertControls && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FF3B9A]/20 border border-[#FF3B9A]/70 text-[#FF8DC7] font-mono text-[10px] font-black">
+              {t('MIRROR', '反转')}
+            </span>
+          )}
+          {activeTournament && (
+            <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FFB800]/18 text-[#FFB800] font-mono text-[10px] font-black">
+              🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
+            </span>
+          )}
+          {!useIntegratedHud && (
+            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden lg:inline">
+              {gameMeta.name}
+            </span>
+          )}
+          {!isCardGame && (
+            <div
+              role="group"
+              aria-label={t('Switch controller pad', '切换手柄模式')}
+              className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#101217]/90 border border-[#262C38]"
+            >
+              {(
+                [
+                  { id: 'analog', en: 'Stick', zh: '摇杆' },
+                  { id: 'arrows', en: 'Arrows', zh: '箭头' },
+                  { id: 'trackpad', en: 'Swipe', zh: '滑控' },
+                ] as const
+              ).map((opt, idx) => {
+                const active = activeArcadePad === opt.id;
+                const isSuggested = recommendedPadMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleSelectArcadePad(opt.id)}
+                    className={`h-7 px-2 rounded-md text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-[#FF4D2E] text-white'
+                        : 'text-[#9CA3AF] hover:text-white'
+                    }`}
+                  >
+                    <span>{idx + 1}·{t(opt.en, opt.zh)}</span>
+                    {isSuggested && !active && (
+                      <span
+                        aria-hidden="true"
+                        className="w-1.5 h-1.5 rounded-full bg-[#10D98B]"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {isPocketRoom && !isCardGame && (
+            <button
+              type="button"
+              onClick={cyclePocketHudOpacity}
+              title={t('Cycle Pocket HUD Transparency', '切换按键透明度')}
+              className="h-8 px-2 rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[10px] font-mono font-bold text-[#00C2FF] cursor-pointer whitespace-nowrap"
+            >
+              {Math.round(hudOpacity * 100)}%
+            </button>
+          )}
+          {isPocketRoom && isCardGame && (
+            <button
+              type="button"
+              onClick={() => setPocketCardTableExpanded((v) => !v)}
+              className="h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[10px] font-bold text-[#00C2FF] cursor-pointer whitespace-nowrap"
+            >
+              {pocketCardTableExpanded ? t('Focus Hand', '放大手牌') : t('Expand Table', '放大桌面')}
+            </button>
+          )}
+          {isPocketRoom && (
+            <button
+              type="button"
+              onClick={() => {
+                arcadeAudio.unlock();
+                setPocketMuted((m) => !m);
+              }}
+              aria-label={pocketMuted ? t('Unmute sound', '开启音效') : t('Mute sound', '静音音效')}
+              className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer ${
+                pocketMuted
+                  ? 'bg-[#1E232D] text-[#9CA3AF]'
+                  : 'bg-[#10D98B]/20 border border-[#10D98B]/45 text-[#10D98B]'
+              }`}
+            >
+              {pocketMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+          )}
+          {connectedGamepadName && !embedded && (
+            <span
+              title={`${t('Controller connected:', '已连接实体手柄：')} ${connectedGamepadName}`}
+              className="min-h-[34px] min-w-[30px] rounded-lg bg-[#10D98B]/15 border border-[#10D98B]/50 text-[#10D98B] flex items-center justify-center shrink-0"
+            >
+              <Gamepad2 className="w-4 h-4" />
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setEmoteDrawerOpen((v) => !v)}
+            aria-label={t('Send quick emote', '发送表情互动')}
+            title={t('Send Emote', '发送互动表情')}
+            className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+              emoteDrawerOpen
+                ? 'bg-[#FFB800] text-[#14120B]'
+                : 'bg-[#1E232D] hover:bg-[#242A36] text-[#FFB800]'
+            }`}
+          >
+            <Smile className="w-4 h-4" />
+          </button>
+          {!embedded && <LanguageToggle compact />}
+          {isRoomHost && room.status === 'PLAYING' && (
+            <button
+              type="button"
+              onClick={() => wsRef.current?.send({ type: 'game:pause', paused: true })}
+              aria-label={t('Pause game', '暂停游戏')}
+              title={t('Pause Game (Host)', '暂停游戏（房主）')}
+              className="min-h-[34px] px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#FFB800] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+            >
+              <Pause className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t('Pause', '暂停')}</span>
+            </button>
+          )}
+          {!wsConnected && (
+            <span className="text-[11px] font-semibold text-[#FFB800] inline-flex items-center gap-1.5">
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+              <span>{t('Reconnecting...', '正在重连...')}</span>
+            </span>
+          )}
+          {!embedded && (
+            <button
+              type="button"
+              onClick={() => {
+                resetControlsState();
+                setSettingsOpen(true);
+              }}
+              aria-label={t('Controller settings & calibration', '手柄位置与按键校准')}
+              title={t('Calibrate Pad & Settings', '4 合 1 手柄位置与功能设置')}
+              className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#00C2FF] flex items-center justify-center cursor-pointer"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+            </button>
+          )}
+          {!embedded && (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+              className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleLeave}
+            aria-label={t('Leave room', '退出房间')}
+            className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+
+  const analogPadSurface = (translucent: boolean) => (
+    <div
+      className={
+        translucent
+          ? 'flex-1 flex items-end justify-between gap-2 min-h-0 px-2 pb-1.5 pointer-events-none'
+          : 'flex-1 grid grid-cols-2 items-center gap-2 min-h-0'
+      }
+    >
+      {/* Left Half: Virtual Joystick */}
+      <div
+        onPointerDown={onStickPointerDown}
+        onPointerMove={onStickPointerMove}
+        onPointerUp={releaseStick}
+        onPointerCancel={releaseStick}
+        onLostPointerCapture={releaseStick}
+        onContextMenu={(e) => e.preventDefault()}
+        className={
+          translucent
+            ? `pointer-events-auto pb-1 pl-1 sm:pl-3 flex flex-col justify-end touch-none select-none ${
+                repositionMode ? '' : 'cursor-grab active:cursor-grabbing'
+              }`
+            : `h-full flex flex-col justify-center touch-none select-none ${
+                repositionMode ? '' : 'cursor-grab active:cursor-grabbing'
+              } ${embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'}`
+        }
+      >
+        <div
+          onPointerDown={(e) => startRepositionDrag('stick', e)}
+          onPointerMove={moveRepositionDrag}
+          onPointerUp={endRepositionDrag}
+          onPointerCancel={endRepositionDrag}
+          onLostPointerCapture={endRepositionDrag}
+          className={`relative flex flex-col items-center ${
+            repositionMode
+              ? 'pointer-events-auto cursor-move rounded-3xl p-2 border-2 border-dashed border-[#00C2FF] bg-[#00C2FF]/10'
+              : 'pointer-events-none'
+          }`}
+          style={{
+            transform: `translate3d(${(embedded ? 0 : controllerPrefs.stickOffsetX) + floatingOriginOffset.x}px, ${(embedded ? 0 : controllerPrefs.stickOffsetY) + floatingOriginOffset.y}px, 0) scale(${embedded ? 1 : controllerPrefs.stickScale})`,
+          }}
+        >
+          {repositionMode && (
+            <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#00C2FF] text-[#0B1219] font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
+              {t('Drag Stick', '拖动摇杆')}
+            </span>
+          )}
+          <div
+            ref={stickZoneRef}
+            className={`relative rounded-full border-2 flex items-center justify-center ${
+              translucent
+                ? 'w-32 h-32 sm:w-36 sm:h-36 backdrop-blur-[2px]'
+                : embedded
+                ? 'w-32 h-32'
+                : 'w-40 h-40 sm:w-44 sm:h-44'
+            }`}
+            style={{
+              backgroundColor: translucent ? `rgba(16, 18, 23, ${hudOpacity})` : '#101217',
+              borderColor: stickActive
+                ? me.color.hex
+                : translucent
+                ? 'rgba(255,255,255,0.24)'
+                : '#2A303D',
+              boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
+            }}
+          >
+            {/* Subtle directional crosshairs */}
+            <div className="absolute inset-4 rounded-full border border-dashed border-white/10" />
+            <div className="absolute w-px h-3/4 bg-white/5" />
+            <div className="absolute h-px w-3/4 bg-white/5" />
+
+            {/* Movable tactile thumbstick knob */}
+            <div
+              className={`rounded-full flex items-center justify-center ${
+                translucent
+                  ? 'w-14 h-14 sm:w-16 sm:h-16'
+                  : embedded
+                  ? 'w-14 h-14'
+                  : 'w-[74px] h-[74px] sm:w-20 sm:h-20'
+              }`}
+              style={{
+                transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
+                backgroundColor: translucent
+                  ? hexToRgba(me.color.hex, Math.max(0.55, Math.min(0.95, hudOpacity + 0.22)))
+                  : me.color.hex,
+                boxShadow: `0 6px 0 ${me.color.dark}, 0 10px 20px rgba(0,0,0,0.5)`,
+              }}
+            >
+              <div className="w-1/2 h-1/2 rounded-full bg-black/20 border border-white/25" />
+            </div>
+          </div>
+
+          {!translucent && (
+            <span className="mt-1.5 text-[11px] font-semibold text-[#8B95A7] tracking-wide">
+              {schema.joystickLabel}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Right Half: Action Buttons A & B + Turbo-A Pin */}
+      <div
+        onContextMenu={(e) => e.preventDefault()}
+        className={
+          translucent
+            ? 'pointer-events-auto relative pb-1 pr-1 sm:pr-3 flex flex-col items-end justify-end gap-1.5 touch-none select-none'
+            : `relative h-full flex items-center touch-none select-none ${
+                embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
+              }`
+        }
+      >
+        {!repositionMode && (
+          <button
+            type="button"
+            onClick={() => setAutoTapPinned((v) => !v)}
+            title={t('Toggle Auto-Tap A', '切换 A 键自动连点')}
+            className={`${
+              translucent ? '' : 'absolute top-1 right-1 sm:right-3'
+            } h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors ${
+              autoTapPinned
+                ? 'bg-[#FFB800] border-[#FFE082] text-[#14120B]'
+                : 'border-white/25 text-[#D1D5DB] hover:text-white'
+            }`}
+            style={
+              autoTapPinned
+                ? undefined
+                : {
+                    backgroundColor: translucent
+                      ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
+                      : '#181C24',
+                  }
+            }
+          >
+            <Repeat className={`w-3 h-3 ${autoTapPinned ? 'animate-spin' : ''}`} />
+            <span>{autoTapPinned ? t('Turbo ON', '连发开') : t('Turbo', '连发')}</span>
+          </button>
+        )}
+        <div
+          onPointerDown={(e) => startRepositionDrag('buttons', e)}
+          onPointerMove={moveRepositionDrag}
+          onPointerUp={endRepositionDrag}
+          onPointerCancel={endRepositionDrag}
+          onLostPointerCapture={endRepositionDrag}
+          className={`relative flex items-center justify-center ${
+            !embedded && controllerPrefs.buttonLayout === 'horizontal' ? 'flex-row' : 'flex-col'
+          } ${
+            repositionMode
+              ? 'cursor-move rounded-3xl p-2.5 border-2 border-dashed border-[#FF4D2E] bg-[#FF4D2E]/10'
+              : ''
+          }`}
+          style={{
+            gap: translucent ? '10px' : embedded ? '10px' : `${controllerPrefs.buttonGap}px`,
+            transform: `translate3d(${embedded ? 0 : controllerPrefs.buttonsOffsetX}px, ${embedded ? 0 : controllerPrefs.buttonsOffsetY}px, 0) scale(${embedded ? 1 : controllerPrefs.buttonsScale})`,
+          }}
+        >
+          {repositionMode && (
+            <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#FF4D2E] text-white font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
+              {t('Drag Buttons', '拖动按键')}
+            </span>
+          )}
+          {renderActionButton(
+            firstAction,
+            !embedded && controllerPrefs.buttonLayout === 'angled'
+              ? '-translate-x-3.5'
+              : !embedded && controllerPrefs.buttonLayout === 'horizontal'
+              ? 'mt-3'
+              : '',
+            translucent
+          )}
+          {renderActionButton(
+            secondAction,
+            !embedded && controllerPrefs.buttonLayout === 'angled'
+              ? 'translate-x-3.5'
+              : !embedded && controllerPrefs.buttonLayout === 'horizontal'
+              ? '-mt-3'
+              : '',
+            translucent
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return renderConnectedShell(
     <div
-      className={`relative flex flex-col justify-between h-full w-full max-w-6xl mx-auto transition-transform duration-75 ${
-        isCardRedWarning ? 'p-1.5' : ''
-      }`}
+      className={`relative flex flex-col justify-between h-full w-full ${
+        useIntegratedHud ? 'overflow-hidden' : 'max-w-6xl mx-auto'
+      } transition-transform duration-75 ${isCardRedWarning ? 'p-1.5' : ''}`}
       style={{
         boxShadow: isCardRedWarning
           ? 'inset 0 0 0 4px #FF3B30, inset 0 0 38px rgba(255, 59, 48, 0.72), 0 0 22px rgba(255, 59, 48, 0.55)'
@@ -3520,209 +4417,37 @@ export function PhoneController({
       {isCardRedWarning && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-[14px] border-4 border-[#FF3B30] shadow-[inset_0_0_44px_rgba(255,59,48,0.82)] animate-pulse z-20"
+          className="pointer-events-none absolute inset-0 rounded-[14px] border-4 border-[#FF3B30] shadow-[inset_0_0_44px_rgba(255,59,48,0.82)] animate-pulse z-30"
         />
       )}
-      {/* Compact Top Status Bar OR Live Drag-Reposition Toolbar */}
-      {repositionMode && !embedded && !isCardGame ? (
-        <div className="flex items-center justify-between gap-2 h-10 shrink-0 px-2 rounded-xl bg-[#1A1E26] border border-[#00C2FF]/60 z-30">
-          <div className="flex items-center gap-2 min-w-0">
-            <Move className="w-4 h-4 text-[#00C2FF] shrink-0" />
-            <span className="text-xs font-bold text-white truncate">
-              {t(
-                'Drag the joystick or A/B buttons to fit your thumbs',
-                '直接拖动摇杆或 A/B 按键到最顺手的位置'
-              )}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleResetControllerPrefs}
-              className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>{t('Reset', '重置')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setRepositionMode(false);
-                setSettingsOpen(true);
-              }}
-              className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[11px] font-bold text-[#00C2FF] inline-flex items-center gap-1 cursor-pointer"
-            >
-              <SlidersHorizontal className="w-3 h-3" />
-              <span>{t('Sliders', '详细设置')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRepositionMode(false)}
-              className="h-7 px-3 rounded-lg bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>{t('Done', '完成')}</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-center justify-between gap-3 h-10 shrink-0 px-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
-            <div className="min-w-0 leading-tight">
-              <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                <span className="truncate">{me.name}</span>
-                {room.teamMode !== 'ffa' && (() => {
-                  const spec = getTeamSpec(me.teamId);
-                  return spec ? (
-                    <span
-                      className="px-1.5 py-0.2 rounded text-[9px] font-mono font-black shrink-0"
-                      style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
-                    >
-                      {spec.emoji} {lang === 'zh' ? spec.nameZh : spec.shortName}
-                    </span>
-                  ) : null;
-                })()}
-              </div>
-              <div className="text-[11px] font-mono text-[#9CA3AF] truncate tabular-nums">
-                {translateGameText(me.statText, lang)}
+
+      {/* Pocket Mode Integrated Full-Arena Background Canvas */}
+      {useIntegratedHud && (
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          <PocketArenaCanvas
+            gameId={room.selectedGameId}
+            status={room.status}
+            snapshotRef={latestSnapshotRef}
+            competitiveRef={latestCompetitiveRef}
+            fxRef={fxRef}
+            tickVersion={pocketTickVersion}
+          />
+          {room.status === 'COUNTDOWN' && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="px-6 py-3 rounded-3xl bg-[#0B0E14]/85 border-2 border-[#FFB800] text-center shadow-2xl">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[#FFB800]">
+                  {gameMeta.name}
+                </div>
+                <div className="font-display text-5xl font-black text-white tabular-nums mt-0.5">
+                  {room.countdownValue}
+                </div>
               </div>
             </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {room.frenzy.active && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FF4D2E]/25 border border-[#FF4D2E] text-[#FF9B8A] font-mono text-[10px] font-black animate-pulse">
-                <Flame className="w-3 h-3 text-[#FFB800]" />
-                <span>{t('2× FRENZY', '2× 狂热')}</span>
-              </span>
-            )}
-            {activeMutatorSpec.invertControls && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FF3B9A]/20 border border-[#FF3B9A]/70 text-[#FF8DC7] font-mono text-[10px] font-black">
-                {t('MIRROR', '反转')}
-              </span>
-            )}
-            {activeTournament && (
-              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FFB800]/18 text-[#FFB800] font-mono text-[10px] font-black">
-                🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
-              </span>
-            )}
-            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden lg:inline">
-              {gameMeta.name}
-            </span>
-            {!isCardGame && (
-              <div
-                role="group"
-                aria-label={t('Switch controller pad', '切换手柄模式')}
-                className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#101217] border border-[#262C38]"
-              >
-                {(
-                  [
-                    { id: 'analog', en: 'Stick', zh: '摇杆' },
-                    { id: 'arrows', en: 'Arrows', zh: '箭头' },
-                    { id: 'trackpad', en: 'Swipe', zh: '滑控' },
-                  ] as const
-                ).map((opt, idx) => {
-                  const active = activeArcadePad === opt.id;
-                  const isSuggested = recommendedPadMode === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => handleSelectArcadePad(opt.id)}
-                      className={`h-7 px-2 rounded-md text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer transition-colors ${
-                        active
-                          ? 'bg-[#FF4D2E] text-white'
-                          : 'text-[#9CA3AF] hover:text-white'
-                      }`}
-                    >
-                      <span>{idx + 1}·{t(opt.en, opt.zh)}</span>
-                      {isSuggested && !active && (
-                        <span
-                          aria-hidden="true"
-                          className="w-1.5 h-1.5 rounded-full bg-[#10D98B]"
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {connectedGamepadName && !embedded && (
-              <span
-                title={`${t('Controller connected:', '已连接实体手柄：')} ${connectedGamepadName}`}
-                className="min-h-[34px] min-w-[30px] rounded-lg bg-[#10D98B]/15 border border-[#10D98B]/50 text-[#10D98B] flex items-center justify-center shrink-0"
-              >
-                <Gamepad2 className="w-4 h-4" />
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setEmoteDrawerOpen((v) => !v)}
-              aria-label={t('Send quick emote', '发送表情互动')}
-              title={t('Send Emote to TV', '发送大屏互动表情')}
-              className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
-                emoteDrawerOpen
-                  ? 'bg-[#FFB800] text-[#14120B]'
-                  : 'bg-[#1E232D] hover:bg-[#242A36] text-[#FFB800]'
-              }`}
-            >
-              <Smile className="w-4 h-4" />
-            </button>
-            {!embedded && <LanguageToggle compact />}
-            {isRoomHost && room.status === 'PLAYING' && (
-              <button
-                type="button"
-                onClick={() => wsRef.current?.send({ type: 'game:pause', paused: true })}
-                aria-label={t('Pause game', '暂停游戏')}
-                title={t('Pause Game (Host)', '暂停游戏（房主）')}
-                className="min-h-[34px] px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#FFB800] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-              >
-                <Pause className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{t('Pause', '暂停')}</span>
-              </button>
-            )}
-            {!wsConnected && (
-              <span className="text-[11px] font-semibold text-[#FFB800] inline-flex items-center gap-1.5">
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
-                <span>{t('Reconnecting...', '正在重连...')}</span>
-              </span>
-            )}
-            {!embedded && (
-              <button
-                type="button"
-                onClick={() => {
-                  resetControlsState();
-                  setSettingsOpen(true);
-                }}
-                aria-label={t('Controller settings & calibration', '手柄位置与按键校准')}
-                title={t('Calibrate Pad & Settings', '4 合 1 手柄位置与功能设置')}
-                className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#00C2FF] flex items-center justify-center cursor-pointer"
-              >
-                <SlidersHorizontal className="w-4 h-4" />
-              </button>
-            )}
-            {!embedded && (
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
-                className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
-              >
-                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleLeave}
-              aria-label={t('Leave room', '退出房间')}
-              className="min-h-[34px] min-w-[34px] rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+          )}
         </div>
       )}
+
+      {topControlBar}
 
       {/* Floating Quick Live Emote Bar (Available across ALL 4 Pads!) */}
       {emoteDrawerOpen && (
@@ -3741,267 +4466,210 @@ export function PhoneController({
       )}
 
       {isCardGame ? (
-        /* PAD 4: Dedicated Private Card & Tabletop Pad */
-        <CardControllerDeck
-          cardState={cardState}
-          playerColorHex={me.color.hex}
-          embedded={embedded}
-          isCountdown={room.status === 'COUNTDOWN'}
-          countdownValue={room.countdownValue}
-          viewMode={controllerPrefs.cardViewMode}
-          recommendedView={effectiveCardDefaultView}
-          sortMode={controllerPrefs.cardSortMode}
-          privacyShield={controllerPrefs.cardPrivacyShield}
-          actionsSide={controllerPrefs.cardActionsSide}
-          onChangeViewMode={(next) =>
-            updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
-          }
-          onCycleSortMode={() => {
-            const order = ['server', 'playable', 'rank'] as const;
-            const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
-            updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
-          }}
-          onTogglePrivacy={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
-            })
-          }
-          onFlipActionsSide={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
-            })
-          }
-          onAction={sendCardAction}
-        />
-      ) : activeArcadePad === 'arrows' ? (
-        /* PAD 2: Beginner-Friendly Easy Tap Arrows + Verb-Labeled A/B + Auto-Tap */
-        <EasyArrowsDeck
-          schema={schema}
-          accentHex={me.color.hex}
-          cooldownA={cdA}
-          cooldownB={cdB}
-          pressedA={pressedA}
-          pressedB={pressedB}
-          strictFourWay={effectiveArrowsStrictFourWay}
-          autoTapActive={autoTapPinned}
-          preferAutoTap={Boolean(currentPadProfile?.preferAutoTap)}
-          swapAB={!embedded && controllerPrefs.swapAB}
-          embedded={embedded}
-          disabled={settingsOpen}
-          isTurboDrift={room.selectedGameId === 'turbo-drift'}
-          onVectorChange={handleSetVector}
-          onActionDown={onActionDown}
-          onActionUp={onActionUp}
-          onToggleAutoTap={() => setAutoTapPinned((v) => !v)}
-          onToggleStrictFourWay={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              arrowsStrictFourWay: !effectiveArrowsStrictFourWay,
-            })
-          }
-        />
-      ) : activeArcadePad === 'trackpad' ? (
-        /* PAD 3: Swipe Trackpad + Reversible Ergonomic Side Triggers */
-        <SwipeTrackpadDeck
-          schema={schema}
-          accentHex={me.color.hex}
-          cooldownA={cdA}
-          cooldownB={cdB}
-          pressedA={pressedA}
-          pressedB={pressedB}
-          trackpadMode={effectiveTrackpadMode}
-          handedness={controllerPrefs.trackpadHandedness}
-          tapForA={effectiveTrackpadTapForA}
-          sensitivity={controllerPrefs.trackpadSensitivity}
-          swapAB={!embedded && controllerPrefs.swapAB}
-          isCssRotated={isCssRotated}
-          embedded={embedded}
-          disabled={settingsOpen}
-          isTurboDrift={room.selectedGameId === 'turbo-drift'}
-          onVectorChange={handleSetVector}
-          onPulseActionA={handlePulseActionA}
-          onActionDown={onActionDown}
-          onActionUp={onActionUp}
-          onToggleTrackpadMode={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              trackpadModeOverride: effectiveTrackpadMode === 'glide' ? 'flick' : 'glide',
-            })
-          }
-          onToggleHandedness={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              trackpadHandedness:
-                controllerPrefs.trackpadHandedness === 'right' ? 'left' : 'right',
-            })
-          }
-          onToggleTapForA={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              trackpadTapForAOverride: !effectiveTrackpadTapForA,
-            })
-          }
-        />
-      ) : (
-        /* PAD 1: Pro Analog Console (360° Thumbstick + A/B + Turbo Pin) */
-        <div className="flex-1 grid grid-cols-2 items-center gap-2 min-h-0">
-          {/* Left Half: Generous Touch Zone with Calibrated Virtual Joystick */}
-          <div
-            onPointerDown={onStickPointerDown}
-            onPointerMove={onStickPointerMove}
-            onPointerUp={releaseStick}
-            onPointerCancel={releaseStick}
-            onLostPointerCapture={releaseStick}
-            onContextMenu={(e) => e.preventDefault()}
-            className={`h-full flex flex-col justify-center touch-none select-none ${
-              repositionMode ? '' : 'cursor-grab active:cursor-grabbing'
-            } ${embedded ? 'items-center' : 'items-start pl-3 sm:pl-10'}`}
-          >
-            <div
-              onPointerDown={(e) => startRepositionDrag('stick', e)}
-              onPointerMove={moveRepositionDrag}
-              onPointerUp={endRepositionDrag}
-              onPointerCancel={endRepositionDrag}
-              onLostPointerCapture={endRepositionDrag}
-              className={`relative flex flex-col items-center ${
-                repositionMode
-                  ? 'pointer-events-auto cursor-move rounded-3xl p-2 border-2 border-dashed border-[#00C2FF] bg-[#00C2FF]/10'
-                  : 'pointer-events-none'
+        isPocketRoom ? (
+          /* POCKET CARD GAME SPLIT: Live Shared Tabletop + Private Hand Deck */
+          <div className="flex-1 min-h-0 flex gap-2 pt-1.5">
+            <button
+              type="button"
+              onClick={() => setPocketCardTableExpanded((v) => !v)}
+              title={t('Tap to resize shared tabletop', '点击切换桌面大小')}
+              className={`relative rounded-2xl overflow-hidden border border-[#262E3E] bg-[#080A0F] shrink-0 cursor-pointer transition-all ${
+                pocketCardTableExpanded ? 'w-[58%]' : 'w-[34%]'
               }`}
-              style={{
-                transform: `translate3d(${(embedded ? 0 : controllerPrefs.stickOffsetX) + floatingOriginOffset.x}px, ${(embedded ? 0 : controllerPrefs.stickOffsetY) + floatingOriginOffset.y}px, 0) scale(${embedded ? 1 : controllerPrefs.stickScale})`,
-              }}
             >
-              {repositionMode && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#00C2FF] text-[#0B1219] font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
-                  {t('Drag Stick', '拖动摇杆')}
-                </span>
-              )}
-              <div
-                ref={stickZoneRef}
-                className={`relative rounded-full bg-[#101217] border-2 flex items-center justify-center ${
-                  embedded ? 'w-32 h-32' : 'w-40 h-40 sm:w-44 sm:h-44'
-                }`}
-                style={{
-                  borderColor: stickActive ? me.color.hex : '#2A303D',
-                  boxShadow: 'inset 0 6px 18px rgba(0,0,0,0.65)',
-                }}
-              >
-                {/* Subtle directional crosshairs */}
-                <div className="absolute inset-4 rounded-full border border-dashed border-white/10" />
-                <div className="absolute w-px h-3/4 bg-white/5" />
-                <div className="absolute h-px w-3/4 bg-white/5" />
-
-                {/* Movable tactile thumbstick knob */}
-                <div
-                  className={`rounded-full flex items-center justify-center ${
-                    embedded ? 'w-14 h-14' : 'w-[74px] h-[74px] sm:w-20 sm:h-20'
-                  }`}
-                  style={{
-                    transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
-                    backgroundColor: me.color.hex,
-                    boxShadow: `0 6px 0 ${me.color.dark}, 0 10px 20px rgba(0,0,0,0.5)`,
-                  }}
-                >
-                  <div className="w-1/2 h-1/2 rounded-full bg-black/20 border border-white/25" />
-                </div>
-              </div>
-
-              <span className="mt-1.5 text-[11px] font-semibold text-[#8B95A7] tracking-wide">
-                {schema.joystickLabel}
+              <PocketArenaCanvas
+                gameId={room.selectedGameId}
+                status={room.status}
+                snapshotRef={latestSnapshotRef}
+                competitiveRef={latestCompetitiveRef}
+                fxRef={fxRef}
+                tickVersion={pocketTickVersion}
+              />
+              <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-[#0B0E14]/80 text-[9px] font-bold text-[#00C2FF]">
+                {t('TABLE', '牌桌')}
               </span>
+            </button>
+            <div className="flex-1 min-w-0 flex flex-col">
+              <CardControllerDeck
+                cardState={cardState}
+                playerColorHex={me.color.hex}
+                embedded={embedded}
+                isCountdown={room.status === 'COUNTDOWN'}
+                countdownValue={room.countdownValue}
+                viewMode={controllerPrefs.cardViewMode}
+                recommendedView={effectiveCardDefaultView}
+                sortMode={controllerPrefs.cardSortMode}
+                privacyShield={controllerPrefs.cardPrivacyShield}
+                actionsSide={controllerPrefs.cardActionsSide}
+                onChangeViewMode={(next) =>
+                  updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
+                }
+                onCycleSortMode={() => {
+                  const order = ['server', 'playable', 'rank'] as const;
+                  const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
+                  updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
+                }}
+                onTogglePrivacy={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
+                  })
+                }
+                onFlipActionsSide={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
+                  })
+                }
+                onAction={sendCardAction}
+              />
             </div>
           </div>
-
-          {/* Right Half: Calibrated Action Buttons A & B + Turbo-A Pin */}
-          <div
-            onContextMenu={(e) => e.preventDefault()}
-            className={`relative h-full flex items-center touch-none select-none ${
-              embedded ? 'justify-center' : 'justify-end pr-3 sm:pr-10'
-            }`}
-          >
-            {!repositionMode && (
-              <button
-                type="button"
-                onClick={() => setAutoTapPinned((v) => !v)}
-                title={t('Toggle Auto-Tap A', '切换 A 键自动连点')}
-                className={`absolute top-1 right-1 sm:right-3 h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors ${
-                  autoTapPinned
-                    ? 'bg-[#FFB800] border-[#FFE082] text-[#14120B]'
-                    : 'bg-[#181C24] border-[#2A303D] text-[#9CA3AF] hover:text-white'
-                }`}
-              >
-                <Repeat className={`w-3 h-3 ${autoTapPinned ? 'animate-spin' : ''}`} />
-                <span>{autoTapPinned ? t('Turbo ON', '连发开') : t('Turbo', '连发')}</span>
-              </button>
-            )}
-            <div
-              onPointerDown={(e) => startRepositionDrag('buttons', e)}
-              onPointerMove={moveRepositionDrag}
-              onPointerUp={endRepositionDrag}
-              onPointerCancel={endRepositionDrag}
-              onLostPointerCapture={endRepositionDrag}
-              className={`relative flex items-center justify-center ${
-                !embedded && controllerPrefs.buttonLayout === 'horizontal' ? 'flex-row' : 'flex-col'
-              } ${
-                repositionMode
-                  ? 'cursor-move rounded-3xl p-2.5 border-2 border-dashed border-[#FF4D2E] bg-[#FF4D2E]/10'
-                  : ''
-              }`}
-              style={{
-                gap: embedded ? '10px' : `${controllerPrefs.buttonGap}px`,
-                transform: `translate3d(${embedded ? 0 : controllerPrefs.buttonsOffsetX}px, ${embedded ? 0 : controllerPrefs.buttonsOffsetY}px, 0) scale(${embedded ? 1 : controllerPrefs.buttonsScale})`,
-              }}
-            >
-              {repositionMode && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#FF4D2E] text-white font-mono text-[9px] font-black uppercase tracking-wider whitespace-nowrap shadow">
-                  {t('Drag Buttons', '拖动按键')}
-                </span>
-              )}
-              {renderActionButton(
-                firstAction,
-                !embedded && controllerPrefs.buttonLayout === 'angled'
-                  ? '-translate-x-3.5'
-                  : !embedded && controllerPrefs.buttonLayout === 'horizontal'
-                  ? 'mt-3'
-                  : ''
-              )}
-              {renderActionButton(
-                secondAction,
-                !embedded && controllerPrefs.buttonLayout === 'angled'
-                  ? 'translate-x-3.5'
-                  : !embedded && controllerPrefs.buttonLayout === 'horizontal'
-                  ? '-mt-3'
-                  : ''
-              )}
-            </div>
-          </div>
+        ) : (
+          /* PAD 4: Dedicated Private Card & Tabletop Pad */
+          <CardControllerDeck
+            cardState={cardState}
+            playerColorHex={me.color.hex}
+            embedded={embedded}
+            isCountdown={room.status === 'COUNTDOWN'}
+            countdownValue={room.countdownValue}
+            viewMode={controllerPrefs.cardViewMode}
+            recommendedView={effectiveCardDefaultView}
+            sortMode={controllerPrefs.cardSortMode}
+            privacyShield={controllerPrefs.cardPrivacyShield}
+            actionsSide={controllerPrefs.cardActionsSide}
+            onChangeViewMode={(next) =>
+              updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
+            }
+            onCycleSortMode={() => {
+              const order = ['server', 'playable', 'rank'] as const;
+              const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
+              updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
+            }}
+            onTogglePrivacy={() =>
+              updateControllerPrefs({
+                ...controllerPrefs,
+                cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
+              })
+            }
+            onFlipActionsSide={() =>
+              updateControllerPrefs({
+                ...controllerPrefs,
+                cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
+              })
+            }
+            onAction={sendCardAction}
+          />
+        )
+      ) : (
+        <div
+          className={`flex-1 min-h-0 flex flex-col justify-end ${
+            useIntegratedHud ? 'relative z-10 pointer-events-none' : ''
+          }`}
+        >
+          {activeArcadePad === 'arrows' ? (
+            /* PAD 2: Beginner-Friendly Easy Tap Arrows + Verb-Labeled A/B + Auto-Tap */
+            <EasyArrowsDeck
+              schema={schema}
+              accentHex={me.color.hex}
+              cooldownA={cdA}
+              cooldownB={cdB}
+              pressedA={pressedA}
+              pressedB={pressedB}
+              strictFourWay={effectiveArrowsStrictFourWay}
+              autoTapActive={autoTapPinned}
+              preferAutoTap={Boolean(currentPadProfile?.preferAutoTap)}
+              swapAB={!embedded && controllerPrefs.swapAB}
+              embedded={embedded}
+              pocketOverlay={useIntegratedHud}
+              hudOpacity={hudOpacity}
+              disabled={settingsOpen}
+              isTurboDrift={room.selectedGameId === 'turbo-drift'}
+              onVectorChange={handleSetVector}
+              onActionDown={onActionDown}
+              onActionUp={onActionUp}
+              onToggleAutoTap={() => setAutoTapPinned((v) => !v)}
+              onToggleStrictFourWay={() =>
+                updateControllerPrefs({
+                  ...controllerPrefs,
+                  arrowsStrictFourWay: !effectiveArrowsStrictFourWay,
+                })
+              }
+            />
+          ) : activeArcadePad === 'trackpad' ? (
+            /* PAD 3: Swipe Trackpad + Reversible Ergonomic Side Triggers */
+            <SwipeTrackpadDeck
+              schema={schema}
+              accentHex={me.color.hex}
+              cooldownA={cdA}
+              cooldownB={cdB}
+              pressedA={pressedA}
+              pressedB={pressedB}
+              trackpadMode={effectiveTrackpadMode}
+              handedness={controllerPrefs.trackpadHandedness}
+              tapForA={effectiveTrackpadTapForA}
+              sensitivity={controllerPrefs.trackpadSensitivity}
+              swapAB={!embedded && controllerPrefs.swapAB}
+              isCssRotated={isCssRotated}
+              embedded={embedded}
+              pocketOverlay={useIntegratedHud}
+              hudOpacity={hudOpacity}
+              disabled={settingsOpen}
+              isTurboDrift={room.selectedGameId === 'turbo-drift'}
+              onVectorChange={handleSetVector}
+              onPulseActionA={handlePulseActionA}
+              onActionDown={onActionDown}
+              onActionUp={onActionUp}
+              onToggleTrackpadMode={() =>
+                updateControllerPrefs({
+                  ...controllerPrefs,
+                  trackpadModeOverride: effectiveTrackpadMode === 'glide' ? 'flick' : 'glide',
+                })
+              }
+              onToggleHandedness={() =>
+                updateControllerPrefs({
+                  ...controllerPrefs,
+                  trackpadHandedness:
+                    controllerPrefs.trackpadHandedness === 'right' ? 'left' : 'right',
+                })
+              }
+              onToggleTapForA={() =>
+                updateControllerPrefs({
+                  ...controllerPrefs,
+                  trackpadTapForAOverride: !effectiveTrackpadTapForA,
+                })
+              }
+            />
+          ) : (
+            /* PAD 1: Pro Analog Console */
+            analogPadSurface(useIntegratedHud)
+          )}
         </div>
       )}
 
-      {/* Subtle Bottom Helper Strip */}
-      <div className="text-center text-[11px] text-[#6B7280] shrink-0">
-        {room.status === 'COUNTDOWN'
-          ? t(`Match starting in ${room.countdownValue}...`, `比赛即将在 ${room.countdownValue} 秒后开始...`)
-          : isCardGame
-          ? keyboardProfile === 'wasd'
-            ? t('Tap cards above or use A/D · Space (A) · Left Shift (B)', '点击上方手牌或使用 A/D · 空格 (A) · 左 Shift (B)')
+      {/* Subtle Bottom Helper Strip (Hidden in Pocket Integrated HUD so full screen stays open) */}
+      {!useIntegratedHud && (
+        <div className="text-center text-[11px] text-[#6B7280] shrink-0">
+          {room.status === 'COUNTDOWN'
+            ? t(`Match starting in ${room.countdownValue}...`, `比赛即将在 ${room.countdownValue} 秒后开始...`)
+            : isCardGame
+            ? keyboardProfile === 'wasd'
+              ? t('Tap cards above or use A/D · Space (A) · Left Shift (B)', '点击上方手牌或使用 A/D · 空格 (A) · 左 Shift (B)')
+              : keyboardProfile === 'arrows'
+              ? t('Tap cards above or use Arrows · Enter (A) · Right Shift (B)', '点击上方手牌或使用方向键 · 回车 (A) · 右 Shift (B)')
+              : t('Secret hand · 15s turn clock · Auto-passes on timeout', '私密手牌 · 每回合限时 15 秒 · 超时自动过牌')
+            : !me.alive
+            ? t(
+                'Knocked out — watch the monitor for next round or respawn',
+                '已被淘汰 — 请观看大屏等待复活或下一回合'
+              )
+            : keyboardProfile === 'wasd'
+            ? t('Keys: W A S D · Space (A) · Left Shift (B)', '按键：W A S D · 空格 (A) · 左 Shift (B)')
             : keyboardProfile === 'arrows'
-            ? t('Tap cards above or use Arrows · Enter (A) · Right Shift (B)', '点击上方手牌或使用方向键 · 回车 (A) · 右 Shift (B)')
-            : t('Secret hand · 15s turn clock · Auto-passes on timeout', '私密手牌 · 每回合限时 15 秒 · 超时自动过牌')
-          : !me.alive
-          ? t(
-              'Knocked out — watch the monitor for next round or respawn',
-              '已被淘汰 — 请观看大屏等待复活或下一回合'
-            )
-          : keyboardProfile === 'wasd'
-          ? t('Keys: W A S D · Space (A) · Left Shift (B)', '按键：W A S D · 空格 (A) · 左 Shift (B)')
-          : keyboardProfile === 'arrows'
-          ? t('Keys: Arrows · Enter (A) · Right Shift (B)', '按键：方向键 · 回车 (A) · 右 Shift (B)')
-          : schema.controlTip}
-      </div>
+            ? t('Keys: Arrows · Enter (A) · Right Shift (B)', '按键：方向键 · 回车 (A) · 右 Shift (B)')
+            : schema.controlTip}
+        </div>
+      )}
     </div>
   );
 }

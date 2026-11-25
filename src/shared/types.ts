@@ -2559,8 +2559,11 @@ export interface HostTransferNotice {
   reason: HostTransferReason;
 }
 
+export type RoomMode = 'monitor' | 'pocket';
+
 export interface RoomSnapshot {
   code: string;
+  roomMode: RoomMode;
   status: RoomStatus;
   selectedGameId: GameId;
   gameSettingValue: number;
@@ -2586,6 +2589,15 @@ export interface RoomSnapshot {
 
 export type ClientMessage =
   | { type: 'room:create'; preferredGameId?: GameId }
+  | {
+      type: 'room:create-pocket';
+      preferredGameId?: GameId;
+      name: string;
+      playerId?: string;
+      deviceId?: string;
+      preferredColorId?: string;
+      avatarId?: string;
+    }
   | { type: 'room:host-reattach'; code: string; hostToken: string }
   | {
       type: 'room:join';

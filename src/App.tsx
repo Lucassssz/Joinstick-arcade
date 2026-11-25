@@ -7,7 +7,7 @@ import { PhoneController } from './components/PhoneController';
 import { LanguageProvider } from './lib/i18n';
 import { arcadeAudio } from './lib/audio';
 
-type AppMode = 'landing' | 'host' | 'controller';
+type AppMode = 'landing' | 'host' | 'controller' | 'pocket';
 
 const VIEW_TRANSITION_VARIANTS = {
   initial: { opacity: 0 },
@@ -34,6 +34,9 @@ function readInitialRoute(): { mode: AppMode; roomCode: string } {
 
   if (modeParam === 'controller' || roomParam.length === 4) {
     return { mode: 'controller', roomCode: roomParam };
+  }
+  if (modeParam === 'pocket') {
+    return { mode: 'pocket', roomCode: '' };
   }
   if (modeParam === 'host') {
     return { mode: 'host', roomCode: '' };
@@ -96,6 +99,16 @@ export default function App() {
     setMode('host');
   };
 
+  const handleStartPocket = (gameId?: GameId) => {
+    forceBrowserFullscreen();
+    arcadeAudio.unlock();
+    if (gameId) setPreferredGameId(gameId);
+    const url = new URL(window.location.href);
+    url.search = '?mode=pocket';
+    window.history.pushState({}, '', url.toString());
+    setMode('pocket');
+  };
+
   const handleJoinController = (code?: string) => {
     forceBrowserFullscreen();
     const cleaned = (code || '').toUpperCase().slice(0, 4);
@@ -127,6 +140,12 @@ export default function App() {
             >
               {mode === 'host' ? (
                 <HostMonitor initialGameId={preferredGameId} onExit={navigateHome} />
+              ) : mode === 'pocket' ? (
+                <PhoneController
+                  initialMode="pocket"
+                  preferredGameId={preferredGameId}
+                  onExit={navigateHome}
+                />
               ) : mode === 'controller' ? (
                 <PhoneController
                   initialRoomCode={initialRoomCode}
@@ -135,6 +154,7 @@ export default function App() {
               ) : (
                 <LandingView
                   onHostRoom={handleHostRoom}
+                  onStartPocket={handleStartPocket}
                   onJoinController={handleJoinController}
                 />
               )}

@@ -15,6 +15,15 @@ import { useLanguage } from '../lib/i18n';
 
 type ArrowDir = 'up' | 'down' | 'left' | 'right';
 
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return `rgba(24, 28, 36, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export interface EasyArrowsDeckProps {
   schema: ControllerSchema;
   accentHex: string;
@@ -27,6 +36,8 @@ export interface EasyArrowsDeckProps {
   preferAutoTap?: boolean;
   swapAB: boolean;
   embedded?: boolean;
+  pocketOverlay?: boolean;
+  hudOpacity?: number;
   disabled?: boolean;
   isTurboDrift?: boolean;
   onVectorChange: (dx: number, dy: number) => void;
@@ -48,6 +59,8 @@ export function EasyArrowsDeck({
   preferAutoTap = false,
   swapAB,
   embedded = false,
+  pocketOverlay = false,
+  hudOpacity = 0.62,
   disabled = false,
   isTurboDrift = false,
   onVectorChange,
@@ -151,9 +164,18 @@ export function EasyArrowsDeck({
 
   const renderArrowBtn = (dir: ArrowDir, icon: React.ReactNode, labelText: string) => {
     const active = activeDirs[dir];
-    const sizeCls = embedded
+    const sizeCls = pocketOverlay
+      ? 'w-12 h-11 sm:w-[54px] sm:h-[46px] rounded-xl'
+      : embedded
       ? 'w-14 h-12 rounded-xl'
       : 'w-[68px] h-[58px] sm:w-[78px] sm:h-[64px] rounded-2xl';
+    const bg = active
+      ? pocketOverlay
+        ? hexToRgba(accentHex, Math.min(0.95, hudOpacity + 0.25))
+        : accentHex
+      : pocketOverlay
+      ? `rgba(16, 18, 23, ${hudOpacity})`
+      : '#181C24';
     return (
       <button
         type="button"
@@ -163,14 +185,18 @@ export function EasyArrowsDeck({
         onLostPointerCapture={(e) => onArrowUp(dir, e)}
         onContextMenu={(e) => e.preventDefault()}
         aria-label={labelText}
-        className={`${sizeCls} flex items-center justify-center border-2 touch-none select-none cursor-pointer transition-transform duration-75`}
+        className={`${sizeCls} flex items-center justify-center border-2 touch-none select-none cursor-pointer transition-transform duration-75 ${
+          pocketOverlay ? 'backdrop-blur-[2px]' : ''
+        }`}
         style={{
-          backgroundColor: active ? accentHex : '#181C24',
-          borderColor: active ? '#FFFFFF' : '#2E3646',
+          backgroundColor: bg,
+          borderColor: active ? '#FFFFFF' : pocketOverlay ? 'rgba(255,255,255,0.22)' : '#2E3646',
           color: active ? '#0B1016' : '#F4F6FA',
           transform: active ? 'translateY(3px) scale(0.96)' : 'translateY(0)',
           boxShadow: active
             ? '0 1px 0 rgba(0,0,0,0.6)'
+            : pocketOverlay
+            ? '0 3px 10px rgba(0,0,0,0.45)'
             : '0 5px 0 #0A0C10, 0 8px 16px rgba(0,0,0,0.42)',
         }}
       >
@@ -189,6 +215,7 @@ export function EasyArrowsDeck({
     const cd = Math.max(0, Math.min(1, isA ? cooldownA : cooldownB));
     const showPct = isA ? isTurboDrift || cd > 0.05 : cd > 0.05;
     const isAutoPulsing = isA && autoTapActive;
+    const tileOpacity = cd > 0.05 && !(isA && isTurboDrift) ? 0.72 : 1;
 
     return (
       <button
@@ -199,18 +226,26 @@ export function EasyArrowsDeck({
         onPointerCancel={(e) => onActionUp(which, e)}
         onLostPointerCapture={(e) => onActionUp(which, e)}
         onContextMenu={(e) => e.preventDefault()}
-        className={`relative w-full flex items-center justify-between gap-2.5 rounded-2xl border-2 px-4 touch-none select-none cursor-pointer transition-transform duration-75 ${
-          embedded ? 'min-h-[54px] py-2' : 'min-h-[68px] sm:min-h-[78px] py-3'
+        className={`relative w-full flex items-center justify-between gap-2 rounded-2xl border-2 px-3 touch-none select-none cursor-pointer transition-transform duration-75 ${
+          pocketOverlay
+            ? 'min-h-[48px] py-1.5 backdrop-blur-[2px]'
+            : embedded
+            ? 'min-h-[54px] py-2 px-4'
+            : 'min-h-[68px] sm:min-h-[78px] py-3 px-4'
         }`}
         style={{
-          backgroundColor: spec.colorHex,
-          borderColor: isAutoPulsing ? '#FFFFFF' : 'rgba(255,255,255,0.22)',
+          backgroundColor: pocketOverlay
+            ? hexToRgba(spec.colorHex, Math.max(0.45, Math.min(0.92, hudOpacity + 0.16)))
+            : spec.colorHex,
+          borderColor: isAutoPulsing ? '#FFFFFF' : 'rgba(255,255,255,0.28)',
           color: spec.textColor,
           transform: pressed ? 'translateY(4px) scale(0.98)' : 'translateY(0)',
           boxShadow: pressed
             ? `0 1px 0 ${spec.darkHex}`
+            : pocketOverlay
+            ? `0 4px 0 ${spec.darkHex}, 0 8px 16px rgba(0,0,0,0.45)`
             : `0 6px 0 ${spec.darkHex}, 0 12px 22px rgba(0,0,0,0.42)`,
-          opacity: cd > 0.05 && !(isA && isTurboDrift) ? 0.72 : 1,
+          opacity: tileOpacity,
         }}
       >
         <div className="flex flex-col items-start text-left min-w-0 pointer-events-none">
@@ -220,15 +255,17 @@ export function EasyArrowsDeck({
             </span>
             <span
               className={`font-display font-black leading-none truncate ${
-                embedded ? 'text-sm' : 'text-base sm:text-xl'
+                pocketOverlay || embedded ? 'text-sm' : 'text-base sm:text-xl'
               }`}
             >
               {spec.label}
             </span>
           </div>
-          <span className="mt-1 text-[10px] sm:text-xs font-semibold opacity-85 truncate max-w-full">
-            {spec.sublabel}
-          </span>
+          {!pocketOverlay && (
+            <span className="mt-1 text-[10px] sm:text-xs font-semibold opacity-85 truncate max-w-full">
+              {spec.sublabel}
+            </span>
+          )}
         </div>
 
         <div className="shrink-0 flex flex-col items-end pointer-events-none">
@@ -245,6 +282,70 @@ export function EasyArrowsDeck({
       </button>
     );
   };
+
+  if (pocketOverlay) {
+    return (
+      <div className="flex-1 flex items-end justify-between gap-2 min-h-0 px-2 pb-1.5 pointer-events-none">
+        {/* Bottom-Left Translucent 4-Arrow Pad */}
+        <div className="pointer-events-auto flex flex-col items-center gap-1 touch-none select-none">
+          <div className="grid grid-cols-3 grid-rows-3 items-center justify-items-center gap-1">
+            <div />
+            {renderArrowBtn('up', <ArrowUp className="w-5 h-5 stroke-[2.6]" />, t('Up', '上'))}
+            <div />
+
+            {renderArrowBtn('left', <ArrowLeft className="w-5 h-5 stroke-[2.6]" />, t('Left', '左'))}
+            <button
+              type="button"
+              onClick={onToggleStrictFourWay}
+              title={t('Toggle Strict 4-Way vs Diagonal Arrows', '切换：严格四向防误触 / 允许斜向')}
+              className={`w-11 h-10 rounded-xl border text-[9px] font-mono font-extrabold px-1 leading-tight text-center cursor-pointer transition-colors ${
+                strictFourWay
+                  ? 'border-[#10D98B]/75 text-[#10D98B]'
+                  : 'border-white/20 text-[#D1D5DB]'
+              }`}
+              style={{
+                backgroundColor: `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.12)})`,
+              }}
+            >
+              {strictFourWay ? t('4-WAY', '四向') : t('8-WAY', '八向')}
+            </button>
+            {renderArrowBtn('right', <ArrowRight className="w-5 h-5 stroke-[2.6]" />, t('Right', '右'))}
+
+            <div />
+            {renderArrowBtn('down', <ArrowDown className="w-5 h-5 stroke-[2.6]" />, t('Down', '下'))}
+            <div />
+          </div>
+        </div>
+
+        {/* Bottom-Right Translucent Action Tiles + Auto-Tap */}
+        <div className="pointer-events-auto flex flex-col items-stretch gap-1.5 w-[178px] sm:w-[214px] touch-none select-none">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onToggleAutoTap}
+              className={`min-h-[30px] px-2.5 py-0.5 rounded-lg border text-[10px] font-display font-extrabold inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                autoTapActive
+                  ? 'bg-[#FFB800] border-[#FFE082] text-[#14120B]'
+                  : 'border-white/25 text-[#E5E7EB]'
+              }`}
+              style={
+                autoTapActive
+                  ? undefined
+                  : { backgroundColor: `rgba(16, 18, 23, ${Math.min(0.9, hudOpacity + 0.1)})` }
+              }
+            >
+              <Repeat className={`w-3 h-3 ${autoTapActive ? 'animate-spin' : ''}`} />
+              <span>{autoTapActive ? t('Auto ON', '自动连点') : t('Auto-Tap', '连点')}</span>
+            </button>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {renderVerbActionTile(firstWhich)}
+            {renderVerbActionTile(secondWhich)}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 grid grid-cols-2 items-center gap-3 min-h-0 px-1 sm:px-4">
@@ -331,6 +432,8 @@ export interface SwipeTrackpadDeckProps {
   swapAB: boolean;
   isCssRotated: boolean;
   embedded?: boolean;
+  pocketOverlay?: boolean;
+  hudOpacity?: number;
   disabled?: boolean;
   isTurboDrift?: boolean;
   onVectorChange: (dx: number, dy: number) => void;
@@ -356,6 +459,8 @@ export function SwipeTrackpadDeck({
   swapAB,
   isCssRotated,
   embedded = false,
+  pocketOverlay = false,
+  hudOpacity = 0.62,
   disabled = false,
   isTurboDrift = false,
   onVectorChange,
@@ -510,11 +615,17 @@ export function SwipeTrackpadDeck({
         onLostPointerCapture={(e) => onActionUp(which, e)}
         onContextMenu={(e) => e.preventDefault()}
         className={`relative w-full flex-1 flex flex-col items-center justify-center rounded-2xl border-2 px-2 touch-none select-none cursor-pointer transition-transform duration-75 ${
-          embedded ? 'min-h-[60px]' : 'min-h-[76px]'
+          pocketOverlay
+            ? 'min-h-[54px] backdrop-blur-[2px]'
+            : embedded
+            ? 'min-h-[60px]'
+            : 'min-h-[76px]'
         }`}
         style={{
-          backgroundColor: spec.colorHex,
-          borderColor: 'rgba(255,255,255,0.22)',
+          backgroundColor: pocketOverlay
+            ? hexToRgba(spec.colorHex, Math.max(0.45, Math.min(0.92, hudOpacity + 0.16)))
+            : spec.colorHex,
+          borderColor: 'rgba(255,255,255,0.28)',
           color: spec.textColor,
           transform: pressed ? 'translateY(4px) scale(0.97)' : 'translateY(0)',
           boxShadow: pressed
@@ -528,7 +639,7 @@ export function SwipeTrackpadDeck({
         </span>
         <span
           className={`mt-1 font-display font-black leading-none text-center pointer-events-none ${
-            embedded ? 'text-xs' : 'text-sm sm:text-base'
+            pocketOverlay || embedded ? 'text-xs' : 'text-sm sm:text-base'
           }`}
         >
           {spec.label}
@@ -541,21 +652,40 @@ export function SwipeTrackpadDeck({
   };
 
   const trackpadColumn = (
-    <div className="flex-1 flex flex-col gap-1.5 min-h-0 h-full">
-      <div className="flex items-center justify-between gap-1.5 shrink-0">
-        <div className="flex items-center gap-1">
+    <div
+      className={
+        pocketOverlay
+          ? 'w-[205px] sm:w-[245px] flex flex-col gap-1.5 shrink-0 pointer-events-auto'
+          : 'flex-1 flex flex-col gap-1.5 min-h-0 h-full'
+      }
+    >
+      <div className="flex items-center justify-between gap-1 shrink-0">
+        <div className="flex items-center gap-1 min-w-0">
           <button
             type="button"
             onClick={onToggleTrackpadMode}
-            className={`h-7 px-2.5 rounded-lg border text-[10px] font-mono font-extrabold inline-flex items-center gap-1 cursor-pointer transition-colors ${
+            className={`h-7 px-2 rounded-lg border text-[10px] font-mono font-extrabold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
               trackpadMode === 'flick'
-                ? 'bg-[#FFB800]/20 border-[#FFB800] text-[#FFB800]'
-                : 'bg-[#181C24] border-[#2E3646] text-[#00C2FF]'
+                ? 'bg-[#FFB800]/25 border-[#FFB800] text-[#FFB800]'
+                : 'border-[#2E3646] text-[#00C2FF]'
             }`}
+            style={
+              trackpadMode === 'flick'
+                ? undefined
+                : {
+                    backgroundColor: pocketOverlay
+                      ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
+                      : '#181C24',
+                  }
+            }
           >
-            <Zap className="w-3 h-3" />
+            <Zap className="w-3 h-3 shrink-0" />
             <span>
-              {trackpadMode === 'flick'
+              {pocketOverlay
+                ? trackpadMode === 'flick'
+                  ? t('Swipe', '滑步')
+                  : t('Glide', '追踪')
+                : trackpadMode === 'flick'
                 ? t('Mode: 4-Way Swipe', '模式：四向滑步')
                 : t('Mode: Smooth Glide', '模式：丝滑追踪')}
             </span>
@@ -564,14 +694,23 @@ export function SwipeTrackpadDeck({
           <button
             type="button"
             onClick={onToggleTapForA}
-            className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors ${
+            className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
               tapForA
-                ? 'bg-[#10D98B]/20 border-[#10D98B] text-[#10D98B]'
-                : 'bg-[#181C24] border-[#2E3646] text-[#9CA3AF] hover:text-white'
+                ? 'bg-[#10D98B]/25 border-[#10D98B] text-[#10D98B]'
+                : 'border-[#2E3646] text-[#D1D5DB] hover:text-white'
             }`}
+            style={
+              tapForA
+                ? undefined
+                : {
+                    backgroundColor: pocketOverlay
+                      ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
+                      : '#181C24',
+                  }
+            }
           >
-            <MousePointerClick className="w-3 h-3" />
-            <span>{tapForA ? t('Tap = A ON', '轻点触发A 开') : t('Tap = A', '轻点=A')}</span>
+            <MousePointerClick className="w-3 h-3 shrink-0" />
+            <span>{tapForA ? t('Tap=A', '轻点=A') : t('Tap', '轻点')}</span>
           </button>
         </div>
 
@@ -579,10 +718,17 @@ export function SwipeTrackpadDeck({
           type="button"
           onClick={onToggleHandedness}
           title={t('Flip Triggers Left / Right', '切换左/右手持握边')}
-          className="h-7 px-2 rounded-lg bg-[#181C24] border border-[#2E3646] hover:border-[#4B5670] text-[10px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer shrink-0"
+          className="h-7 px-2 rounded-lg border border-[#2E3646] hover:border-[#4B5670] text-[10px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+          style={{
+            backgroundColor: pocketOverlay
+              ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
+              : '#181C24',
+          }}
         >
           <Hand className="w-3 h-3 text-[#00C2FF]" />
-          <span>{handedness === 'right' ? t('Right Hand', '右手触发') : t('Left Hand', '左手触发')}</span>
+          {!pocketOverlay && (
+            <span>{handedness === 'right' ? t('Right Hand', '右手触发') : t('Left Hand', '左手触发')}</span>
+          )}
         </button>
       </div>
 
@@ -594,9 +740,14 @@ export function SwipeTrackpadDeck({
         onPointerCancel={handlePadUp}
         onLostPointerCapture={handlePadUp}
         onContextMenu={(e) => e.preventDefault()}
-        className="relative flex-1 min-h-[120px] rounded-2xl bg-[#101217] border-2 overflow-hidden flex flex-col items-center justify-center touch-none select-none cursor-crosshair"
+        className={`relative rounded-2xl border-2 overflow-hidden flex flex-col items-center justify-center touch-none select-none cursor-crosshair ${
+          pocketOverlay
+            ? 'h-[126px] sm:h-[148px] backdrop-blur-[2px]'
+            : 'flex-1 min-h-[120px]'
+        }`}
         style={{
-          borderColor: anchorLocal ? accentHex : '#2A303D',
+          backgroundColor: pocketOverlay ? `rgba(16, 18, 23, ${hudOpacity})` : '#101217',
+          borderColor: anchorLocal ? accentHex : pocketOverlay ? 'rgba(255,255,255,0.22)' : '#2A303D',
           boxShadow: 'inset 0 8px 24px rgba(0,0,0,0.65)',
         }}
       >
@@ -612,17 +763,19 @@ export function SwipeTrackpadDeck({
         />
 
         {!anchorLocal && !flickBadge && (
-          <div className="pointer-events-none text-center px-4">
+          <div className="pointer-events-none text-center px-3">
             <div className="font-display font-bold text-xs sm:text-sm text-[#D1D5DB]">
               {trackpadMode === 'flick'
-                ? t('Swipe anywhere to step cleanly', '任意滑动切换方向（可连续滑）')
-                : t('Slide anywhere to steer smoothly', '按住任意位置滑动精准移动')}
+                ? t('Swipe anywhere', '任意滑动切换方向')
+                : t('Slide anywhere', '按住滑动控制方向')}
             </div>
-            <div className="mt-1 text-[10px] sm:text-[11px] text-[#6B7280]">
-              {tapForA
-                ? t('Quick tap fires primary action A', '轻点触控板也可直接触发 A 动作')
-                : schema.joystickLabel}
-            </div>
+            {!pocketOverlay && (
+              <div className="mt-1 text-[10px] sm:text-[11px] text-[#6B7280]">
+                {tapForA
+                  ? t('Quick tap fires primary action A', '轻点触控板也可直接触发 A 动作')
+                  : schema.joystickLabel}
+              </div>
+            )}
           </div>
         )}
 
@@ -671,14 +824,36 @@ export function SwipeTrackpadDeck({
 
   const triggersColumn = (
     <div
-      className={`flex flex-col gap-2.5 h-full shrink-0 ${
-        embedded ? 'w-24' : 'w-[104px] sm:w-[132px]'
+      className={`flex flex-col gap-2 shrink-0 ${
+        pocketOverlay
+          ? 'w-[92px] sm:w-[112px] h-[160px] sm:h-[182px] pointer-events-auto'
+          : embedded
+          ? 'w-24 h-full'
+          : 'w-[104px] sm:w-[132px] h-full'
       }`}
     >
       {renderTriggerPaddle(firstWhich)}
       {renderTriggerPaddle(secondWhich)}
     </div>
   );
+
+  if (pocketOverlay) {
+    return (
+      <div className="flex-1 flex items-end justify-between gap-2 min-h-0 px-2 pb-1.5 pointer-events-none">
+        {handedness === 'left' ? (
+          <>
+            {triggersColumn}
+            {trackpadColumn}
+          </>
+        ) : (
+          <>
+            {trackpadColumn}
+            {triggersColumn}
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex items-stretch gap-3 min-h-0 px-1 sm:px-3">

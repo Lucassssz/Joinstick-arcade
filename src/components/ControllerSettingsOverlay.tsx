@@ -53,6 +53,9 @@ export interface ControllerPrefs {
   deadzone: number;
   stickRadius: number;
   stickSensitivity: number;
+
+  // === Pocket Mode Integrated HUD ===
+  pocketHudOpacity: number;
 }
 
 export const DEFAULT_CONTROLLER_PREFS: ControllerPrefs = {
@@ -85,6 +88,7 @@ export const DEFAULT_CONTROLLER_PREFS: ControllerPrefs = {
   deadzone: 0.1,
   stickRadius: 58,
   stickSensitivity: 0.86,
+  pocketHudOpacity: 0.62,
 };
 
 const STORAGE_KEY = 'joinstick_controller_prefs_v1';
@@ -266,6 +270,15 @@ export function clampControllerPrefs(raw: Partial<ControllerPrefs>): ControllerP
           : DEFAULT_CONTROLLER_PREFS.stickSensitivity,
         0.65,
         1.15
+      ).toFixed(2)
+    ),
+    pocketHudOpacity: Number(
+      clamp(
+        typeof raw.pocketHudOpacity === 'number'
+          ? raw.pocketHudOpacity
+          : DEFAULT_CONTROLLER_PREFS.pocketHudOpacity,
+        0.3,
+        0.95
       ).toFixed(2)
     ),
   };
@@ -654,7 +667,7 @@ export function ControllerSettingsOverlay({
                 />
               </label>
 
-              <label className="block space-y-1 col-span-2">
+              <label className="block space-y-1">
                 <div className="flex items-center justify-between text-[10px]">
                   <span className="text-[#9CA3AF]">{t('Stick Sensitivity', '摇杆灵敏度')}</span>
                   <span className="font-mono text-white tabular-nums">
@@ -669,6 +682,24 @@ export function ControllerSettingsOverlay({
                   value={prefs.stickSensitivity}
                   onChange={(e) => update({ stickSensitivity: Number(e.target.value) })}
                   className="w-full h-2 rounded-lg bg-[#101217] accent-[#00C2FF] cursor-pointer"
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-[#9CA3AF]">{t('Pocket HUD Opacity', '掌机透明按键浓度')}</span>
+                  <span className="font-mono text-white tabular-nums">
+                    {Math.round(prefs.pocketHudOpacity * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.3}
+                  max={0.95}
+                  step={0.05}
+                  value={prefs.pocketHudOpacity}
+                  onChange={(e) => update({ pocketHudOpacity: Number(e.target.value) })}
+                  className="w-full h-2 rounded-lg bg-[#101217] accent-[#10D98B] cursor-pointer"
                 />
               </label>
             </div>

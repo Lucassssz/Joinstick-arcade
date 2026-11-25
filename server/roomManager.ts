@@ -21,6 +21,7 @@ import {
   type RankingEntry,
   type RemoteDirection,
   type RemoteFocusState,
+  type RoomMode,
   type RoomReadyGate,
   type RoomSnapshot,
   type RoomStatus,
@@ -160,6 +161,7 @@ function createHostHapticTracker(): HostHapticTracker {
 
 interface RoomRecord {
   code: string;
+  roomMode: RoomMode;
   hostToken: string;
   hostWs: WebSocket | null;
   hostDisconnectedAt: number | null;
@@ -569,6 +571,7 @@ export class RoomManager {
 
     return {
       code: room.code,
+      roomMode: room.roomMode,
       status: room.status,
       selectedGameId: room.selectedGameId,
       gameSettingValue: room.gameSettingValue,
@@ -624,6 +627,17 @@ export class RoomManager {
     }
   }
 
+  private sendToScreenListeners(room: RoomRecord, msg: ServerMessage): void {
+    this.send(room.hostWs, msg);
+    if (room.roomMode === 'pocket') {
+      for (const p of room.players.values()) {
+        if (p.connected && !p.isBot && p.ws) {
+          this.send(p.ws, msg);
+        }
+      }
+    }
+  }
+
   private broadcastTick(
     room: RoomRecord,
     snapshot: GameSnapshot,
@@ -633,7 +647,7 @@ export class RoomManager {
     const msg: ServerMessage = competitive
       ? { type: 'game:tick', snapshot, competitive, sounds }
       : { type: 'game:tick', snapshot, sounds };
-    this.send(room.hostWs, msg);
+    this.sendToScreenListeners(room, msg);
   }
 
   private nextAvailableSlot(room: RoomRecord): number {
@@ -788,6 +802,7 @@ export class RoomManager {
 
         const room: RoomRecord = {
           code,
+          roomMode: 'monitor',
           hostToken,
           hostWs: ws,
           hostDisconnectedAt: null,
@@ -838,6 +853,117 @@ export class RoomManager {
           type: 'room:created',
           code,
           hostToken,
+          room: this.buildRoomSnapshot(room),
+        });
+        return;
+      }
+
+      case 'room:create-pocket': {
+        this.detachSocket(ws);
+        const code = this.generateRoomCode();
+        const hostToken = crypto.randomUUID();
+        const gameId: GameId =
+          msg.preferredGameId && SERVER_GAMES[msg.preferredGameId]
+            ? msg.preferredGameId
+            : 'bumper-brawl';
+        const meta = getGameMeta(gameId);
+        const allGames = filterGamesByPlayerMode('all');
+        const currentIdx = Math.max(
+          0,
+          allGames.findIndex((g) => g.id === gameId)
+        );
+
+        const room: RoomRecord = {
+          code,
+          roomMode: 'pocket',
+          hostToken,
+          hostWs: null,
+          hostDisconnectedAt: null,
+          hostPlayerId: null,
+          hostTransfer: null,
+          hostTransferSeq: 0,
+          botDifficulty: 'arcade',
+          teamMode: 'ffa',
+          teamRankings: [],
+          status: 'LOBBY',
+          selectedGameId: gameId,
+          gameSettingValue: meta.defaultSetting,
+          lobbyFilter: 'all',
+          lobbyGameCols: 4,
+          lobbyActionCols: 7,
+          remoteFocus: { zone: 'games', index: currentIdx, modalIndex: 0 },
+          activeMutator: 'normal',
+          mutatorSpinSeq: 0,
+          frenzy: {
+            active: false,
+            freezing: false,
+            freezeRemaining: 0,
+            freezeTotal: 3.0,
+            triggerCount: 0,
+          },
+          matchElapsedSec: 0,
+          tournament: null,
+          countdownValue: 3,
+          countdownTimer: 0,
+          players: new Map(),
+          gameState: null,
+          lastSnapshot: null,
+          competitiveState: null,
+          lastCompetitiveSnapshot: null,
+          lastCardStateHashes: new Map(),
+          hapticTracker: createHostHapticTracker(),
+          rankings: [],
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+          tickInterval: null,
+          voteInterval: null,
+          voteLockTimeout: null,
+        };
+
+        const cleanName = (msg.name || '').trim().slice(0, 14) || 'Player 1';
+        const cleanDeviceId =
+          typeof msg.deviceId === 'string' && msg.deviceId.trim()
+            ? msg.deviceId.trim().slice(0, 80)
+            : undefined;
+        const playerId = msg.playerId || crypto.randomUUID();
+        const color = this.pickColor(room, 0, msg.preferredColorId);
+        const avatarId = this.pickAvatar(room, 0, msg.avatarId);
+
+        const player: ConnectedPlayer = {
+          id: playerId,
+          slotIndex: 0,
+          name: cleanName,
+          color,
+          avatarId,
+          teamId: null,
+          ws,
+          connected: true,
+          ready: false,
+          isBot: false,
+          deviceId: cleanDeviceId,
+          isTestController: false,
+          score: 0,
+          rawGameScore: 0,
+          bonusScore: 0,
+          alive: true,
+          statText: 'In Lobby',
+          cooldownA: 0,
+          cooldownB: 0,
+          input: { dx: 0, dy: 0, a: false, b: false },
+          prevA: false,
+          prevB: false,
+          disconnectedAt: null,
+          matchStats: createDefaultMatchStats(),
+          cardPromptStartedAt: null,
+        };
+
+        room.players.set(playerId, player);
+        room.hostPlayerId = playerId;
+        this.rooms.set(code, room);
+        this.bindings.set(ws, { role: 'player', roomCode: code, playerId });
+        this.send(ws, {
+          type: 'room:joined',
+          playerId,
           room: this.buildRoomSnapshot(room),
         });
         return;
@@ -976,6 +1102,23 @@ export class RoomManager {
               this.send(ws, { type: 'player:card-state', cardState: states[existing.id] });
             }
           }
+          if (room.roomMode === 'pocket' && room.lastSnapshot) {
+            this.send(
+              ws,
+              room.lastCompetitiveSnapshot
+                ? {
+                    type: 'game:tick',
+                    snapshot: room.lastSnapshot,
+                    competitive: room.lastCompetitiveSnapshot,
+                    sounds: [],
+                  }
+                : {
+                    type: 'game:tick',
+                    snapshot: room.lastSnapshot,
+                    sounds: [],
+                  }
+            );
+          }
           this.broadcastRoom(room);
           return;
         }
@@ -1061,7 +1204,24 @@ export class RoomManager {
           playerId,
           room: this.buildRoomSnapshot(room),
         });
-        this.send(room.hostWs, {
+        if (room.roomMode === 'pocket' && room.lastSnapshot) {
+          this.send(
+            ws,
+            room.lastCompetitiveSnapshot
+              ? {
+                  type: 'game:tick',
+                  snapshot: room.lastSnapshot,
+                  competitive: room.lastCompetitiveSnapshot,
+                  sounds: [],
+                }
+              : {
+                  type: 'game:tick',
+                  snapshot: room.lastSnapshot,
+                  sounds: [],
+                }
+          );
+        }
+        this.sendToScreenListeners(room, {
           type: 'game:tick',
           snapshot: room.lastSnapshot as any,
           sounds: [{ type: 'join', playerId }],
@@ -1819,7 +1979,7 @@ export class RoomManager {
   }
 
   private playHostSound(room: RoomRecord, soundType: SoundEvent['type']): void {
-    this.send(room.hostWs, {
+    this.sendToScreenListeners(room, {
       type: 'game:tick',
       snapshot: room.lastSnapshot as any,
       sounds: [{ type: soundType }],
@@ -1879,7 +2039,7 @@ export class RoomManager {
 
     room.players.set(botId, botPlayer);
     room.lastActivityAt = Date.now();
-    this.send(room.hostWs, {
+    this.sendToScreenListeners(room, {
       type: 'game:tick',
       snapshot: room.lastSnapshot as any,
       sounds: [{ type: 'join', playerId: botId }],
@@ -2252,6 +2412,10 @@ export class RoomManager {
   }
 
   private returnToSetup(room: RoomRecord): void {
+    if (room.roomMode === 'pocket') {
+      this.returnToLobby(room);
+      return;
+    }
     this.stopGameLoop(room);
     room.status = 'SETUP';
     room.tournament = null;
@@ -3893,13 +4057,23 @@ export class RoomManager {
       }
 
       const hostGone =
+        room.roomMode === 'monitor' &&
         !room.hostWs &&
         room.hostDisconnectedAt !== null &&
         now - room.hostDisconnectedAt > HOST_RECONNECT_GRACE_MS;
+      const hasAnyHumanInPocket =
+        room.roomMode === 'pocket' && [...room.players.values()].some((p) => !p.isBot);
+      const pocketEmpty =
+        room.roomMode === 'pocket' &&
+        !hasAnyHumanInPocket &&
+        now - room.lastActivityAt > 60_000;
       const idleExpired = now - room.lastActivityAt > IDLE_ROOM_TTL_MS;
 
-      if (hostGone || idleExpired) {
-        this.closeRoom(room, 'The host monitor session ended.');
+      if (hostGone || pocketEmpty || idleExpired) {
+        this.closeRoom(
+          room,
+          pocketEmpty ? 'All players left the Pocket Mode room.' : 'The host monitor session ended.'
+        );
       }
     }
   }

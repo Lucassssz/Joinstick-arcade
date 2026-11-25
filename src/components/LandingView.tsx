@@ -39,10 +39,11 @@ import { GameShowcaseCard } from './GameShowcaseCard';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
+  onStartPocket: (preferredGameId?: GameId) => void;
   onJoinController: (initialCode?: string) => void;
 }
 
-export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) {
+export function LandingView({ onHostRoom, onStartPocket, onJoinController }: LandingViewProps) {
   const { lang, t } = useLanguage();
   const [quickCode, setQuickCode] = useState('');
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
@@ -57,10 +58,13 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
     gamesRailRef.current = node;
     setRailRootEl((prev) => (prev === node ? prev : node));
   }, []);
+  const MANUAL_SCROLL_RESUME_MS = 5000;
   const virtualScrollLeftRef = useRef(0);
   const manualPauseUntilRef = useRef(0);
   const endDwellUntilRef = useRef(0);
-  const isHoveringRailRef = useRef(false);
+  const smoothScrollUntilRef = useRef(0);
+  const isTouchingRailRef = useRef(false);
+  const lastHoverAtRef = useRef(0);
   const pointerDragRef = useRef<{
     active: boolean;
     startX: number;
@@ -69,11 +73,13 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
   }>({ active: false, startX: 0, startScrollLeft: 0, moved: false });
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [manualPaused, setManualPaused] = useState(false);
+  const [manualResumeSeconds, setManualResumeSeconds] = useState(0);
   const [activeScrollIdx, setActiveScrollIdx] = useState(0);
 
-  // PIN Protection State for Host / Create Room
+  // PIN Protection State for Host / Create Room / Pocket Mode
   const [showPinModal, setShowPinModal] = useState(false);
   const [pendingHostGameId, setPendingHostGameId] = useState<GameId | undefined>(undefined);
+  const [pendingHostTarget, setPendingHostTarget] = useState<'host' | 'pocket'>('host');
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
@@ -213,12 +219,17 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
     return () => cancelAnimationFrame(rafId);
   }, [gameTypesAnimated]);
 
-  const requestHost = (gameId?: GameId) => {
+  const requestHost = (gameId?: GameId, target: 'host' | 'pocket' = 'host') => {
     const unlocked = sessionStorage.getItem('joystick_host_pin_unlocked') === 'true';
     if (unlocked) {
-      onHostRoom(gameId);
+      if (target === 'pocket') {
+        onStartPocket(gameId);
+      } else {
+        onHostRoom(gameId);
+      }
     } else {
       setPendingHostGameId(gameId);
+      setPendingHostTarget(target);
       setPinInput('');
       setPinError(false);
       setShowPinModal(true);
@@ -230,7 +241,11 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
     if (pinInput.trim() === '1234' || pinInput.trim() === '8888') {
       sessionStorage.setItem('joystick_host_pin_unlocked', 'true');
       setShowPinModal(false);
-      onHostRoom(pendingHostGameId);
+      if (pendingHostTarget === 'pocket') {
+        onStartPocket(pendingHostGameId);
+      } else {
+        onHostRoom(pendingHostGameId);
+      }
     } else {
       setPinError(true);
     }
@@ -320,7 +335,8 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
     }
   }, [filteredGames, activeScrollIdx, hoveredGameId]);
 
-  // Smooth automatic horizontal scrolling when no manual scroll or interaction is detected
+  // Smooth automatic horizontal scrolling when no manual scroll is detected;
+  // automatically resumes 5 seconds after manual scrolling stops
   useEffect(() => {
     if (!autoScrollEnabled || filteredGames.length <= 1 || previewGameId) return;
     const reducedMotion =
@@ -337,20 +353,32 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
       lastTs = now;
 
       const el = gamesRailRef.current;
+      const isActivelyInteracting =
+        pointerDragRef.current.active || isTouchingRailRef.current;
+      const remainingManualMs = Math.max(0, manualPauseUntilRef.current - now);
       const isPaused =
         !el ||
         document.hidden ||
-        isHoveringRailRef.current ||
-        pointerDragRef.current.active ||
-        now < manualPauseUntilRef.current;
+        isActivelyInteracting ||
+        remainingManualMs > 0;
 
       if (isPaused) {
         if (el) virtualScrollLeftRef.current = el.scrollLeft;
-        const shouldShowManualPause =
-          isHoveringRailRef.current || pointerDragRef.current.active || now < manualPauseUntilRef.current;
+        const shouldShowManualPause = isActivelyInteracting || remainingManualMs > 0;
         setManualPaused((prev) => (prev === shouldShowManualPause ? prev : shouldShowManualPause));
+        const nextCountdownSec = isActivelyInteracting
+          ? Math.ceil(MANUAL_SCROLL_RESUME_MS / 1000)
+          : remainingManualMs > 0
+          ? Math.ceil(remainingManualMs / 1000)
+          : 0;
+        setManualResumeSeconds((prev) => (prev === nextCountdownSec ? prev : nextCountdownSec));
       } else {
         setManualPaused((prev) => (prev ? false : prev));
+        setManualResumeSeconds((prev) => (prev === 0 ? prev : 0));
+        if (now - lastHoverAtRef.current > 1200) {
+          setHoveredGameId((prev) => (prev === null ? prev : null));
+        }
+
         const maxScroll = el.scrollWidth - el.clientWidth;
         if (maxScroll > 8) {
           if (now < endDwellUntilRef.current) {
@@ -386,15 +414,18 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
     return () => cancelAnimationFrame(rafId);
   }, [autoScrollEnabled, filteredGames.length, previewGameId, syncActiveCardFromRail]);
 
-  const markManualScroll = (pauseMs = 2800) => {
+  const markManualScroll = useCallback((pauseMs = MANUAL_SCROLL_RESUME_MS) => {
     manualPauseUntilRef.current = performance.now() + pauseMs;
     setManualPaused(true);
-  };
+    const nextSec = Math.ceil(pauseMs / 1000);
+    setManualResumeSeconds((prev) => (prev === nextSec ? prev : nextSec));
+  }, []);
 
   const scrollRailByCards = (dir: -1 | 1) => {
     const el = gamesRailRef.current;
     if (!el) return;
-    markManualScroll(4000);
+    markManualScroll(MANUAL_SCROLL_RESUME_MS);
+    smoothScrollUntilRef.current = performance.now() + 700;
     const step = Math.min(el.clientWidth * 0.85, 680);
     const targetLeft = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, el.scrollLeft + dir * step));
     virtualScrollLeftRef.current = targetLeft;
@@ -631,20 +662,30 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             )}
           </p>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3.5 sm:gap-4">
             <button
               type="button"
-              onClick={() => requestHost()}
-              className="tactile-btn inline-flex items-center gap-2.5 px-7.5 py-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold text-base shadow-[0_4px_0_#B82E17] whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5"
+              onClick={() => requestHost(undefined, 'host')}
+              className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold text-base shadow-[0_4px_0_#B82E17] whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5"
             >
               <Lock className="w-5 h-5" />
-              {t('Create Game Room', '创建游戏房间')}
+              {t('Create Game Room', '创建大屏房间')}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => requestHost(undefined, 'pocket')}
+              className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-extrabold text-base shadow-[0_4px_0_#0A915D] whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5"
+            >
+              <Lock className="w-4 h-4" />
+              <Gamepad2 className="w-5 h-5" />
+              {t('Pocket Mode (No Monitor)', '掌机模式（无需大屏）')}
             </button>
 
             <button
               type="button"
               onClick={() => onJoinController()}
-              className="tactile-btn inline-flex items-center gap-2.5 px-7.5 py-4 rounded-xl bg-[#151B26] hover:bg-[#1E2636] text-white border border-[#2A354A] font-bold text-base whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5 shadow-lg"
+              className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#151B26] hover:bg-[#1E2636] text-white border border-[#2A354A] font-bold text-base whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5 shadow-lg"
             >
               <Smartphone className="w-5 h-5 text-[#00C2FF]" />
               {t('Join with Phone', '手机加入游戏')}
@@ -954,9 +995,12 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   <span aria-hidden="true">·</span>
                   <span>
                     {autoScrollEnabled && !manualPaused
-                      ? t('Auto-scrolling · Hover or scroll manually to pause', '自动横向滚动中 · 悬停或手动滑动即暂停')
+                      ? t('Auto-scrolling · Manual scroll pauses for 5s', '自动横向滚动中 · 手动滑动后将暂停 5 秒')
                       : manualPaused && autoScrollEnabled
-                      ? t('Paused during manual browse · Preloading next games', '手动浏览暂停中 · 正在预加载后续游戏')
+                      ? t(
+                          `Paused after manual scroll · Resuming in ${Math.max(1, manualResumeSeconds)}s`,
+                          `手动滑动暂停中 · ${Math.max(1, manualResumeSeconds)} 秒后恢复自动滚动`
+                        )
                       : t('Auto-scroll paused · Click a card for rules & animated demo', '自动滚动已暂停 · 点击卡片查看规则与动画演示')}
                   </span>
                 </div>
@@ -1003,29 +1047,42 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
               {/* Horizontal Auto-Scrolling Game Rail (Zero Play Buttons on Cards) */}
               <div
                 ref={setGamesRailNode}
-                onMouseEnter={() => {
-                  isHoveringRailRef.current = true;
-                }}
                 onMouseLeave={() => {
-                  isHoveringRailRef.current = false;
                   pointerDragRef.current.active = false;
                   setHoveredGameId(null);
                 }}
                 onScroll={() => {
                   const el = gamesRailRef.current;
                   if (!el) return;
-                  if (Math.abs(el.scrollLeft - virtualScrollLeftRef.current) > 3.5) {
+                  if (performance.now() < smoothScrollUntilRef.current) {
                     virtualScrollLeftRef.current = el.scrollLeft;
-                    markManualScroll(2800);
+                  } else if (Math.abs(el.scrollLeft - virtualScrollLeftRef.current) > 3.5) {
+                    virtualScrollLeftRef.current = el.scrollLeft;
+                    markManualScroll(MANUAL_SCROLL_RESUME_MS);
                   }
                   syncActiveCardFromRail();
                 }}
                 onWheel={(e) => {
-                  if (Math.abs(e.deltaX) > 2 || e.shiftKey) {
-                    markManualScroll(2800);
+                  if (Math.abs(e.deltaX) > 1 || (e.shiftKey && Math.abs(e.deltaY) > 0)) {
+                    markManualScroll(MANUAL_SCROLL_RESUME_MS);
                   }
                 }}
-                onTouchStart={() => markManualScroll(3200)}
+                onTouchStart={() => {
+                  isTouchingRailRef.current = true;
+                  markManualScroll(MANUAL_SCROLL_RESUME_MS);
+                }}
+                onTouchMove={() => {
+                  isTouchingRailRef.current = true;
+                  markManualScroll(MANUAL_SCROLL_RESUME_MS);
+                }}
+                onTouchEnd={() => {
+                  isTouchingRailRef.current = false;
+                  markManualScroll(MANUAL_SCROLL_RESUME_MS);
+                }}
+                onTouchCancel={() => {
+                  isTouchingRailRef.current = false;
+                  markManualScroll(MANUAL_SCROLL_RESUME_MS);
+                }}
                 onPointerDown={(e) => {
                   const el = gamesRailRef.current;
                   if (!el || e.button !== 0) return;
@@ -1043,7 +1100,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   const dx = e.clientX - drag.startX;
                   if (Math.abs(dx) > 6) {
                     drag.moved = true;
-                    markManualScroll(3000);
+                    markManualScroll(MANUAL_SCROLL_RESUME_MS);
                     const nextLeft = drag.startScrollLeft - dx;
                     el.scrollLeft = nextLeft;
                     virtualScrollLeftRef.current = el.scrollLeft;
@@ -1051,6 +1108,15 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   }
                 }}
                 onPointerUp={() => {
+                  if (pointerDragRef.current.moved) {
+                    markManualScroll(MANUAL_SCROLL_RESUME_MS);
+                  }
+                  pointerDragRef.current.active = false;
+                }}
+                onPointerCancel={() => {
+                  if (pointerDragRef.current.moved) {
+                    markManualScroll(MANUAL_SCROLL_RESUME_MS);
+                  }
                   pointerDragRef.current.active = false;
                 }}
                 className="flex gap-5 overflow-x-auto pb-4 pt-1 select-none arcade-scrollbar cursor-grab active:cursor-grabbing"
@@ -1070,6 +1136,7 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                       railRoot={railRootEl}
                       onHoverChange={(id) => {
                         if (id) {
+                          lastHoverAtRef.current = performance.now();
                           setHoveredGameId(id);
                         } else {
                           setHoveredGameId((prev) => (prev === game.id ? null : prev));
@@ -1148,11 +1215,20 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
               <button
                 type="button"
-                onClick={() => requestHost()}
+                onClick={() => requestHost(undefined, 'host')}
                 className="tactile-btn inline-flex items-center gap-2.5 px-8 py-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
               >
                 <Lock className="w-5 h-5" />
                 {t('Create Game Room', '创建游戏房间')}
+              </button>
+              <button
+                type="button"
+                onClick={() => requestHost(undefined, 'pocket')}
+                className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-extrabold text-base shadow-[0_4px_0_#0A915D] cursor-pointer"
+              >
+                <Lock className="w-4 h-4" />
+                <Gamepad2 className="w-5 h-5" />
+                {t('Pocket Mode (No Monitor)', '掌机模式（无需大屏）')}
               </button>
             </div>
           </div>
@@ -1170,11 +1246,19 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
           <div className="flex items-center gap-6">
             <button
               type="button"
-              onClick={() => requestHost()}
+              onClick={() => requestHost(undefined, 'host')}
               className="hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5"
             >
               <Lock className="w-3.5 h-3.5" />
               <span>{t('Host Monitor', '大屏主机')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => requestHost(undefined, 'pocket')}
+              className="hover:text-[#10D98B] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>{t('Pocket Mode', '掌机模式')}</span>
             </button>
             <button
               type="button"
@@ -1205,13 +1289,20 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
             </div>
 
             <h2 id="pin-modal-title" className="font-display text-2xl font-extrabold text-white">
-              {t('Enter Host Master PIN', '请输入主持管理密码')}
+              {pendingHostTarget === 'pocket'
+                ? t('Enter PIN for Pocket Mode', '请输入掌机开房密码')
+                : t('Enter Host Master PIN', '请输入主持管理密码')}
             </h2>
             <p className="mt-2 text-sm text-[#9CA3AF] leading-relaxed">
-              {t(
-                'Please enter your security PIN to open the Host Monitor. (Default: 1234)',
-                '请输入安全密码以打开大屏主机。(默认: 1234)'
-              )}
+              {pendingHostTarget === 'pocket'
+                ? t(
+                    'Please enter your security PIN to create a Pocket Mode room on your phone. (Default: 1234)',
+                    '请输入安全密码以在手机端创建掌机联机房。(默认: 1234)'
+                  )
+                : t(
+                    'Please enter your security PIN to open the Host Monitor. (Default: 1234)',
+                    '请输入安全密码以打开大屏主机。(默认: 1234)'
+                  )}
             </p>
 
             <form onSubmit={handlePinSubmit} className="mt-6 space-y-4">
@@ -1336,11 +1427,11 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                 </strong>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setPreviewGameId(null)}
-                  className="h-10 px-5 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-sm font-bold text-white cursor-pointer"
+                  className="h-10 px-4 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-sm font-bold text-white cursor-pointer"
                 >
                   {t('Close', '关闭')}
                 </button>
@@ -1349,12 +1440,24 @@ export function LandingView({ onHostRoom, onJoinController }: LandingViewProps) 
                   onClick={() => {
                     const targetId = previewGame.id;
                     setPreviewGameId(null);
-                    requestHost(targetId);
+                    requestHost(targetId, 'pocket');
+                  }}
+                  className="tactile-btn h-10 px-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-extrabold text-sm shadow-[0_3px_0_#0A915D] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{t('Pocket Mode', '掌机开玩')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetId = previewGame.id;
+                    setPreviewGameId(null);
+                    requestHost(targetId, 'host');
                   }}
                   className="tactile-btn h-10 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
                 >
                   <Lock className="w-4 h-4" />
-                  <span>{t('Host Room (PIN)', '创建房间开玩')}</span>
+                  <span>{t('Host Room (PIN)', '大屏开玩')}</span>
                 </button>
               </div>
             </div>
