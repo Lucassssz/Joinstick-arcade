@@ -20,6 +20,8 @@ interface PocketArenaCanvasProps {
   fxRef: MutableRefObject<RenderFxState>;
   tickVersion: number;
   className?: string;
+  frameClassName?: string;
+  cameraFocus?: 'overview' | 'turn-focus';
 }
 
 export function PocketArenaCanvas({
@@ -30,6 +32,8 @@ export function PocketArenaCanvas({
   fxRef,
   tickVersion,
   className = '',
+  frameClassName = '',
+  cameraFocus = 'overview',
 }: PocketArenaCanvasProps) {
   const { lang, t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -78,12 +82,16 @@ export function PocketArenaCanvas({
   }, [status, gameId, snapshotRef, competitiveRef, fxRef, hasSnapshot]);
 
   return (
-    <div className={`relative w-full h-full flex items-center justify-center bg-[#080A0F] overflow-hidden ${className}`}>
+    <div
+      className={`relative w-full h-full flex items-center justify-center bg-[#080A0F] overflow-hidden ${frameClassName} ${className}`}
+    >
       <canvas
         ref={canvasRef}
         width={ARENA_WIDTH}
         height={ARENA_HEIGHT}
-        className="w-full h-full object-contain select-none pointer-events-none"
+        className={`w-full h-full object-contain select-none pointer-events-none transition-transform duration-300 ease-out origin-[50%_51%] will-change-transform ${
+          cameraFocus === 'turn-focus' ? 'scale-[1.26]' : 'scale-100'
+        }`}
       />
       {!hasSnapshot && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#090B10]/90 text-xs font-semibold text-[#A5AEBD]">

@@ -427,14 +427,18 @@ export function WatchAndPlayCardCanvas({
     const startTime = performance.now();
     let rafId = 0;
 
-    const renderAtProgress = (progress: number) => {
+    const renderAtProgress = (rawProgress: number) => {
+      const progress = Math.max(0, Math.min(1, rawProgress));
       const isZh = langRef.current === 'zh';
       if (segmentFrames && segmentFrames.length > 0) {
-        const frameIdx = Math.min(
-          segmentFrames.length - 1,
-          Math.floor(progress * segmentFrames.length)
+        const frameIdx = Math.max(
+          0,
+          Math.min(segmentFrames.length - 1, Math.floor(progress * segmentFrames.length))
         );
-        renderGameSnapshot(ctx, segmentFrames[frameIdx], fx, langRef.current);
+        const frame = segmentFrames[frameIdx];
+        if (frame) {
+          renderGameSnapshot(ctx, frame, fx, langRef.current);
+        }
       } else {
         drawInstantStudioFallback(
           ctx,
@@ -471,7 +475,7 @@ export function WatchAndPlayCardCanvas({
         rafId = requestAnimationFrame(tick);
         return;
       }
-      const progress = ((now - startTime) % LOOP_MS) / LOOP_MS;
+      const progress = (Math.max(0, now - startTime) % LOOP_MS) / LOOP_MS;
       renderAtProgress(progress);
       rafId = requestAnimationFrame(tick);
     };

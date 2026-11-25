@@ -205,13 +205,16 @@ export function GameHoverPreview({
         return;
       }
 
-      const elapsed = (now - startTime) % durationMs;
+      const elapsed = Math.max(0, now - startTime) % durationMs;
       const progress = elapsed / durationMs;
-      const frameIdx = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
+      const frameIdx = Math.max(0, Math.min(totalFrames - 1, Math.floor(progress * totalFrames)));
 
       if (frameIdx !== lastRenderedIdx) {
         lastRenderedIdx = frameIdx;
-        renderGameSnapshot(ctx, clip.frames[frameIdx], fx, langRef.current);
+        const frame = clip.frames[frameIdx];
+        if (frame) {
+          renderGameSnapshot(ctx, frame, fx, langRef.current);
+        }
       }
 
       if (progressBarRef.current) {
@@ -227,7 +230,9 @@ export function GameHoverPreview({
       rafId = requestAnimationFrame(tick);
     };
 
-    renderGameSnapshot(ctx, clip.frames[0], fx, langRef.current);
+    if (clip.frames[0]) {
+      renderGameSnapshot(ctx, clip.frames[0], fx, langRef.current);
+    }
     rafId = requestAnimationFrame(tick);
 
     return () => {

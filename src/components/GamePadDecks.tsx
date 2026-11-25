@@ -651,74 +651,70 @@ export function SwipeTrackpadDeck({
     );
   };
 
-  const trackpadColumn = (
+  const cornerControls = (
     <div
+      onPointerDown={(e) => e.stopPropagation()}
       className={
         pocketOverlay
-          ? 'w-[205px] sm:w-[245px] flex flex-col gap-1.5 shrink-0 pointer-events-auto'
-          : 'flex-1 flex flex-col gap-1.5 min-h-0 h-full'
+          ? `pointer-events-auto absolute bottom-1.5 z-20 flex flex-col gap-1.5 touch-none select-none ${
+              handedness === 'left' ? 'left-2 items-start' : 'right-2 items-end'
+            }`
+          : 'flex flex-col gap-2 shrink-0 h-full justify-between'
       }
     >
-      <div className="flex items-center justify-between gap-1 shrink-0">
-        <div className="flex items-center gap-1 min-w-0">
-          <button
-            type="button"
-            onClick={onToggleTrackpadMode}
-            className={`h-7 px-2 rounded-lg border text-[10px] font-mono font-extrabold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
-              trackpadMode === 'flick'
-                ? 'bg-[#FFB800]/25 border-[#FFB800] text-[#FFB800]'
-                : 'border-[#2E3646] text-[#00C2FF]'
-            }`}
-            style={
-              trackpadMode === 'flick'
-                ? undefined
-                : {
-                    backgroundColor: pocketOverlay
-                      ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
-                      : '#181C24',
-                  }
-            }
-          >
-            <Zap className="w-3 h-3 shrink-0" />
-            <span>
-              {pocketOverlay
-                ? trackpadMode === 'flick'
-                  ? t('Swipe', '滑步')
-                  : t('Glide', '追踪')
-                : trackpadMode === 'flick'
-                ? t('Mode: 4-Way Swipe', '模式：四向滑步')
-                : t('Mode: Smooth Glide', '模式：丝滑追踪')}
-            </span>
-          </button>
+      {/* Compact Pad 3 Mode / Tap / Handedness Chips */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <button
+          type="button"
+          onClick={onToggleTrackpadMode}
+          className={`h-7 px-2 rounded-lg border text-[10px] font-mono font-extrabold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
+            trackpadMode === 'flick'
+              ? 'bg-[#FFB800]/25 border-[#FFB800] text-[#FFB800]'
+              : 'border-white/25 text-[#00C2FF]'
+          }`}
+          style={
+            trackpadMode === 'flick'
+              ? undefined
+              : {
+                  backgroundColor: pocketOverlay
+                    ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
+                    : '#181C24',
+                }
+          }
+        >
+          <Zap className="w-3 h-3 shrink-0" />
+          <span>
+            {trackpadMode === 'flick' ? t('Swipe', '滑步') : t('Glide', '跟滑')}
+          </span>
+        </button>
 
-          <button
-            type="button"
-            onClick={onToggleTapForA}
-            className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
-              tapForA
-                ? 'bg-[#10D98B]/25 border-[#10D98B] text-[#10D98B]'
-                : 'border-[#2E3646] text-[#D1D5DB] hover:text-white'
-            }`}
-            style={
-              tapForA
-                ? undefined
-                : {
-                    backgroundColor: pocketOverlay
-                      ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
-                      : '#181C24',
-                  }
-            }
-          >
-            <MousePointerClick className="w-3 h-3 shrink-0" />
-            <span>{tapForA ? t('Tap=A', '轻点=A') : t('Tap', '轻点')}</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onToggleTapForA}
+          className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
+            tapForA
+              ? 'bg-[#10D98B]/25 border-[#10D98B] text-[#10D98B]'
+              : 'border-white/25 text-[#D1D5DB] hover:text-white'
+          }`}
+          style={
+            tapForA
+              ? undefined
+              : {
+                  backgroundColor: pocketOverlay
+                    ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
+                    : '#181C24',
+                }
+          }
+        >
+          <MousePointerClick className="w-3 h-3 shrink-0" />
+          <span>{tapForA ? t('Tap=A', '轻点=A') : t('Tap', '轻点')}</span>
+        </button>
 
         <button
           type="button"
           onClick={onToggleHandedness}
           title={t('Flip Triggers Left / Right', '切换左/右手持握边')}
-          className="h-7 px-2 rounded-lg border border-[#2E3646] hover:border-[#4B5670] text-[10px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+          className="h-7 px-2 rounded-lg border border-white/25 hover:border-[#4B5670] text-[10px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
           style={{
             backgroundColor: pocketOverlay
               ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
@@ -727,11 +723,29 @@ export function SwipeTrackpadDeck({
         >
           <Hand className="w-3 h-3 text-[#00C2FF]" />
           {!pocketOverlay && (
-            <span>{handedness === 'right' ? t('Right Hand', '右手触发') : t('Left Hand', '左手触发')}</span>
+            <span>{handedness === 'right' ? t('Right', '右手') : t('Left', '左手')}</span>
           )}
         </button>
       </div>
 
+      {/* Side Action Triggers */}
+      <div
+        className={`flex flex-col gap-2 shrink-0 ${
+          pocketOverlay
+            ? 'w-[92px] sm:w-[112px] h-[142px] sm:h-[164px]'
+            : embedded
+            ? 'w-24 flex-1'
+            : 'w-[104px] sm:w-[132px] flex-1'
+        }`}
+      >
+        {renderTriggerPaddle(firstWhich)}
+        {renderTriggerPaddle(secondWhich)}
+      </div>
+    </div>
+  );
+
+  if (pocketOverlay) {
+    return (
       <div
         ref={surfaceRef}
         onPointerDown={handlePadDown}
@@ -740,55 +754,18 @@ export function SwipeTrackpadDeck({
         onPointerCancel={handlePadUp}
         onLostPointerCapture={handlePadUp}
         onContextMenu={(e) => e.preventDefault()}
-        className={`relative rounded-2xl border-2 overflow-hidden flex flex-col items-center justify-center touch-none select-none cursor-crosshair ${
-          pocketOverlay
-            ? 'h-[126px] sm:h-[148px] backdrop-blur-[2px]'
-            : 'flex-1 min-h-[120px]'
-        }`}
-        style={{
-          backgroundColor: pocketOverlay ? `rgba(16, 18, 23, ${hudOpacity})` : '#101217',
-          borderColor: anchorLocal ? accentHex : pocketOverlay ? 'rgba(255,255,255,0.22)' : '#2A303D',
-          boxShadow: 'inset 0 8px 24px rgba(0,0,0,0.65)',
-        }}
+        className="relative flex-1 w-full h-full min-h-0 pointer-events-auto touch-none select-none overflow-hidden"
       >
-        {/* Subtle calibration grid lines */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-20"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)',
-            backgroundSize: '36px 36px',
-          }}
-        />
-
-        {!anchorLocal && !flickBadge && (
-          <div className="pointer-events-none text-center px-3">
-            <div className="font-display font-bold text-xs sm:text-sm text-[#D1D5DB]">
-              {trackpadMode === 'flick'
-                ? t('Swipe anywhere', '任意滑动切换方向')
-                : t('Slide anywhere', '按住滑动控制方向')}
-            </div>
-            {!pocketOverlay && (
-              <div className="mt-1 text-[10px] sm:text-[11px] text-[#6B7280]">
-                {tapForA
-                  ? t('Quick tap fires primary action A', '轻点触控板也可直接触发 A 动作')
-                  : schema.joystickLabel}
-              </div>
-            )}
-          </div>
-        )}
-
+        {/* Subtle transient touch feedback only while finger is actively dragging */}
         {flickBadge && (
           <div
-            className="pointer-events-none px-4 py-2 rounded-2xl font-display text-3xl font-black shadow-xl"
+            className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-2 rounded-2xl font-display text-3xl font-black shadow-xl opacity-85"
             style={{ backgroundColor: accentHex, color: '#0B1016' }}
           >
             {flickBadge}
           </div>
         )}
 
-        {/* Anchor ring & active thumb puck */}
         {anchorLocal && puckLocal && (
           <>
             <svg
@@ -801,71 +778,106 @@ export function SwipeTrackpadDeck({
                 x2={puckLocal.x}
                 y2={puckLocal.y}
                 stroke={accentHex}
-                strokeWidth={3}
+                strokeWidth={2.5}
                 strokeDasharray="4 4"
-                opacity={0.75}
+                opacity={0.55}
               />
             </svg>
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute w-14 h-14 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed opacity-50"
+              className="pointer-events-none absolute w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed opacity-45"
               style={{ left: anchorLocal.x, top: anchorLocal.y, borderColor: accentHex }}
             />
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-lg border-2 border-white/80"
+              className="pointer-events-none absolute w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-lg border-2 border-white/75 opacity-75"
               style={{ left: puckLocal.x, top: puckLocal.y, backgroundColor: accentHex }}
             />
           </>
         )}
-      </div>
-    </div>
-  );
 
-  const triggersColumn = (
-    <div
-      className={`flex flex-col gap-2 shrink-0 ${
-        pocketOverlay
-          ? 'w-[92px] sm:w-[112px] h-[160px] sm:h-[182px] pointer-events-auto'
-          : embedded
-          ? 'w-24 h-full'
-          : 'w-[104px] sm:w-[132px] h-full'
-      }`}
-    >
-      {renderTriggerPaddle(firstWhich)}
-      {renderTriggerPaddle(secondWhich)}
-    </div>
-  );
-
-  if (pocketOverlay) {
-    return (
-      <div className="flex-1 flex items-end justify-between gap-2 min-h-0 px-2 pb-1.5 pointer-events-none">
-        {handedness === 'left' ? (
-          <>
-            {triggersColumn}
-            {trackpadColumn}
-          </>
-        ) : (
-          <>
-            {trackpadColumn}
-            {triggersColumn}
-          </>
-        )}
+        {cornerControls}
       </div>
     );
   }
 
+  // Standard controller mode (TV/PC is the monitor): full open borderless touch surface beside triggers
+  const freeTouchSurface = (
+    <div
+      ref={surfaceRef}
+      onPointerDown={handlePadDown}
+      onPointerMove={handlePadMove}
+      onPointerUp={handlePadUp}
+      onPointerCancel={handlePadUp}
+      onLostPointerCapture={handlePadUp}
+      onContextMenu={(e) => e.preventDefault()}
+      className="relative flex-1 min-h-[120px] h-full touch-none select-none overflow-hidden flex items-center justify-center cursor-crosshair"
+    >
+      {!anchorLocal && !flickBadge && (
+        <div className="pointer-events-none text-center px-3 opacity-55">
+          <div className="font-display font-bold text-xs sm:text-sm text-[#D1D5DB]">
+            {trackpadMode === 'flick'
+              ? t('Tap or swipe anywhere', '全区任意滑动或轻点')
+              : t('Slide or tap anywhere', '全区自由滑动或轻点')}
+          </div>
+          <div className="mt-1 text-[10px] sm:text-[11px] text-[#9CA3AF]">
+            {tapForA ? t('Quick tap fires action A', '轻点任意位置即触发 A 动作') : schema.joystickLabel}
+          </div>
+        </div>
+      )}
+
+      {flickBadge && (
+        <div
+          className="pointer-events-none px-4 py-2 rounded-2xl font-display text-3xl font-black shadow-xl"
+          style={{ backgroundColor: accentHex, color: '#0B1016' }}
+        >
+          {flickBadge}
+        </div>
+      )}
+
+      {anchorLocal && puckLocal && (
+        <>
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 w-full h-full"
+          >
+            <line
+              x1={anchorLocal.x}
+              y1={anchorLocal.y}
+              x2={puckLocal.x}
+              y2={puckLocal.y}
+              stroke={accentHex}
+              strokeWidth={3}
+              strokeDasharray="4 4"
+              opacity={0.7}
+            />
+          </svg>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute w-14 h-14 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed opacity-45"
+            style={{ left: anchorLocal.x, top: anchorLocal.y, borderColor: accentHex }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-lg border-2 border-white/80"
+            style={{ left: puckLocal.x, top: puckLocal.y, backgroundColor: accentHex }}
+          />
+        </>
+      )}
+    </div>
+  );
+
   return (
-    <div className="flex-1 flex items-stretch gap-3 min-h-0 px-1 sm:px-3">
+    <div className="flex-1 flex items-stretch gap-2 min-h-0 px-1 sm:px-3">
       {handedness === 'left' ? (
         <>
-          {triggersColumn}
-          {trackpadColumn}
+          {cornerControls}
+          {freeTouchSurface}
         </>
       ) : (
         <>
-          {trackpadColumn}
-          {triggersColumn}
+          {freeTouchSurface}
+          {cornerControls}
         </>
       )}
     </div>

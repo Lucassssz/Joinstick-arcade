@@ -81,7 +81,7 @@ import {
   TEAM_MODE_OPTIONS,
   type TeamId,
 } from '../shared/party';
-import { CardControllerDeck } from './CardControllerDeck';
+import { CardControllerDeck, type PocketCardSituation } from './CardControllerDeck';
 import { PhoneControllerDemo } from './PhoneControllerDemo';
 import { createRenderFxState } from '../games/renderers';
 import { arcadeAudio } from '../lib/audio';
@@ -171,6 +171,200 @@ function ActionIcon({ icon, className }: { icon: ActionButtonSpec['icon']; class
   }
 }
 
+const SITUATION_COLOR_BADGE: Record<string, { bg: string; fg: string; en: string; zh: string }> = {
+  red: { bg: '#FF4D2E', fg: '#FFFFFF', en: 'RED', zh: '红' },
+  blue: { bg: '#00C2FF', fg: '#0B1219', en: 'BLUE', zh: '蓝' },
+  gold: { bg: '#FFB800', fg: '#14120B', en: 'GOLD', zh: '黄' },
+  green: { bg: '#10D98B', fg: '#0A1913', en: 'GREEN', zh: '绿' },
+  wild: { bg: '#7C3AED', fg: '#FFFFFF', en: 'WILD', zh: '万能' },
+};
+
+const TABLETOP_ZOOM_CARD_GAMES = new Set<GameId>([
+  'color-clash',
+  'dark-flip-clash',
+  'liars-deck',
+  'boom-kittens',
+  'property-deal',
+  'flip-seven',
+  'royal-bluff',
+  'sushi-draft',
+  'big-two-royale',
+  'lucky-21',
+  'ten-pair-showdown',
+  'landlord-clash',
+  'speed-mahjong',
+  'liars-dice-tavern',
+  'hearts-breaker',
+  'spades-bidding',
+]);
+
+function buildPocketCardSituation(
+  snap: GameSnapshot | null,
+  room: RoomSnapshot,
+  cardState: CardPrivateState | null,
+  meId: string,
+  lang: 'en' | 'zh'
+): PocketCardSituation {
+  const s = (snap ?? null) as Record<string, unknown> | null;
+  const activePlayerId =
+    typeof s?.activePlayerId === 'string' && s.activePlayerId ? s.activePlayerId : undefined;
+  const snapPlayers = Array.isArray(s?.players)
+    ? (s.players as Array<Record<string, unknown>>)
+    : [];
+
+  const players = room.players.map((rp) => {
+    const sp = snapPlayers.find((p) => p.id === rp.id);
+    let stat = rp.statText || `${rp.score}`;
+    if (sp) {
+      if (typeof sp.cardCount === 'number') {
+        stat = `${sp.cardCount}🃏`;
+      } else if (typeof sp.handCount === 'number') {
+        stat = `${sp.handCount}🃏`;
+      } else if (typeof sp.chips === 'number') {
+        stat = `$${sp.chips}`;
+      } else if (typeof sp.bankCash === 'number' && typeof sp.setsCompleted === 'number') {
+        stat = `${sp.setsCompleted}★ $${sp.bankCash}`;
+      } else if (typeof sp.roundPoints === 'number') {
+        stat = `${sp.roundPoints}pt`;
+      } else if (typeof sp.influenceLeft === 'number') {
+        stat = `${sp.influenceLeft}♛ $${typeof sp.coins === 'number' ? sp.coins : 0}`;
+      } else if (typeof sp.totalScore === 'number') {
+        stat = `${sp.totalScore}pt`;
+      }
+    }
+    const alive =
+      typeof sp?.alive === 'boolean' ? sp.alive : rp.alive;
+    return {
+      id: rp.id,
+      name: rp.name,
+      colorHex: rp.color.hex,
+      stat,
+      isActive: activePlayerId ? rp.id === activePlayerId : false,
+      isMe: rp.id === meId,
+      alive,
+    };
+  });
+
+  const activePlayer =
+    players.find((p) => p.isActive) ??
+    (cardState?.isMyTurn ? players.find((p) => p.isMe) : undefined);
+
+  let tableBadge: PocketCardSituation['tableBadge'] = null;
+  const summaryParts: string[] = [];
+
+  if (s) {
+    const gameId = String(s.gameId ?? room.selectedGameId);
+
+    // Color Clash & Dark Flip Clash
+    if ((gameId === 'color-clash' || gameId === 'dark-flip-clash') && s.topCard && typeof s.topCard === 'object') {
+      const topCard = s.topCard as { color?: string; value?: string };
+      const activeColKey = typeof s.activeColor === 'string' ? s.activeColor : topCard.color ?? 'red';
+      const colStyle = SITUATION_COLOR_BADGE[activeColKey] ?? SITUATION_COLOR_BADGE.red;
+      const topVal = topCard.value ?? '';
+      tableBadge = {
+        text: `${lang === 'zh' ? colStyle.zh : colStyle.en} ${topVal}`.trim(),
+        bg: colStyle.bg,
+        fg: colStyle.fg,
+      };
+      if (s.direction === 1 || s.direction === -1) {
+        summaryParts.push(s.direction === 1 ? '↻' : '↺');
+      }
+      if (typeof s.drawPenalty === 'number' && s.drawPenalty > 0) {
+        summaryParts.push(`+${s.drawPenalty}`);
+      }
+      if (typeof s.deckCount === 'number') {
+        summaryParts.push(lang === 'zh' ? `牌堆 ${s.deckCount}` : `Deck ${s.deckCount}`);
+      }
+    } else if (gameId === 'liars-deck') {
+      const target = typeof s.targetRank === 'string' ? s.targetRank : cardState?.targetRank ?? 'A';
+      tableBadge = {
+        text: lang === 'zh' ? `目标 ${target}` : `TARGET ${target}`,
+        bg: '#FFB800',
+        fg: '#14120B',
+      };
+      if (typeof s.pileCount === 'number') {
+        summaryParts.push(lang === 'zh' ? `桌面 ${s.pileCount} 张` : `Pile ${s.pileCount}`);
+      }
+      if (typeof s.lastClaimPlayerName === 'string' && typeof s.lastClaimCount === 'number') {
+        summaryParts.push(`${s.lastClaimPlayerName}: ${s.lastClaimCount}×${target}`);
+      }
+    } else if (gameId === 'boom-kittens') {
+      const bombs = typeof s.bombsInDeck === 'number' ? s.bombsInDeck : 1;
+      const deck = typeof s.deckCount === 'number' ? s.deckCount : 0;
+      tableBadge = {
+        text: `💣 ${bombs} · 🃏 ${deck}`,
+        bg: '#FF4D2E',
+        fg: '#FFFFFF',
+      };
+      if (s.topDiscard && typeof s.topDiscard === 'object') {
+        const td = s.topDiscard as { label?: string };
+        if (td.label) summaryParts.push(td.label);
+      }
+    } else if (typeof s.tableLabel === 'string' && s.tableLabel) {
+      tableBadge = {
+        text: s.tableLabel,
+        bg: '#FFB800',
+        fg: '#14120B',
+      };
+    } else if (typeof s.pot === 'number' && s.pot > 0) {
+      tableBadge = {
+        text: `POT $${s.pot}`,
+        bg: '#10D98B',
+        fg: '#0A1913',
+      };
+    } else if (typeof s.currentBid === 'string' && s.currentBid) {
+      tableBadge = {
+        text: s.currentBid,
+        bg: '#FFB800',
+        fg: '#14120B',
+      };
+    } else if (typeof s.round === 'number') {
+      tableBadge = {
+        text: `R${s.round}`,
+        bg: '#00C2FF',
+        fg: '#0B1219',
+      };
+    }
+
+    if (typeof s.dealerTotal === 'number' && s.dealerTotal > 0) {
+      summaryParts.push(lang === 'zh' ? `庄家 ${s.dealerTotal}` : `Dealer ${s.dealerTotal}`);
+    }
+    if (typeof s.banner === 'string' && s.banner && summaryParts.length < 2) {
+      summaryParts.push(s.banner);
+    }
+  }
+
+  if (!tableBadge && cardState?.badgeText) {
+    tableBadge = {
+      text: cardState.badgeText,
+      bg: cardState.badgeColorHex ?? '#FFB800',
+      fg: '#0B1219',
+    };
+  }
+
+  if (summaryParts.length === 0 && activePlayer) {
+    summaryParts.push(
+      activePlayer.isMe
+        ? lang === 'zh'
+          ? '轮到你出牌！'
+          : 'Your Turn!'
+        : lang === 'zh'
+        ? `${activePlayer.name} 回合`
+        : `${activePlayer.name}'s Turn`
+    );
+  }
+
+  return {
+    activePlayerId,
+    activePlayerName: activePlayer?.name,
+    activePlayerColor: activePlayer?.colorHex,
+    tableBadge,
+    tableSummary: summaryParts.join(' · '),
+    banner: typeof s?.banner === 'string' ? s.banner : null,
+    players,
+  };
+}
+
 export function PhoneController({
   initialRoomCode = '',
   initialMode = 'join',
@@ -239,11 +433,16 @@ export function PhoneController({
   });
   const [pocketTickVersion, setPocketTickVersion] = useState(0);
   const [pocketMuted, setPocketMuted] = useState(false);
+  const [pocketCardViewOverride, setPocketCardViewOverride] = useState<
+    'auto' | 'show-hand' | 'show-table'
+  >('auto');
+  const prevCardTurnRef = useRef<boolean | null>(null);
 
   const latestSnapshotRef = useRef<GameSnapshot | null>(null);
   const latestCompetitiveRef = useRef<CompetitiveSnapshot | null>(null);
   const fxRef = useRef(createRenderFxState());
   const hasPocketSnapRef = useRef<boolean>(false);
+  const lastPocketHudBumpRef = useRef<number>(0);
   const pocketAudioStartedRef = useRef<boolean>(false);
 
   const wasDisconnectedRef = useRef<boolean>(false);
@@ -652,6 +851,8 @@ export function PhoneController({
     setCloseRoomConfirmOpen(false);
     setRepositionMode(false);
     setEmoteDrawerOpen(false);
+    setPocketCardViewOverride('auto');
+    prevCardTurnRef.current = null;
     if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN' && room?.status !== 'PAUSED') {
       setCardState(null);
       latestSnapshotRef.current = null;
@@ -913,11 +1114,20 @@ export function PhoneController({
             roomRef.current = msg.room;
             setRoom(msg.room);
             break;
-          case 'game:tick':
+          case 'game:tick': {
             latestSnapshotRef.current = msg.snapshot;
             latestCompetitiveRef.current = msg.competitive ?? null;
+            const nowMs = Date.now();
             if (!hasPocketSnapRef.current) {
               hasPocketSnapRef.current = true;
+              lastPocketHudBumpRef.current = nowMs;
+              setPocketTickVersion((v) => v + 1);
+            } else if (
+              roomRef.current?.roomMode === 'pocket' &&
+              CARD_GAME_IDS.has(roomRef.current.selectedGameId) &&
+              nowMs - lastPocketHudBumpRef.current >= 200
+            ) {
+              lastPocketHudBumpRef.current = nowMs;
               setPocketTickVersion((v) => v + 1);
             }
             if (roomRef.current?.roomMode === 'pocket') {
@@ -930,6 +1140,7 @@ export function PhoneController({
               }
             }
             break;
+          }
           case 'player:card-state':
             setCardState(msg.cardState);
             break;
@@ -1337,6 +1548,28 @@ export function PhoneController({
   const me = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
   const gameMeta = room ? getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang) : null;
   const isCardGame = Boolean(room && CARD_GAME_IDS.has(room.selectedGameId));
+  const isMyCardTurnNow = Boolean(cardState && (cardState.isActionRequired || cardState.isMyTurn));
+
+  useEffect(() => {
+    if (!isCardGame || !cardState) {
+      prevCardTurnRef.current = null;
+      return;
+    }
+    if (prevCardTurnRef.current !== null && prevCardTurnRef.current !== isMyCardTurnNow) {
+      setPocketCardViewOverride('auto');
+    }
+    prevCardTurnRef.current = isMyCardTurnNow;
+  }, [isCardGame, cardState, isMyCardTurnNow]);
+
+  const isPocketCardHandShown = Boolean(
+    cardState &&
+      (pocketCardViewOverride === 'show-hand'
+        ? true
+        : pocketCardViewOverride === 'show-table'
+        ? false
+        : isMyCardTurnNow)
+  );
+
   const currentPadProfile = room ? getGamePadProfile(room.selectedGameId) : null;
   const recommendedPadMode: PadMode = isCardGame
     ? 'card'
@@ -1362,7 +1595,7 @@ export function PhoneController({
   const effectiveTrackpadTapForA =
     controllerPrefs.trackpadTapForAOverride !== null
       ? controllerPrefs.trackpadTapForAOverride
-      : currentPadProfile?.trackpadTapForA ?? false;
+      : currentPadProfile?.trackpadTapForA ?? true;
   const effectiveCardDefaultView = currentPadProfile?.cardDefaultView ?? 'fan';
 
   const handleSelectArcadePad = (nextPad: ArcadePadMode) => {
@@ -1778,6 +2011,12 @@ export function PhoneController({
       );
     }
 
+    const isCompactPocketCardShell = Boolean(
+      room?.roomMode === 'pocket' &&
+        CARD_GAME_IDS.has(room.selectedGameId) &&
+        (room.status === 'PLAYING' || room.status === 'COUNTDOWN')
+    );
+
     if (isCssRotated) {
       return (
         <div className="fixed inset-0 bg-[#121419] overflow-hidden gamepad-surface z-50">
@@ -1787,7 +2026,9 @@ export function PhoneController({
               width: '100dvh',
               height: '100dvw',
               transform: 'translate(-50%, -50%) rotate(90deg)',
-              padding: 'max(10px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-top))',
+              padding: isCompactPocketCardShell
+                ? 'max(6px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-top))'
+                : 'max(10px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-top))',
             }}
           >
             {children}
@@ -1801,7 +2042,9 @@ export function PhoneController({
       <div
         className="fixed inset-0 w-screen h-[100dvh] flex flex-col justify-between bg-[#121419] text-[#F4F6FA] overflow-hidden gamepad-surface z-50"
         style={{
-          padding: 'max(10px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left))',
+          padding: isCompactPocketCardShell
+            ? 'max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left))'
+            : 'max(10px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left))',
         }}
       >
         {children}
@@ -4065,9 +4308,11 @@ export function PhoneController({
       </div>
     ) : (
       <div
-        className={`relative z-20 flex items-center justify-between gap-2 h-10 shrink-0 px-2 ${
+        className={`relative z-20 flex items-center justify-between gap-2 shrink-0 px-2 ${
+          useIntegratedHud && isCardGame ? 'h-8 mb-1' : 'h-10'
+        } ${
           useIntegratedHud
-            ? 'rounded-xl bg-[#0D1017]/75 border border-white/10 backdrop-blur-sm'
+            ? 'rounded-xl bg-[#0D1017]/82 border border-white/10 backdrop-blur-sm'
             : ''
         }`}
       >
@@ -4468,6 +4713,20 @@ export function PhoneController({
             competitiveRef={latestCompetitiveRef}
             fxRef={fxRef}
             tickVersion={pocketTickVersion}
+            cameraFocus={
+              isCardGame &&
+              isPocketCardHandShown &&
+              TABLETOP_ZOOM_CARD_GAMES.has(room.selectedGameId)
+                ? 'turn-focus'
+                : 'overview'
+            }
+            frameClassName={
+              isCardGame
+                ? isPocketCardHandShown
+                  ? 'pt-[68px] pb-[134px] sm:pt-[74px] sm:pb-[150px]'
+                  : 'pt-[38px] pb-[48px]'
+                : ''
+            }
           />
           {room.status === 'COUNTDOWN' && (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -4503,7 +4762,7 @@ export function PhoneController({
       )}
 
       {isCardGame ? (
-        /* PAD 4: Private Card Hand + Actions (Full-screen overlay dock in Pocket Mode) */
+        /* PAD 4: Private Card Hand + Actions (Turn-Driven Camera & Auto-Hide in Pocket Mode) */
         <CardControllerDeck
           cardState={cardState}
           playerColorHex={me.color.hex}
@@ -4517,6 +4776,32 @@ export function PhoneController({
           sortMode={controllerPrefs.cardSortMode}
           privacyShield={controllerPrefs.cardPrivacyShield}
           actionsSide={controllerPrefs.cardActionsSide}
+          situation={
+            isPocketRoom
+              ? buildPocketCardSituation(
+                  latestSnapshotRef.current,
+                  room,
+                  cardState,
+                  me.id,
+                  lang
+                )
+              : null
+          }
+          handCollapsed={isPocketRoom ? !isPocketCardHandShown : false}
+          onToggleHandCollapsed={
+            isPocketRoom
+              ? () =>
+                  setPocketCardViewOverride(
+                    isPocketCardHandShown
+                      ? isMyCardTurnNow
+                        ? 'show-table'
+                        : 'auto'
+                      : isMyCardTurnNow
+                      ? 'auto'
+                      : 'show-hand'
+                  )
+              : undefined
+          }
           onChangeViewMode={(next) =>
             updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
           }

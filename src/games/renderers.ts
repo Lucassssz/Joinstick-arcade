@@ -1056,6 +1056,7 @@ export function renderGameSnapshot(
   lang: Language = 'en',
   competitive?: CompetitiveSnapshot | null
 ): void {
+  if (!rawSnap || typeof rawSnap.gameId !== 'string') return;
   setActiveCanvasLang(lang);
   const snap = prepareArcadeFrame(rawSnap, fx.arcade);
   setActiveArcadeMotion(fx.arcade);

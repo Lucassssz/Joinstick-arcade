@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import QRCode from 'qrcode';
 import {
   ArrowLeftRight,
   Bot,
   Check,
+  ChevronDown,
   Copy,
   Crown,
   Dices,
+  Filter,
   LogOut,
   Maximize2,
   Minimize2,
@@ -17,6 +19,7 @@ import {
   Search,
   Shuffle,
   SlidersHorizontal,
+  Sparkles,
   Trophy,
   Users,
   Volume2,
@@ -46,6 +49,7 @@ import {
   useLanguage,
 } from '../lib/i18n';
 import { getJoinUrl } from '../lib/ws';
+import { GameThumbnail } from './GameThumbnail';
 import { PlayerAvatar } from './PlayerAvatar';
 
 const DIFFICULTY_CYCLE: BotDifficulty[] = ['chill', 'arcade', 'spicy'];
@@ -115,9 +119,31 @@ export function PocketLobbyView({
 }: PocketLobbyViewProps) {
   const { lang, t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [partyOpen, setPartyOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const filterRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setFilterOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFilterOpen(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [filterOpen]);
 
   const selectedMeta = getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang);
   const activeMutatorSpec = getMutatorSpec(room.activeMutator);
@@ -184,10 +210,25 @@ export function PocketLobbyView({
     onCycleMyTeam(teams[(curIdx + 1) % teams.length]);
   };
 
+  const handlePickRandomGame = () => {
+    const pool = visibleGames.length > 0 ? visibleGames : [selectedMeta];
+    const candidates =
+      pool.length > 1 ? pool.filter((g) => g.id !== room.selectedGameId) : pool;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    if (!chosen) return;
+    onSelectGame(chosen.id, chosen.defaultSetting);
+    requestAnimationFrame(() => {
+      const el = railRef.current?.querySelector<HTMLElement>(
+        `[data-pocket-game-id="${chosen.id}"]`
+      );
+      el?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    });
+  };
+
   const myTeamSpec = room.teamMode !== 'ffa' ? getTeamSpec(me.teamId) : null;
 
   return (
-    <div className="relative flex flex-col h-full w-full max-w-6xl mx-auto gap-2 overflow-hidden">
+    <div className="relative flex flex-col h-full w-full max-w-6xl mx-auto gap-1.5 overflow-hidden">
       {avatarPickerOverlay}
       {passHostOverlay}
       {closeRoomOverlay}
@@ -258,127 +299,62 @@ export function PocketLobbyView({
         </div>
       )}
 
-      {/* Top Pocket Room Bar */}
-      <div className="flex items-center justify-between gap-2 h-10 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <button
-            type="button"
-            onClick={onOpenAvatarPicker}
-            title={t('Tap to change avatar', '点击更换头像')}
-            className="shrink-0 cursor-pointer hover:scale-105 transition-transform"
+      {/* Collapsible Party & Host Controls Drawer */}
+      {partyOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('Party roster and settings', '玩家队伍与房间设置')}
+          onClick={() => setPartyOpen(false)}
+          className="absolute inset-0 z-40 bg-[#0B0E14]/82 backdrop-blur-sm p-3 flex items-center justify-center"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xl max-h-full rounded-2xl bg-[#161B24] border border-[#2C374B] p-3.5 flex flex-col gap-2.5 shadow-2xl overflow-hidden"
           >
-            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="sm" />
-          </button>
-
-          <div className="min-w-0 leading-tight">
-            <div className="flex items-center gap-1.5 text-xs font-extrabold text-white truncate">
-              <span className="truncate">{me.name}</span>
-              {isRoomHost && <Crown className="w-3.5 h-3.5 text-[#FFB800] shrink-0" />}
-            </div>
-            <div className="text-[11px] text-[#9CA3AF] font-mono tabular-nums truncate">
-              {t('Pocket', '掌机房')} · {room.code} · {readyHumans.length}/{connectedHumans.length}{' '}
-              {t('Ready', '已准备')}
-              {botCount > 0 ? ` · +${botCount} ${t('Bots', '机器人')}` : ''}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setQrOpen(true)}
-            className="tactile-btn h-8 px-2.5 rounded-lg bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-          >
-            <QrCode className="w-3.5 h-3.5" />
-            <span>{t('Invite', '邀请')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onToggleMute}
-            aria-label={pocketMuted ? t('Unmute sound', '开启音效') : t('Mute sound', '静音音效')}
-            className={`h-8 w-8 rounded-lg flex items-center justify-center cursor-pointer ${
-              pocketMuted
-                ? 'bg-[#242A36] text-[#9CA3AF]'
-                : 'bg-[#10D98B]/20 border border-[#10D98B]/50 text-[#10D98B]'
-            }`}
-          >
-            {pocketMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-          </button>
-
-          <LanguageToggle compact className="h-8" />
-
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            aria-label={t('Controller settings', '手柄设置')}
-            className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#00C2FF] flex items-center justify-center cursor-pointer"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={onToggleFullscreen}
-            aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
-            className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
-          >
-            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={onLeave}
-            aria-label={t('Leave room', '退出房间')}
-            className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-          </button>
-
-          {isRoomHost && (
-            <button
-              type="button"
-              onClick={onOpenCloseRoom}
-              aria-label={t('Close Entire Room', '关闭整个房间')}
-              className="h-8 w-8 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer"
-            >
-              <Power className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Main 2-Column Mobile Landscape Pocket Lobby */}
-      <div className="flex-1 min-h-0 grid grid-cols-12 gap-2.5">
-        {/* LEFT COLUMN (5 cols): Roster + Host Tools + Ready & Start */}
-        <div className="col-span-5 flex flex-col justify-between gap-2 min-h-0 bg-[#171B24] border border-[#262E3E] rounded-2xl p-2.5">
-          {/* Players Roster */}
-          <div className="min-h-0 flex-1 flex flex-col gap-1.5">
-            <div className="flex items-center justify-between text-[11px] font-bold text-[#9CA3AF]">
-              <span className="inline-flex items-center gap-1 text-white">
-                <Users className="w-3.5 h-3.5 text-[#00C2FF]" />
-                {t('Players', '玩家列表')} ({room.players.length}/8)
-              </span>
-              {isRoomHost && room.players.length > 1 && (
+            <div className="flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#00C2FF]" />
+                <span className="font-display font-extrabold text-sm text-white">
+                  {t('Party Roster', '玩家列表')} ({room.players.length}/8)
+                </span>
+                <span className="text-[11px] font-mono text-[#10D98B]">
+                  {readyHumans.length}/{connectedHumans.length} {t('Ready', '已准备')}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {isRoomHost && room.players.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPartyOpen(false);
+                      onOpenPassHost();
+                    }}
+                    className="h-7 px-2.5 rounded-lg bg-[#242A36] hover:bg-[#2F3747] text-[11px] font-bold text-[#FFB800] inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowLeftRight className="w-3 h-3" />
+                    {t('Manage', '管理')}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={onOpenPassHost}
-                  className="text-[#FFB800] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                  onClick={() => setPartyOpen(false)}
+                  aria-label={t('Close party drawer', '关闭玩家窗口')}
+                  className="h-7 w-7 rounded-lg bg-[#242A36] hover:bg-[#2F3747] text-white flex items-center justify-center cursor-pointer"
                 >
-                  <ArrowLeftRight className="w-3 h-3" />
-                  {t('Manage', '管理')}
+                  <X className="w-4 h-4" />
                 </button>
-              )}
+              </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar space-y-1 pr-0.5">
+            <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {room.players.map((p) => {
                 const pTeam = room.teamMode !== 'ffa' ? getTeamSpec(p.teamId) : null;
                 const pIsHost = !p.isBot && room.hostPlayerId === p.id;
                 return (
                   <div
                     key={p.id}
-                    className="px-2 py-1.5 rounded-xl bg-[#10131A] border border-[#222938] flex items-center justify-between gap-2"
+                    className="px-2.5 py-1.5 rounded-xl bg-[#10131A] border border-[#222938] flex items-center justify-between gap-2"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <PlayerAvatar avatarId={p.avatarId} colorHex={p.color.hex} size="xs" />
@@ -401,7 +377,7 @@ export function PocketLobbyView({
                       </div>
                     </div>
                     <span
-                      className={`text-[10px] font-extrabold shrink-0 ${
+                      className={`text-[11px] font-extrabold shrink-0 ${
                         p.ready ? 'text-[#10D98B]' : 'text-[#FFB800]'
                       }`}
                     >
@@ -411,35 +387,32 @@ export function PocketLobbyView({
                 );
               })}
             </div>
-          </div>
 
-          {/* Host Bot / Team Controls OR Non-Host Team & Emotes */}
-          <div className="space-y-1.5 shrink-0">
             {isRoomHost ? (
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#242B3A] shrink-0">
                 <button
                   type="button"
                   onClick={onAddBot}
-                  className="h-8 px-2 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-[11px] font-bold text-white inline-flex items-center justify-center gap-1 cursor-pointer truncate"
+                  className="h-8 px-3 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-xs font-bold text-white inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <Plus className="w-3 h-3 text-[#00C2FF] shrink-0" />
-                  <span className="truncate">{t('Bot', '机器人')}</span>
+                  <Plus className="w-3.5 h-3.5 text-[#00C2FF]" />
+                  <span>{t('Add Bot', '加机器人')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleNextBotDifficulty}
-                  className="h-8 px-2 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-[11px] font-bold text-[#D1D5DB] inline-flex items-center justify-center gap-1 cursor-pointer truncate"
+                  className="h-8 px-3 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-xs font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <Bot className="w-3 h-3 text-[#FFB800] shrink-0" />
-                  <span className="truncate">{diffInfo.label}</span>
+                  <Bot className="w-3.5 h-3.5 text-[#FFB800]" />
+                  <span>{diffInfo.label}</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleNextTeamMode}
-                  className="h-8 px-2 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-[11px] font-bold text-[#D1D5DB] inline-flex items-center justify-center gap-1 cursor-pointer truncate"
+                  className="h-8 px-3 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-xs font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <Shuffle className="w-3 h-3 text-[#10D98B] shrink-0" />
-                  <span className="truncate">
+                  <Shuffle className="w-3.5 h-3.5 text-[#10D98B]" />
+                  <span>
                     {(() => {
                       const modeOpt = TEAM_MODE_OPTIONS.find((o) => o.id === room.teamMode);
                       if (!modeOpt) return t('FFA', '混战');
@@ -447,278 +420,446 @@ export function PocketLobbyView({
                     })()}
                   </span>
                 </button>
+                {room.teamMode !== 'ffa' && (
+                  <>
+                    {myTeamSpec && (
+                      <button
+                        type="button"
+                        onClick={handleCyclePlayerTeam}
+                        className="h-8 px-2.5 rounded-lg bg-[#10131A] border border-[#262E3E] text-xs font-bold text-white cursor-pointer"
+                      >
+                        {myTeamSpec.emoji} {lang === 'zh' ? myTeamSpec.nameZh : myTeamSpec.shortName}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={onShuffleTeams}
+                      className="h-8 px-2.5 rounded-lg bg-[#10131A] border border-[#262E3E] text-xs font-bold text-[#00C2FF] cursor-pointer"
+                    >
+                      {t('Shuffle Teams', '随机分队')}
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-1.5">
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#242B3A] shrink-0">
                 {myTeamSpec ? (
                   <button
                     type="button"
                     onClick={handleCyclePlayerTeam}
-                    className="h-8 px-2.5 rounded-lg bg-[#212735] text-xs font-bold text-white inline-flex items-center gap-1 cursor-pointer"
+                    className="h-8 px-3 rounded-lg bg-[#212735] text-xs font-bold text-white inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <span>{myTeamSpec.emoji}</span>
                     <span>{lang === 'zh' ? myTeamSpec.nameZh : myTeamSpec.shortName}</span>
                   </button>
                 ) : (
-                  <div className="flex items-center gap-1 overflow-x-auto">
-                    {quickEmotes.slice(0, 5).map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => onSendEmote(emoji)}
-                        className="h-8 w-8 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-sm flex items-center justify-center cursor-pointer shrink-0"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
+                  <span className="text-xs text-[#9CA3AF]">
+                    {t('Send a quick reaction:', '发送快捷表情：')}
+                  </span>
                 )}
+                <div className="flex items-center gap-1">
+                  {quickEmotes.slice(0, 5).map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => onSendEmote(emoji)}
+                      className="h-8 w-8 rounded-lg bg-[#212735] hover:bg-[#2A3244] text-sm flex items-center justify-center cursor-pointer"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
-
-            {isRoomHost && room.teamMode !== 'ffa' && (
-              <div className="flex items-center justify-between gap-1.5">
-                {myTeamSpec && (
-                  <button
-                    type="button"
-                    onClick={handleCyclePlayerTeam}
-                    className="flex-1 h-7 px-2 rounded-lg bg-[#10131A] border border-[#262E3E] text-[11px] font-bold text-white truncate cursor-pointer"
-                  >
-                    {t('My Team:', '我的队伍：')} {myTeamSpec.emoji}{' '}
-                    {lang === 'zh' ? myTeamSpec.nameZh : myTeamSpec.shortName}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onShuffleTeams}
-                  className="h-7 px-2.5 rounded-lg bg-[#10131A] border border-[#262E3E] text-[11px] font-bold text-[#00C2FF] cursor-pointer"
-                >
-                  {t('Shuffle', '随机分队')}
-                </button>
-              </div>
-            )}
-
-            {/* Primary Ready & Host Start Controls */}
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onToggleReady}
-                className="tactile-btn flex-1 h-10 rounded-xl font-display font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-1.5 cursor-pointer"
-                style={
-                  me.ready
-                    ? {
-                        backgroundColor: '#10D98B',
-                        color: '#0A1913',
-                        boxShadow: '0 3px 0 #0A915D',
-                      }
-                    : {
-                        backgroundColor: me.color.hex,
-                        color: me.color.textOnColor,
-                        boxShadow: `0 3px 0 ${me.color.dark}`,
-                      }
-                }
-              >
-                {me.ready && <Check className="w-4 h-4 shrink-0" />}
-                <span className="truncate">
-                  {me.ready ? t('Ready!', '已准备!') : t('Tap Ready', '点击准备')}
-                </span>
-              </button>
-
-              {isRoomHost && (
-                <button
-                  type="button"
-                  onClick={onStartMatch}
-                  className={`tactile-btn h-10 px-3.5 rounded-xl font-display font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
-                    allHumansReady
-                      ? 'bg-[#FF4D2E] hover:bg-[#FF6145] text-white shadow-[0_3px_0_#B82E17]'
-                      : 'bg-[#242A36] text-[#9CA3AF]'
-                  }`}
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>{t('Start', '开始')}</span>
-                </button>
-              )}
-            </div>
-
-            {errorMsg && (
-              <p className="text-[10px] font-semibold text-[#FF9B8A] leading-tight truncate">
-                {errorMsg}
-              </p>
             )}
           </div>
         </div>
+      )}
 
-        {/* RIGHT COLUMN (7 cols): Host Game Browser OR Friend Selected Game Card */}
-        <div className="col-span-7 flex flex-col gap-2 min-h-0 bg-[#171B24] border border-[#262E3E] rounded-2xl p-2.5">
-          {isRoomHost ? (
-            <>
-              {/* Filter + Search + Chaos & Cup Row */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <div className="relative flex-1 min-w-0">
-                  <Search className="w-3.5 h-3.5 text-[#9CA3AF] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+      {/* 1. Slim Header + Collapsible Party Pill */}
+      <div className="flex items-center justify-between gap-2 h-9 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={onOpenAvatarPicker}
+            title={t('Tap to change avatar', '点击更换头像')}
+            className="shrink-0 cursor-pointer hover:scale-105 transition-transform"
+          >
+            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+          </button>
+
+          <div className="min-w-0 leading-tight">
+            <div className="flex items-center gap-1 text-xs font-extrabold text-white truncate">
+              <span className="truncate">{me.name}</span>
+              {isRoomHost && <Crown className="w-3 h-3 text-[#FFB800] shrink-0" />}
+              <span className="font-mono text-[10px] text-[#00C2FF] bg-[#00C2FF]/12 px-1.5 py-0.2 rounded ml-0.5 shrink-0">
+                {room.code}
+              </span>
+            </div>
+          </div>
+
+          {/* Collapsible Party Dock Trigger */}
+          <button
+            type="button"
+            onClick={() => setPartyOpen(true)}
+            className="h-7 px-2 rounded-lg bg-[#171C27] hover:bg-[#1E2534] border border-[#2B3548] inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+          >
+            <div className="flex items-center -space-x-1">
+              {room.players.slice(0, 4).map((p) => (
+                <span
+                  key={p.id}
+                  className="w-2.5 h-2.5 rounded-full border border-[#121419]"
+                  style={{ backgroundColor: p.color.hex }}
+                />
+              ))}
+            </div>
+            <span className="text-[11px] font-bold text-white tabular-nums">
+              {room.players.length}/8
+            </span>
+            <span className="text-[10px] font-mono text-[#10D98B] tabular-nums hidden sm:inline">
+              {readyHumans.length}/{connectedHumans.length}✓
+            </span>
+            {botCount > 0 && (
+              <span className="text-[10px] font-mono text-[#00C2FF] hidden md:inline">
+                +{botCount}🤖
+              </span>
+            )}
+            <ChevronDown className="w-3 h-3 text-[#9CA3AF]" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setQrOpen(true)}
+            className="tactile-btn h-7 px-2 rounded-lg bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+          >
+            <QrCode className="w-3.5 h-3.5" />
+            <span>{t('Invite', '邀请')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onToggleMute}
+            aria-label={pocketMuted ? t('Unmute sound', '开启音效') : t('Mute sound', '静音音效')}
+            className={`h-7 w-7 rounded-lg flex items-center justify-center cursor-pointer ${
+              pocketMuted
+                ? 'bg-[#242A36] text-[#9CA3AF]'
+                : 'bg-[#10D98B]/20 border border-[#10D98B]/50 text-[#10D98B]'
+            }`}
+          >
+            {pocketMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+          </button>
+
+          <LanguageToggle compact className="h-7" />
+
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label={t('Controller settings', '手柄设置')}
+            className="h-7 w-7 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#00C2FF] flex items-center justify-center cursor-pointer"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onToggleFullscreen}
+            aria-label={isFullscreen ? t('Exit fullscreen', '退出全屏') : t('Enter fullscreen', '进入全屏')}
+            className="h-7 w-7 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
+          >
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={onLeave}
+            aria-label={t('Leave room', '退出房间')}
+            className="h-7 w-7 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] flex items-center justify-center cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
+
+          {isRoomHost && (
+            <button
+              type="button"
+              onClick={onOpenCloseRoom}
+              aria-label={t('Close Entire Room', '关闭整个房间')}
+              className="h-7 w-7 rounded-lg bg-[#2A191B] hover:bg-[#FF4D2E] border border-[#FF4D2E]/45 text-[#FF9B8A] hover:text-white flex items-center justify-center cursor-pointer"
+            >
+              <Power className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Full-Width Visual Game Showcase Stage */}
+      <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+        {isRoomHost ? (
+          <>
+            {/* Search + Collapsible Filter + Discovery Controls */}
+            <div className="flex items-center justify-between gap-1.5 shrink-0">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <div className="relative flex-1 min-w-[110px] max-w-[220px]">
+                  <Search className="w-3.5 h-3.5 text-[#9CA3AF] absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={t('Search games…', '搜索游戏…')}
-                    className="w-full h-8 pl-8 pr-2.5 rounded-lg bg-[#10131A] border border-[#262E3E] focus:border-[#00C2FF] focus:outline-none text-xs text-white placeholder:text-[#6B7280]"
+                    placeholder={t('Search…', '搜索…')}
+                    className="w-full h-7 pl-7 pr-2 rounded-lg bg-[#161B24] border border-[#283142] focus:border-[#00C2FF] focus:outline-none text-xs text-white placeholder:text-[#6B7280]"
                   />
                 </div>
+
+                <div ref={filterRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    aria-expanded={filterOpen}
+                    aria-haspopup="listbox"
+                    onClick={() => setFilterOpen((prev) => !prev)}
+                    className={`h-7 px-2.5 rounded-lg border text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap ${
+                      room.lobbyFilter !== 'all' || filterOpen
+                        ? 'bg-[#00C2FF]/15 border-[#00C2FF] text-[#00C2FF]'
+                        : 'bg-[#161B24] border-[#283142] hover:border-[#3D4B66] text-[#D1D5DB]'
+                    }`}
+                  >
+                    <Filter className="w-3 h-3 shrink-0" />
+                    <span>
+                      {room.lobbyFilter === 'all'
+                        ? t('Filter', '筛选')
+                        : getLocalizedFilterLabel(room.lobbyFilter, lang, true)}
+                    </span>
+                    <ChevronDown
+                      className={`w-3 h-3 shrink-0 transition-transform duration-150 ${
+                        filterOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {filterOpen && (
+                    <div
+                      role="listbox"
+                      aria-label={t('Filter games', '筛选游戏')}
+                      className="absolute left-0 top-full mt-1.5 z-30 w-60 sm:w-68 rounded-xl bg-[#161B24]/98 backdrop-blur-md border border-[#2C374B] p-2 shadow-2xl grid grid-cols-2 gap-1.5"
+                    >
+                      {PLAYER_FILTER_OPTIONS.map((opt) => {
+                        const active = room.lobbyFilter === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onClick={() => {
+                              onChangeFilter(opt.id);
+                              setFilterOpen(false);
+                            }}
+                            className={`h-7 px-2.5 rounded-lg text-[11px] font-bold text-left inline-flex items-center justify-between gap-1 cursor-pointer transition-colors ${
+                              active
+                                ? 'bg-[#00C2FF] text-[#0B1219]'
+                                : 'bg-[#10131A] border border-[#242C3D] text-[#D1D5DB] hover:border-[#3D4B66] hover:text-white'
+                            }`}
+                          >
+                            <span className="truncate">
+                              {getLocalizedFilterLabel(opt.id, lang, true)}
+                            </span>
+                            {active && <Check className="w-3 h-3 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handlePickRandomGame}
+                  title={t('Pick a random game', '随机选一款游戏')}
+                  className="h-7 px-2 rounded-lg bg-[#161B24] border border-[#283142] hover:border-[#10D98B] text-[11px] font-bold text-[#10D98B] inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span className="hidden sm:inline">{t('Random', '随机')}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={onSpinMutator}
                   title={t('Spin Chaos Rule', '随机混沌规则')}
-                  className="h-8 px-2.5 rounded-lg bg-[#10131A] border border-[#262E3E] hover:border-[#FFB800] text-[11px] font-bold text-white inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  className="h-7 px-2 rounded-lg bg-[#161B24] border border-[#283142] hover:border-[#FFB800] text-[11px] font-bold text-white inline-flex items-center gap-1 cursor-pointer"
                 >
                   <Dices className="w-3.5 h-3.5" style={{ color: activeMutatorSpec.accentHex }} />
-                  <span className="truncate max-w-[84px]">
+                  <span className="truncate max-w-[68px] hidden sm:inline">
                     {room.activeMutator === 'normal'
-                      ? t('Chaos', '混沌轮盘')
+                      ? t('Chaos', '混沌')
                       : lang === 'zh'
                       ? activeMutatorSpec.shortTagZh
                       : activeMutatorSpec.shortTag}
                   </span>
                 </button>
+
                 <button
                   type="button"
                   onClick={onStartTournament}
                   title={t('Start 5-Game Cup', '开启 5 局锦标赛')}
-                  className="h-8 px-2.5 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[#14120B] text-[11px] font-extrabold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  className="h-7 px-2 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[#14120B] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <Trophy className="w-3.5 h-3.5" />
-                  <span>{t('Cup', '锦标赛')}</span>
+                  <Trophy className="w-3 h-3" />
+                  <span className="hidden sm:inline">{t('Cup', '锦标赛')}</span>
                 </button>
               </div>
+            </div>
 
-              {/* Filter Tabs */}
-              <div className="flex items-center gap-1 overflow-x-auto arcade-scrollbar pb-0.5 shrink-0">
-                {PLAYER_FILTER_OPTIONS.map((opt) => {
-                  const active = room.lobbyFilter === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => onChangeFilter(opt.id)}
-                      className={`h-7 px-2.5 rounded-lg text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                        active
-                          ? 'bg-[#00C2FF] text-[#0B1219]'
-                          : 'bg-[#10131A] text-[#9CA3AF] hover:text-white'
-                      }`}
-                    >
-                      {getLocalizedFilterLabel(opt.id, lang, true)}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Selected Game Setting Strip */}
-              <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-[#10131A] border border-[#222938] shrink-0">
-                <div className="min-w-0">
-                  <div className="text-xs font-extrabold text-white truncate">
-                    {selectedMeta.name}
-                  </div>
-                  <div className="text-[10px] text-[#9CA3AF] truncate">{selectedMeta.tagline}</div>
+            {/* Visual Showcase Rail */}
+            <div
+              ref={railRef}
+              className="flex-1 min-h-0 flex items-stretch gap-2.5 overflow-x-auto arcade-scrollbar pb-1 px-0.5 snap-x snap-mandatory"
+            >
+              {visibleGames.length === 0 ? (
+                <div className="w-full flex flex-col items-center justify-center text-center py-6 text-xs text-[#9CA3AF]">
+                  <span>{t('No matching games found.', '没有找到匹配的游戏。')}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      onChangeFilter('all');
+                    }}
+                    className="mt-2 px-3 py-1 rounded-lg bg-[#242A36] text-white font-bold cursor-pointer"
+                  >
+                    {t('Show All Games', '显示全部游戏')}
+                  </button>
                 </div>
-                {selectedMeta.settingOptions.length > 0 && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    {selectedMeta.settingOptions.map((opt) => {
-                      const active = room.gameSettingValue === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => onSelectGame(room.selectedGameId, opt.value)}
-                          className={`h-6 px-2 rounded-md text-[10px] font-bold cursor-pointer whitespace-nowrap ${
-                            active
-                              ? 'bg-[#FF4D2E] text-white'
-                              : 'bg-[#1A202C] text-[#9CA3AF] hover:text-white'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Scrollable Game Picker Grid */}
-              <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar grid grid-cols-2 gap-1.5 pr-0.5 content-start">
-                {visibleGames.map((g) => {
+              ) : (
+                visibleGames.map((g) => {
                   const selected = g.id === room.selectedGameId;
+                  const genre = getGameGenre(g.id);
                   return (
                     <button
                       key={g.id}
+                      data-pocket-game-id={g.id}
                       type="button"
                       onClick={() => onSelectGame(g.id, g.defaultSetting)}
-                      className={`p-2 rounded-xl border text-left transition-colors cursor-pointer flex flex-col justify-between gap-1 ${
+                      className={`group relative rounded-2xl border text-left overflow-hidden flex flex-col transition-all cursor-pointer w-[176px] sm:w-[208px] shrink-0 snap-center h-full ${
                         selected
-                          ? 'bg-[#152436] border-[#00C2FF]'
-                          : 'bg-[#10131A] border-[#222938] hover:border-[#39455E]'
+                          ? 'bg-[#152436] border-[#00C2FF] ring-2 ring-[#00C2FF]/65 shadow-[0_6px_22px_rgba(0,194,255,0.22)]'
+                          : 'bg-[#141822] border-[#242C3D] hover:border-[#3D4B66]'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-1 text-[10px] text-[#9CA3AF]">
-                        <span className="font-semibold truncate" style={{ color: g.accentHex }}>
-                          {getLocalizedFilterLabel(getGameGenre(g.id), lang, true)} · {g.category}
-                        </span>
-                        <span className="font-mono shrink-0">{g.playerModeLabel}</span>
+                      <div className="relative w-full overflow-hidden shrink-0 flex-1 min-h-[76px]">
+                        <GameThumbnail
+                          gameId={g.id}
+                          gameName={g.name}
+                          accentHex={g.accentHex}
+                          fallbackSrc={g.coverImage}
+                          eager={selected}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#10131C] via-transparent to-black/35 pointer-events-none" />
+
+                        <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 pointer-events-none">
+                          <span
+                            className="px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm text-[9px] font-extrabold uppercase tracking-wide truncate"
+                            style={{ color: g.accentHex }}
+                          >
+                            {getLocalizedFilterLabel(genre, lang, true)}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm font-mono text-[9px] font-bold text-[#E5E7EB] shrink-0">
+                            {g.playerModeLabel}
+                          </span>
+                        </div>
+
+                        {selected && (
+                          <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-[#00C2FF] text-[#0B1219] font-mono text-[9px] font-black uppercase shadow">
+                            {t('SELECTED', '已选')}
+                          </span>
+                        )}
                       </div>
-                      <div className="font-display font-bold text-xs text-white truncate">
-                        {g.name}
+
+                      <div className="px-2.5 py-1.5 shrink-0 bg-[#121620]">
+                        <div className="font-display font-extrabold text-xs sm:text-sm text-white truncate">
+                          {g.name}
+                        </div>
+                        <div className="text-[10px] text-[#9CA3AF] truncate mt-0.5">
+                          {g.tagline}
+                        </div>
                       </div>
                     </button>
                   );
-                })}
+                })
+              )}
+            </div>
+          </>
+        ) : (
+          /* Non-Host Friend Full-Width Selected Game Hero Preview */
+          <div className="flex-1 min-h-0 grid grid-cols-12 gap-2.5 bg-[#151923] border border-[#262E3E] rounded-2xl p-2.5 overflow-hidden">
+            <div className="col-span-5 relative rounded-xl overflow-hidden border border-white/10 bg-[#0D1017]">
+              <GameThumbnail
+                gameId={selectedMeta.id}
+                gameName={selectedMeta.name}
+                accentHex={selectedMeta.accentHex}
+                fallbackSrc={selectedMeta.coverImage}
+                eager
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
+              <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-1">
+                <span className="px-2 py-0.5 rounded-md bg-black/75 text-[#FFB800] text-[10px] font-bold inline-flex items-center gap-1 truncate">
+                  <Crown className="w-3 h-3 shrink-0" />
+                  {t(`${hostPlayer?.name ?? 'Host'} Pick`, `${hostPlayer?.name ?? '房主'} 选定`)}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-black/75 font-mono text-[10px] text-white shrink-0">
+                  {selectedMeta.playerModeLabel}
+                </span>
               </div>
-            </>
-          ) : (
-            /* Non-Host Friend View: Selected Game Details + Rules + Control Tip */
-            <div className="flex-1 min-h-0 flex flex-col justify-between gap-2 p-1">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-[#FFB800] font-bold inline-flex items-center gap-1">
-                    <Crown className="w-3.5 h-3.5" />
-                    {t(
-                      `${hostPlayer?.name ?? 'Host'} selected`,
-                      `${hostPlayer?.name ?? '房主'} 已选择游戏`
-                    )}
-                  </span>
-                  <span className="font-mono text-[#9CA3AF]">{selectedMeta.playerModeLabel}</span>
-                </div>
+              <div className="absolute bottom-2 left-2 right-2 flex items-center gap-1 overflow-x-auto no-scrollbar">
+                {quickEmotes.slice(0, 5).map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => onSendEmote(emoji)}
+                    className="h-7 w-7 rounded-lg bg-black/65 hover:bg-black/85 border border-white/15 text-sm flex items-center justify-center cursor-pointer shrink-0"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                <div>
-                  <div className="text-[11px] font-semibold" style={{ color: selectedMeta.accentHex }}>
+            <div className="col-span-7 flex flex-col justify-between min-h-0 gap-2 overflow-y-auto arcade-scrollbar pr-0.5">
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className="text-[11px] font-bold uppercase tracking-wider"
+                    style={{ color: selectedMeta.accentHex }}
+                  >
                     {selectedMeta.category}
-                  </div>
-                  <h2 className="font-display text-xl font-extrabold text-white truncate">
-                    {selectedMeta.name}
-                  </h2>
-                  <p className="text-xs text-[#A5AEBD] mt-1 leading-relaxed">
-                    {selectedMeta.description}
-                  </p>
-                </div>
-
-                {room.activeMutator !== 'normal' && (
-                  <div className="px-2.5 py-1.5 rounded-xl bg-[#10131A] border border-[#262E3E] flex items-center justify-between text-xs">
-                    <span className="text-[#9CA3AF] inline-flex items-center gap-1.5">
-                      <Dices className="w-3.5 h-3.5" style={{ color: activeMutatorSpec.accentHex }} />
-                      {t('Chaos Rule', '混沌规则')}
-                    </span>
-                    <span className="font-bold" style={{ color: activeMutatorSpec.accentHex }}>
+                  </span>
+                  {room.activeMutator !== 'normal' && (
+                    <span
+                      className="px-2 py-0.5 rounded-md bg-[#10131A] border border-[#262E3E] text-[10px] font-bold inline-flex items-center gap-1"
+                      style={{ color: activeMutatorSpec.accentHex }}
+                    >
+                      <Dices className="w-3 h-3" />
                       {lang === 'zh' ? activeMutatorSpec.nameZh : activeMutatorSpec.name}
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
+                <h2 className="font-display text-lg sm:text-xl font-black text-white truncate">
+                  {selectedMeta.name}
+                </h2>
+                <p className="text-xs text-[#A5AEBD] mt-1 leading-snug line-clamp-2">
+                  {selectedMeta.description}
+                </p>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-[#10131A] border border-[#222938] space-y-1 text-xs">
-                <div className="text-[11px] font-bold text-[#00C2FF]">
-                  {t('Pocket Mode Controls', '掌机操作说明')}
+              <div className="p-2 rounded-xl bg-[#10131A] border border-[#222938] space-y-1 text-xs">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[#00C2FF]">
+                  {t('Pocket Controls', '掌机操作指南')}
                 </div>
                 <p className="text-[11px] text-[#D1D5DB] leading-snug">
                   {selectedMeta.controllerSchema.controlTip}
                 </p>
-                <div className="pt-1 flex items-center justify-between text-[11px] text-[#9CA3AF]">
+                <div className="pt-0.5 flex items-center gap-4 text-[11px] text-[#9CA3AF]">
                   <span>
                     A: <strong className="text-white">{selectedMeta.controllerSchema.actionA.label}</strong>
                   </span>
@@ -728,6 +869,99 @@ export function PocketLobbyView({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Sticky Bottom Launch Dock (Selected Settings + Ready & Start) */}
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-2xl bg-[#161B24] border border-[#262E3E] shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: selectedMeta.accentHex }}
+              />
+              <span className="font-display font-extrabold text-xs sm:text-sm text-white truncate">
+                {selectedMeta.name}
+              </span>
+              {room.activeMutator !== 'normal' && (
+                <span
+                  className="px-1.5 py-0.5 rounded bg-[#10131A] font-mono text-[9px] font-black shrink-0"
+                  style={{ color: activeMutatorSpec.accentHex }}
+                >
+                  {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
+                </span>
+              )}
+            </div>
+            {errorMsg ? (
+              <p className="text-[10px] font-semibold text-[#FF9B8A] truncate">{errorMsg}</p>
+            ) : (
+              <p className="text-[10px] text-[#9CA3AF] truncate hidden sm:block">
+                {selectedMeta.tagline}
+              </p>
+            )}
+          </div>
+
+          {isRoomHost && selectedMeta.settingOptions.length > 0 && (
+            <div className="flex items-center gap-1 shrink-0">
+              {selectedMeta.settingOptions.map((opt) => {
+                const active = room.gameSettingValue === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => onSelectGame(room.selectedGameId, opt.value)}
+                    className={`h-7 px-2 rounded-lg text-[10px] font-bold cursor-pointer whitespace-nowrap transition-colors ${
+                      active
+                        ? 'bg-[#FF4D2E] text-white'
+                        : 'bg-[#10131A] border border-[#252E3F] text-[#9CA3AF] hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleReady}
+            className="tactile-btn h-9 px-3.5 sm:px-4 rounded-xl font-display font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+            style={
+              me.ready
+                ? {
+                    backgroundColor: '#10D98B',
+                    color: '#0A1913',
+                    boxShadow: '0 3px 0 #0A915D',
+                  }
+                : {
+                    backgroundColor: me.color.hex,
+                    color: me.color.textOnColor,
+                    boxShadow: `0 3px 0 ${me.color.dark}`,
+                  }
+            }
+          >
+            {me.ready && <Check className="w-4 h-4 shrink-0" />}
+            <span>{me.ready ? t('Ready!', '已准备!') : t('Tap Ready', '点击准备')}</span>
+          </button>
+
+          {isRoomHost && (
+            <button
+              type="button"
+              onClick={onStartMatch}
+              className={`tactile-btn h-9 px-4 rounded-xl font-display font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-1 cursor-pointer shrink-0 whitespace-nowrap ${
+                allHumansReady
+                  ? 'bg-[#FF4D2E] hover:bg-[#FF6145] text-white shadow-[0_3px_0_#B82E17]'
+                  : 'bg-[#242A36] text-[#9CA3AF]'
+              }`}
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>{t('Start', '开始')}</span>
+            </button>
           )}
         </div>
       </div>
