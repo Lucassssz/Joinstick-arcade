@@ -258,6 +258,7 @@ export function PhoneController({
   const pulseATimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
   const userExitedPhoneFsRef = useRef<boolean>(false);
+  const wasFullscreenRef = useRef<boolean>(false);
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
     pointerId: number;
@@ -350,12 +351,22 @@ export function PhoneController({
   // Listen to resize, orientationchange, and fullscreen changes
   useEffect(() => {
     if (embedded) return;
+    const doc = document as Document & { webkitFullscreenElement?: Element };
+    const initialFs = Boolean(document.fullscreenElement || doc.webkitFullscreenElement);
+    wasFullscreenRef.current = initialFs;
+    setIsFullscreen(initialFs);
+
     const onResize = () => {
       setViewport({ w: window.innerWidth, h: window.innerHeight });
     };
     const onFsChange = () => {
-      const doc = document as Document & { webkitFullscreenElement?: Element };
-      setIsFullscreen(Boolean(document.fullscreenElement || doc.webkitFullscreenElement));
+      const nextFs = Boolean(document.fullscreenElement || doc.webkitFullscreenElement);
+      if (wasFullscreenRef.current && !nextFs) {
+        // Respect native exits (Esc key, mobile soft keyboard opening, swipe/back gesture, browser UI)
+        userExitedPhoneFsRef.current = true;
+      }
+      wasFullscreenRef.current = nextFs;
+      setIsFullscreen(nextFs);
     };
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
@@ -369,8 +380,16 @@ export function PhoneController({
     };
   }, [embedded]);
 
-  const enterFullscreenAndLandscape = () => {
+  const enterFullscreenAndLandscape = (force = false) => {
     if (embedded || typeof document === 'undefined') return;
+    if (!force && (!joinedPlayerIdRef.current || userExitedPhoneFsRef.current)) {
+      return;
+    }
+    const activeTag = document.activeElement?.tagName;
+    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+      return;
+    }
+
     try {
       const doc = document as Document & { webkitFullscreenElement?: Element };
       const el = document.documentElement as HTMLElement & {
@@ -432,33 +451,19 @@ export function PhoneController({
         doc.webkitExitFullscreen();
       }
     } else {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.tagName === 'SELECT')
+      ) {
+        activeEl.blur();
+      }
       userExitedPhoneFsRef.current = false;
-      enterFullscreenAndLandscape();
+      enterFullscreenAndLandscape(true);
     }
   };
-
-  // Automatically force Fullscreen on the phone browser on mount and on the first touch gesture
-  useEffect(() => {
-    if (embedded) return;
-    enterFullscreenAndLandscape();
-    const onGesture = () => {
-      if (userExitedPhoneFsRef.current) return;
-      const doc = document as Document & { webkitFullscreenElement?: Element };
-      if (!document.fullscreenElement && !doc.webkitFullscreenElement) {
-        enterFullscreenAndLandscape();
-      }
-    };
-    const opts: AddEventListenerOptions = { passive: true, capture: true };
-    window.addEventListener('pointerdown', onGesture, opts);
-    window.addEventListener('touchend', onGesture, opts);
-    window.addEventListener('click', onGesture, opts);
-    return () => {
-      window.removeEventListener('pointerdown', onGesture, opts);
-      window.removeEventListener('touchend', onGesture, opts);
-      window.removeEventListener('click', onGesture, opts);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [embedded]);
 
   const simSlot: 'P1' | 'P2' = useMemo(() => {
     const raw = (defaultName || 'Test P1').trim().toUpperCase();
@@ -857,9 +862,6 @@ export function PhoneController({
             } catch {
               // Ignore storage error
             }
-            if (!embedded && !userExitedPhoneFsRef.current) {
-              enterFullscreenAndLandscape();
-            }
             if (msg.room.roomMode === 'pocket') {
               arcadeAudio.unlock();
             }
@@ -902,6 +904,7 @@ export function PhoneController({
           case 'player:haptic':
             break;
           case 'room:closed':
+            userExitedPhoneFsRef.current = true;
             storedPlayerIdRef.current = undefined;
             joinedPlayerIdRef.current = null;
             roomRef.current = null;
@@ -1183,6 +1186,9 @@ export function PhoneController({
         setPocketPinError(false);
       }
 
+      const activeEl = document.activeElement as HTMLElement | null;
+      activeEl?.blur?.();
+      userExitedPhoneFsRef.current = false;
       setErrorMsg(null);
       setJoiningRoom(true);
       storedPlayerIdRef.current = undefined;
@@ -1191,7 +1197,7 @@ export function PhoneController({
       latestCompetitiveRef.current = null;
       hasPocketSnapRef.current = false;
       arcadeAudio.unlock();
-      enterFullscreenAndLandscape();
+      enterFullscreenAndLandscape(true);
       wsRef.current?.send({
         type: 'room:create-pocket',
         preferredGameId,
@@ -1213,10 +1219,13 @@ export function PhoneController({
       );
       return;
     }
+    const activeEl = document.activeElement as HTMLElement | null;
+    activeEl?.blur?.();
+    userExitedPhoneFsRef.current = false;
     setErrorMsg(null);
     setJoiningRoom(true);
     arcadeAudio.unlock();
-    enterFullscreenAndLandscape();
+    enterFullscreenAndLandscape(true);
     wsRef.current?.send({
       type: 'room:join',
       code: cleaned,
@@ -1274,11 +1283,18 @@ export function PhoneController({
       // Ignore storage error
     }
     if (!embedded) {
+      userExitedPhoneFsRef.current = true;
       try {
         const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
         orientation?.unlock?.();
+        const doc = document as Document & {
+          webkitFullscreenElement?: Element;
+          webkitExitFullscreen?: () => Promise<void> | void;
+        };
         if (document.fullscreenElement) {
           document.exitFullscreen?.().catch(() => {});
+        } else if (doc.webkitFullscreenElement) {
+          doc.webkitExitFullscreen?.();
         }
       } catch {
         // Ignore unlock/exit errors

@@ -100,7 +100,6 @@ export default function App() {
   };
 
   const handleStartPocket = (gameId?: GameId) => {
-    forceBrowserFullscreen();
     arcadeAudio.unlock();
     if (gameId) setPreferredGameId(gameId);
     const url = new URL(window.location.href);
@@ -110,7 +109,6 @@ export default function App() {
   };
 
   const handleJoinController = (code?: string) => {
-    forceBrowserFullscreen();
     const cleaned = (code || '').toUpperCase().slice(0, 4);
     setInitialRoomCode(cleaned);
     const url = new URL(window.location.href);
