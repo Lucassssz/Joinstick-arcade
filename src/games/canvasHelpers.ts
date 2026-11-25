@@ -16,6 +16,96 @@ export function tCanvas(text: string): string {
   return translateGameText(text, activeCanvasLang);
 }
 
+export interface DrawnNameplateBounds {
+  rx: number;
+  ry: number;
+  w: number;
+  h: number;
+  cx: number;
+  cy: number;
+}
+
+const frameNameplates: DrawnNameplateBounds[] = [];
+let frameBaseTransform: { e: number; f: number; a: number; d: number } = {
+  e: 0,
+  f: 0,
+  a: 1,
+  d: 1,
+};
+
+export function clearDrawnNameplates(ctx?: CanvasRenderingContext2D): void {
+  frameNameplates.length = 0;
+  if (ctx && typeof ctx.getTransform === 'function') {
+    const t = ctx.getTransform();
+    frameBaseTransform = {
+      e: t.e,
+      f: t.f,
+      a: Math.abs(t.a) > 0.001 ? t.a : 1,
+      d: Math.abs(t.d) > 0.001 ? t.d : 1,
+    };
+  } else {
+    frameBaseTransform = { e: 0, f: 0, a: 1, d: 1 };
+  }
+}
+
+export function recordDrawnNameplate(
+  ctx: CanvasRenderingContext2D,
+  rx: number,
+  ry: number,
+  w: number,
+  h: number
+): void {
+  let offsetX = 0;
+  let offsetY = 0;
+  let scaleX = 1;
+  let scaleY = 1;
+  if (typeof ctx.getTransform === 'function') {
+    const t = ctx.getTransform();
+    offsetX = (t.e - frameBaseTransform.e) / frameBaseTransform.a;
+    offsetY = (t.f - frameBaseTransform.f) / frameBaseTransform.d;
+    scaleX = t.a / frameBaseTransform.a;
+    scaleY = t.d / frameBaseTransform.d;
+  }
+  const absRx = offsetX + rx * scaleX;
+  const absRy = offsetY + ry * scaleY;
+  const absW = Math.abs(w * scaleX);
+  const absH = Math.abs(h * scaleY);
+  frameNameplates.push({
+    rx: absRx,
+    ry: absRy,
+    w: absW,
+    h: absH,
+    cx: absRx + absW / 2,
+    cy: absRy + absH / 2,
+  });
+}
+
+export function findDrawnNameplateNear(
+  x: number,
+  y: number,
+  maxDx = 92,
+  maxDy = 92
+): DrawnNameplateBounds | null {
+  let best: DrawnNameplateBounds | null = null;
+  let bestDist = Infinity;
+  for (const plate of frameNameplates) {
+    const dx = Math.abs(plate.cx - x);
+    const dy = Math.abs(plate.cy - y);
+    if (dx <= maxDx && dy <= maxDy) {
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = plate;
+      }
+    }
+  }
+  return best;
+}
+
+export function getDrawnNameplates(): readonly DrawnNameplateBounds[] {
+  return frameNameplates;
+}
+
 export function drawNameplate(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -48,6 +138,7 @@ export function drawNameplate(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, x, y + 0.5);
+  recordDrawnNameplate(ctx, rx, ry, w, h);
   ctx.restore();
 }
 

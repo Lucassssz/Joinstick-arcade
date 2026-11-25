@@ -239,7 +239,6 @@ export function PhoneController({
   });
   const [pocketTickVersion, setPocketTickVersion] = useState(0);
   const [pocketMuted, setPocketMuted] = useState(false);
-  const [pocketCardTableExpanded, setPocketCardTableExpanded] = useState(false);
 
   const latestSnapshotRef = useRef<GameSnapshot | null>(null);
   const latestCompetitiveRef = useRef<CompetitiveSnapshot | null>(null);
@@ -258,7 +257,9 @@ export function PhoneController({
   const pulseATimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerPrefsRef = useRef<ControllerPrefs>(controllerPrefs);
   const userExitedPhoneFsRef = useRef<boolean>(false);
+  const manualExitFsRef = useRef<boolean>(false);
   const wasFullscreenRef = useRef<boolean>(false);
+  const prevRoomStatusRef = useRef<RoomSnapshot['status'] | null>(null);
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
     pointerId: number;
@@ -364,6 +365,13 @@ export function PhoneController({
       if (wasFullscreenRef.current && !nextFs) {
         // Respect native exits (Esc key, mobile soft keyboard opening, swipe/back gesture, browser UI)
         userExitedPhoneFsRef.current = true;
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA' && activeTag !== 'SELECT') {
+          manualExitFsRef.current = true;
+        }
+      } else if (nextFs) {
+        userExitedPhoneFsRef.current = false;
+        manualExitFsRef.current = false;
       }
       wasFullscreenRef.current = nextFs;
       setIsFullscreen(nextFs);
@@ -437,6 +445,22 @@ export function PhoneController({
     }
   };
 
+  const triggerRoomFullscreen = () => {
+    if (embedded || typeof document === 'undefined') return;
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (
+      activeEl &&
+      (activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT')
+    ) {
+      activeEl.blur();
+    }
+    userExitedPhoneFsRef.current = false;
+    manualExitFsRef.current = false;
+    enterFullscreenAndLandscape(true);
+  };
+
   const toggleFullscreen = () => {
     if (embedded || typeof document === 'undefined') return;
     const doc = document as Document & {
@@ -445,25 +469,34 @@ export function PhoneController({
     };
     if (document.fullscreenElement || doc.webkitFullscreenElement) {
       userExitedPhoneFsRef.current = true;
+      manualExitFsRef.current = true;
       if (typeof document.exitFullscreen === 'function') {
         document.exitFullscreen().catch(() => {});
       } else if (typeof doc.webkitExitFullscreen === 'function') {
         doc.webkitExitFullscreen();
       }
     } else {
-      const activeEl = document.activeElement as HTMLElement | null;
-      if (
-        activeEl &&
-        (activeEl.tagName === 'INPUT' ||
-          activeEl.tagName === 'TEXTAREA' ||
-          activeEl.tagName === 'SELECT')
-      ) {
-        activeEl.blur();
-      }
+      triggerRoomFullscreen();
+    }
+  };
+
+  // Trigger fullscreen automatically when entering a game room or starting a match (unless user manually exited)
+  useEffect(() => {
+    const status = room?.status ?? null;
+    const prev = prevRoomStatusRef.current;
+    prevRoomStatusRef.current = status;
+    if (embedded || !status || !joinedPlayerId) return;
+    const enteredGameRoom =
+      prev === null ||
+      (prev === 'SETUP' && (status === 'LOBBY' || status === 'COUNTDOWN' || status === 'PLAYING')) ||
+      ((prev === 'LOBBY' || prev === 'BRIEFING' || prev === 'RESULTS' || prev === 'VOTING') &&
+        (status === 'COUNTDOWN' || status === 'PLAYING'));
+    if (enteredGameRoom && !manualExitFsRef.current) {
       userExitedPhoneFsRef.current = false;
       enterFullscreenAndLandscape(true);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.status, joinedPlayerId, embedded]);
 
   const simSlot: 'P1' | 'P2' = useMemo(() => {
     const raw = (defaultName || 'Test P1').trim().toUpperCase();
@@ -624,7 +657,6 @@ export function PhoneController({
       latestSnapshotRef.current = null;
       latestCompetitiveRef.current = null;
       hasPocketSnapRef.current = false;
-      setPocketCardTableExpanded(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.status, room?.selectedGameId, room?.hostPlayerId]);
@@ -905,6 +937,7 @@ export function PhoneController({
             break;
           case 'room:closed':
             userExitedPhoneFsRef.current = true;
+            manualExitFsRef.current = false;
             storedPlayerIdRef.current = undefined;
             joinedPlayerIdRef.current = null;
             roomRef.current = null;
@@ -1186,9 +1219,7 @@ export function PhoneController({
         setPocketPinError(false);
       }
 
-      const activeEl = document.activeElement as HTMLElement | null;
-      activeEl?.blur?.();
-      userExitedPhoneFsRef.current = false;
+      triggerRoomFullscreen();
       setErrorMsg(null);
       setJoiningRoom(true);
       storedPlayerIdRef.current = undefined;
@@ -1197,7 +1228,6 @@ export function PhoneController({
       latestCompetitiveRef.current = null;
       hasPocketSnapRef.current = false;
       arcadeAudio.unlock();
-      enterFullscreenAndLandscape(true);
       wsRef.current?.send({
         type: 'room:create-pocket',
         preferredGameId,
@@ -1219,13 +1249,10 @@ export function PhoneController({
       );
       return;
     }
-    const activeEl = document.activeElement as HTMLElement | null;
-    activeEl?.blur?.();
-    userExitedPhoneFsRef.current = false;
+    triggerRoomFullscreen();
     setErrorMsg(null);
     setJoiningRoom(true);
     arcadeAudio.unlock();
-    enterFullscreenAndLandscape(true);
     wsRef.current?.send({
       type: 'room:join',
       code: cleaned,
@@ -1284,6 +1311,7 @@ export function PhoneController({
     }
     if (!embedded) {
       userExitedPhoneFsRef.current = true;
+      manualExitFsRef.current = false;
       try {
         const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
         orientation?.unlock?.();
@@ -2424,7 +2452,9 @@ export function PhoneController({
         onLeave={handleLeave}
         onToggleReady={() => {
           arcadeAudio.unlock();
-          enterFullscreenAndLandscape();
+          if (!manualExitFsRef.current) {
+            triggerRoomFullscreen();
+          }
           setErrorMsg(null);
           wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
         }}
@@ -2437,13 +2467,13 @@ export function PhoneController({
         }}
         onStartMatch={() => {
           arcadeAudio.unlock();
-          enterFullscreenAndLandscape();
+          triggerRoomFullscreen();
           setErrorMsg(null);
           wsRef.current?.send({ type: 'game:start' });
         }}
         onStartTournament={() => {
           arcadeAudio.unlock();
-          enterFullscreenAndLandscape();
+          triggerRoomFullscreen();
           setErrorMsg(null);
           wsRef.current?.send({ type: 'tournament:start' });
         }}
@@ -2593,7 +2623,7 @@ export function PhoneController({
                 <button
                   type="button"
                   onClick={() => {
-                    enterFullscreenAndLandscape();
+                    triggerRoomFullscreen();
                     wsRef.current?.send({ type: 'room:enter-game-room' });
                   }}
                   className="tactile-btn w-full h-16 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-lg shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
@@ -3041,7 +3071,7 @@ export function PhoneController({
             <button
               type="button"
               onClick={() => {
-                enterFullscreenAndLandscape();
+                triggerRoomFullscreen();
                 setErrorMsg(null);
                 wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
               }}
@@ -3827,7 +3857,7 @@ export function PhoneController({
             <button
               type="button"
               onClick={() => {
-                enterFullscreenAndLandscape();
+                triggerRoomFullscreen();
                 wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
               }}
               className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
@@ -3989,7 +4019,7 @@ export function PhoneController({
     );
   };
 
-  const useIntegratedHud = isPocketRoom && !isCardGame;
+  const useIntegratedHud = isPocketRoom;
 
   const topControlBar =
     repositionMode && !embedded && !isCardGame ? (
@@ -4124,7 +4154,7 @@ export function PhoneController({
               })}
             </div>
           )}
-          {isPocketRoom && !isCardGame && (
+          {isPocketRoom && (
             <button
               type="button"
               onClick={cyclePocketHudOpacity}
@@ -4132,15 +4162,6 @@ export function PhoneController({
               className="h-8 px-2 rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[10px] font-mono font-bold text-[#00C2FF] cursor-pointer whitespace-nowrap"
             >
               {Math.round(hudOpacity * 100)}%
-            </button>
-          )}
-          {isPocketRoom && isCardGame && (
-            <button
-              type="button"
-              onClick={() => setPocketCardTableExpanded((v) => !v)}
-              className="h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[10px] font-bold text-[#00C2FF] cursor-pointer whitespace-nowrap"
-            >
-              {pocketCardTableExpanded ? t('Focus Hand', '放大手牌') : t('Expand Table', '放大桌面')}
             </button>
           )}
           {isPocketRoom && (
@@ -4482,101 +4503,42 @@ export function PhoneController({
       )}
 
       {isCardGame ? (
-        isPocketRoom ? (
-          /* POCKET CARD GAME SPLIT: Live Shared Tabletop + Private Hand Deck */
-          <div className="flex-1 min-h-0 flex gap-2 pt-1.5">
-            <button
-              type="button"
-              onClick={() => setPocketCardTableExpanded((v) => !v)}
-              title={t('Tap to resize shared tabletop', '点击切换桌面大小')}
-              className={`relative rounded-2xl overflow-hidden border border-[#262E3E] bg-[#080A0F] shrink-0 cursor-pointer transition-all ${
-                pocketCardTableExpanded ? 'w-[58%]' : 'w-[34%]'
-              }`}
-            >
-              <PocketArenaCanvas
-                gameId={room.selectedGameId}
-                status={room.status}
-                snapshotRef={latestSnapshotRef}
-                competitiveRef={latestCompetitiveRef}
-                fxRef={fxRef}
-                tickVersion={pocketTickVersion}
-              />
-              <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-[#0B0E14]/80 text-[9px] font-bold text-[#00C2FF]">
-                {t('TABLE', '牌桌')}
-              </span>
-            </button>
-            <div className="flex-1 min-w-0 flex flex-col">
-              <CardControllerDeck
-                cardState={cardState}
-                playerColorHex={me.color.hex}
-                embedded={embedded}
-                isCountdown={room.status === 'COUNTDOWN'}
-                countdownValue={room.countdownValue}
-                viewMode={controllerPrefs.cardViewMode}
-                recommendedView={effectiveCardDefaultView}
-                sortMode={controllerPrefs.cardSortMode}
-                privacyShield={controllerPrefs.cardPrivacyShield}
-                actionsSide={controllerPrefs.cardActionsSide}
-                onChangeViewMode={(next) =>
-                  updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
-                }
-                onCycleSortMode={() => {
-                  const order = ['server', 'playable', 'rank'] as const;
-                  const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
-                  updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
-                }}
-                onTogglePrivacy={() =>
-                  updateControllerPrefs({
-                    ...controllerPrefs,
-                    cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
-                  })
-                }
-                onFlipActionsSide={() =>
-                  updateControllerPrefs({
-                    ...controllerPrefs,
-                    cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
-                  })
-                }
-                onAction={sendCardAction}
-              />
-            </div>
-          </div>
-        ) : (
-          /* PAD 4: Dedicated Private Card & Tabletop Pad */
-          <CardControllerDeck
-            cardState={cardState}
-            playerColorHex={me.color.hex}
-            embedded={embedded}
-            isCountdown={room.status === 'COUNTDOWN'}
-            countdownValue={room.countdownValue}
-            viewMode={controllerPrefs.cardViewMode}
-            recommendedView={effectiveCardDefaultView}
-            sortMode={controllerPrefs.cardSortMode}
-            privacyShield={controllerPrefs.cardPrivacyShield}
-            actionsSide={controllerPrefs.cardActionsSide}
-            onChangeViewMode={(next) =>
-              updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
-            }
-            onCycleSortMode={() => {
-              const order = ['server', 'playable', 'rank'] as const;
-              const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
-              updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
-            }}
-            onTogglePrivacy={() =>
-              updateControllerPrefs({
-                ...controllerPrefs,
-                cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
-              })
-            }
-            onFlipActionsSide={() =>
-              updateControllerPrefs({
-                ...controllerPrefs,
-                cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
-              })
-            }
-            onAction={sendCardAction}
-          />
-        )
+        /* PAD 4: Private Card Hand + Actions (Full-screen overlay dock in Pocket Mode) */
+        <CardControllerDeck
+          cardState={cardState}
+          playerColorHex={me.color.hex}
+          embedded={embedded}
+          pocketOverlay={isPocketRoom}
+          hudOpacity={hudOpacity}
+          isCountdown={room.status === 'COUNTDOWN'}
+          countdownValue={room.countdownValue}
+          viewMode={controllerPrefs.cardViewMode}
+          recommendedView={effectiveCardDefaultView}
+          sortMode={controllerPrefs.cardSortMode}
+          privacyShield={controllerPrefs.cardPrivacyShield}
+          actionsSide={controllerPrefs.cardActionsSide}
+          onChangeViewMode={(next) =>
+            updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
+          }
+          onCycleSortMode={() => {
+            const order = ['server', 'playable', 'rank'] as const;
+            const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
+            updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
+          }}
+          onTogglePrivacy={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
+            })
+          }
+          onFlipActionsSide={() =>
+            updateControllerPrefs({
+              ...controllerPrefs,
+              cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
+            })
+          }
+          onAction={sendCardAction}
+        />
       ) : (
         <div
           className={`flex-1 min-h-0 flex flex-col justify-end ${

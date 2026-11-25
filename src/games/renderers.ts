@@ -10,6 +10,7 @@ import {
 import { Language } from '../lib/i18n';
 import { CARD_GAME_IDS } from '../shared/games';
 import {
+  clearDrawnNameplates,
   drawNameplate,
   drawPopupTexts,
   setActiveCanvasLang,
@@ -1059,6 +1060,7 @@ export function renderGameSnapshot(
   const snap = prepareArcadeFrame(rawSnap, fx.arcade);
   setActiveArcadeMotion(fx.arcade);
   ctx.save();
+  clearDrawnNameplates(ctx);
 
   try {
     const isCardGame = CARD_GAME_IDS.has(snap.gameId);

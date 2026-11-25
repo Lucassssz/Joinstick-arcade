@@ -19,6 +19,8 @@ interface CardControllerDeckProps {
   cardState: CardPrivateState | null;
   playerColorHex: string;
   embedded?: boolean;
+  pocketOverlay?: boolean;
+  hudOpacity?: number;
   isCountdown?: boolean;
   countdownValue?: number;
   viewMode?: CardViewMode;
@@ -94,6 +96,8 @@ export function CardControllerDeck({
   cardState,
   playerColorHex,
   embedded = false,
+  pocketOverlay = false,
+  hudOpacity = 0.78,
   isCountdown = false,
   countdownValue = 0,
   viewMode = 'auto',
@@ -181,6 +185,25 @@ export function CardControllerDeck({
   }, [handList, sortMode]);
 
   if (!cardState) {
+    if (pocketOverlay) {
+      return (
+        <div className="flex-1 flex flex-col justify-end min-h-0 relative z-10 pointer-events-none pb-1">
+          <div className="pointer-events-auto flex items-center justify-center gap-3 rounded-2xl bg-[#0D1017]/82 backdrop-blur-sm border border-white/15 px-4 py-3 text-left">
+            <Sparkles className="w-5 h-5 text-[#FFB800] animate-pulse shrink-0" />
+            <div className="min-w-0">
+              <p className="font-display text-sm font-bold text-white truncate">
+                {isCountdown
+                  ? t(`Dealing secret cards in ${countdownValue}...`, `${countdownValue} 秒后秘密发牌...`)
+                  : t('Shuffling your private hand...', '正在为你秘密发牌...')}
+              </p>
+              <p className="text-[11px] text-[#9CA3AF] truncate">
+                {t('Only your phone sees your cards — shared table stays visible above.', '你的手牌仅显示在你的手机下方 — 上方共享牌桌实时同步！')}
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex-1 flex flex-col items-center justify-center rounded-2xl bg-[#161922] border border-[#2A303D] p-4 text-center">
         <Sparkles className="w-7 h-7 text-[#FFB800] animate-pulse" />
@@ -211,16 +234,26 @@ export function CardControllerDeck({
   const handMid = (sortedEntries.length - 1) / 2;
 
   return (
-    <div className="flex-1 flex flex-col justify-between gap-2 min-h-0">
+    <div
+      className={
+        pocketOverlay
+          ? 'flex-1 flex flex-col justify-end gap-1.5 min-h-0 relative z-10 pointer-events-none pb-0.5'
+          : 'flex-1 flex flex-col justify-between gap-2 min-h-0'
+      }
+    >
       {/* Status Banner + Target / Active Color / Party Info + Shot-Clock */}
       <div
         className={`flex items-center justify-between gap-2 px-3 rounded-xl border shrink-0 transition-colors duration-150 ${
-          embedded ? 'py-1.5' : 'py-2'
+          pocketOverlay ? 'pointer-events-auto py-1 backdrop-blur-sm' : embedded ? 'py-1.5' : 'py-2'
         } ${
           isDanger
-            ? 'bg-[#FF3B30]/20 border-[#FF3B30] animate-pulse'
+            ? 'bg-[#FF3B30]/25 border-[#FF3B30] animate-pulse'
             : cardState.isActionRequired
-            ? 'bg-[#10D98B]/12 border-[#10D98B]/60'
+            ? pocketOverlay
+              ? 'bg-[#0D1A15]/82 border-[#10D98B]/70'
+              : 'bg-[#10D98B]/12 border-[#10D98B]/60'
+            : pocketOverlay
+            ? 'bg-[#0D1017]/78 border-white/15'
             : 'bg-[#171B24] border-[#2A303D]'
         }`}
       >
@@ -275,7 +308,13 @@ export function CardControllerDeck({
 
       {/* Wild Color Picker Overlay when Color Clash needs a color */}
       {isColorClash && cardState.awaitingColorPick ? (
-        <div className="flex-1 grid grid-cols-4 gap-2.5 py-1 min-h-0">
+        <div
+          className={
+            pocketOverlay
+              ? 'pointer-events-auto grid grid-cols-4 gap-2 h-16 sm:h-20 shrink-0'
+              : 'flex-1 grid grid-cols-4 gap-2.5 py-1 min-h-0'
+          }
+        >
           {(['red', 'blue', 'gold', 'green'] as const).map((col, idx) => {
             const spec = CLASH_STYLE[col];
             return (
@@ -299,14 +338,33 @@ export function CardControllerDeck({
       ) : (
         /* Pad 4 Tabletop Hand + Action Column */
         <div
-          className={`flex-1 flex items-stretch gap-2.5 min-h-0 ${
-            actionsSide === 'left' ? 'flex-row-reverse' : 'flex-row'
-          }`}
+          className={`${
+            pocketOverlay
+              ? 'flex items-end gap-2 shrink-0 pointer-events-none'
+              : 'flex-1 flex items-stretch gap-2.5 min-h-0'
+          } ${actionsSide === 'left' ? 'flex-row-reverse' : 'flex-row'}`}
         >
           {/* Private Card Hand Container + Utility Bar */}
-          <div className="relative flex-1 flex flex-col rounded-2xl bg-[#0F131A]/85 border border-[#242B38] min-w-0 overflow-hidden">
+          <div
+            className={`relative flex-1 flex flex-col rounded-2xl border min-w-0 overflow-hidden ${
+              pocketOverlay
+                ? 'pointer-events-auto border-white/18 backdrop-blur-sm'
+                : 'bg-[#0F131A]/85 border-[#242B38]'
+            }`}
+            style={
+              pocketOverlay
+                ? { backgroundColor: `rgba(13, 16, 23, ${Math.max(0.42, hudOpacity)})` }
+                : undefined
+            }
+          >
             {/* Compact Pad 4 Card Toolbar */}
-            <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 border-b border-[#1E2430] bg-[#131722] shrink-0">
+            <div
+              className={`flex items-center justify-between gap-1.5 px-2.5 border-b shrink-0 ${
+                pocketOverlay
+                  ? 'py-0.5 border-white/10 bg-black/35'
+                  : 'py-1 border-[#1E2430] bg-[#131722]'
+              }`}
+            >
               <div className="flex items-center gap-1">
                 {onChangeViewMode && (
                   <div className="inline-flex items-center p-0.5 rounded-md bg-[#0B0E14] border border-[#242934]">
@@ -410,10 +468,16 @@ export function CardControllerDeck({
               </div>
             ) : (
               <div
-                className={`flex-1 min-h-0 px-2.5 py-2.5 ${
-                  effectiveView === 'grid'
-                    ? 'overflow-y-auto arcade-scrollbar grid grid-cols-4 sm:grid-cols-6 gap-2 content-start justify-items-center'
-                    : 'flex items-center gap-1.5 sm:gap-2 overflow-x-auto'
+                className={`${
+                  pocketOverlay
+                    ? effectiveView === 'grid'
+                      ? 'max-h-[108px] sm:max-h-[124px] overflow-y-auto arcade-scrollbar grid grid-cols-5 sm:grid-cols-7 gap-1.5 px-2 py-1.5 content-start justify-items-center'
+                      : 'flex items-center gap-1.5 overflow-x-auto px-2 py-1.5'
+                    : `flex-1 min-h-0 px-2.5 py-2.5 ${
+                        effectiveView === 'grid'
+                          ? 'overflow-y-auto arcade-scrollbar grid grid-cols-4 sm:grid-cols-6 gap-2 content-start justify-items-center'
+                          : 'flex items-center gap-1.5 sm:gap-2 overflow-x-auto'
+                      }`
                 }`}
               >
                 {sortedEntries.length === 0 ? (
@@ -465,7 +529,11 @@ export function CardControllerDeck({
                           }
                         }}
                         className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer ${
-                          embedded ? 'w-14 h-20' : 'w-[68px] h-[98px] sm:w-[76px] sm:h-[110px]'
+                          embedded
+                            ? 'w-14 h-20'
+                            : pocketOverlay
+                            ? 'w-[56px] h-[80px] sm:w-[66px] sm:h-[94px]'
+                            : 'w-[68px] h-[98px] sm:w-[76px] sm:h-[110px]'
                         } ${
                           canTapPlay
                             ? 'ring-2 ring-white shadow-[0_8px_18px_rgba(255,255,255,0.22)] hover:brightness-110 active:scale-95'
@@ -548,7 +616,11 @@ export function CardControllerDeck({
                           }
                         }}
                         className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 text-center select-none cursor-pointer ${
-                          embedded ? 'w-16 h-22' : 'w-[76px] h-[104px] sm:w-[86px] sm:h-[116px]'
+                          embedded
+                            ? 'w-16 h-22'
+                            : pocketOverlay
+                            ? 'w-[66px] h-[86px] sm:w-[76px] sm:h-[98px]'
+                            : 'w-[76px] h-[104px] sm:w-[86px] sm:h-[116px]'
                         } ${
                           canTapPlay
                             ? 'ring-2 ring-white shadow-[0_8px_18px_rgba(255,255,255,0.22)] hover:brightness-110 active:scale-95'
@@ -611,7 +683,11 @@ export function CardControllerDeck({
                         }
                       }}
                       className={`card-hand-item relative rounded-xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer bg-[#F8FAFC] border-2 active:scale-95 ${
-                        embedded ? 'w-14 h-20' : 'w-[66px] h-[96px] sm:w-[74px] sm:h-[108px]'
+                        embedded
+                          ? 'w-14 h-20'
+                          : pocketOverlay
+                          ? 'w-[56px] h-[80px] sm:w-[66px] sm:h-[94px]'
+                          : 'w-[66px] h-[96px] sm:w-[74px] sm:h-[108px]'
                       } ${
                         isSelected
                           ? 'border-[#FFB800] ring-2 ring-[#FFB800] shadow-[0_8px_18px_rgba(255,184,0,0.45)]'
@@ -671,8 +747,16 @@ export function CardControllerDeck({
             )}
           </div>
 
-          {/* Right Tactile Action Buttons Column */}
-          <div className={`flex flex-col justify-center gap-1.5 shrink-0 ${embedded ? 'w-32' : 'w-36 sm:w-44'}`}>
+          {/* Right Tactile Action Buttons Column (Beside Card Hand Overlay) */}
+          <div
+            className={`flex flex-col justify-center gap-1.5 shrink-0 ${
+              pocketOverlay
+                ? 'pointer-events-auto w-[108px] sm:w-[134px] h-[112px] sm:h-[128px]'
+                : embedded
+                ? 'w-32'
+                : 'w-36 sm:w-44'
+            }`}
+          >
             {cardState.extraActions && cardState.extraActions.length > 0 ? (
               <div className="flex-1 grid grid-cols-1 gap-1.5 min-h-0">
                 {cardState.extraActions.map((btn, i) => (

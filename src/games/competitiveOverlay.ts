@@ -1,6 +1,7 @@
-import { ARENA_WIDTH, type CompetitiveSnapshot } from '../shared/types';
+import { ARENA_HEIGHT, ARENA_WIDTH, type CompetitiveSnapshot } from '../shared/types';
 import { type Language } from '../lib/i18n';
 import { getMotionTime } from './arcadeMotion';
+import { findDrawnNameplateNear } from './canvasHelpers';
 
 export function renderCompetitiveOverlay(
   ctx: CanvasRenderingContext2D,
@@ -115,44 +116,79 @@ export function renderCompetitiveOverlay(
     }
   }
 
-  // 3. Leader Bounty Crown & Hot Streak Badges above players (Spatial Arenas)
+  // 3. Leader Bounty Crown & Hot Streak Badges positioned cleanly above/beside player nameplates
   if (comp.spatialActive) {
     for (const pm of comp.playerMeta) {
       if (typeof pm.x !== 'number' || typeof pm.y !== 'number') continue;
-      if (!pm.isLeader && pm.streak < 3) continue;
+      const hasCrown = pm.isLeader && pm.bounty > 0;
+      const hasStreak = pm.streak >= 3;
+      if (!hasCrown && !hasStreak) continue;
 
       ctx.save();
-      const bx = pm.x;
-      const by = pm.y - 38 + Math.sin(now * 4) * 2;
-      if (pm.isLeader && pm.bounty > 0) {
-        ctx.fillStyle = 'rgba(20, 18, 11, 0.88)';
-        ctx.strokeStyle = '#FFB800';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.roundRect(bx - 30, by - 10, 60, 18, 6);
-        ctx.fill();
-        ctx.stroke();
+      const label =
+        hasCrown && hasStreak
+          ? `👑+${pm.bounty} · 🔥${pm.streak}×`
+          : hasCrown
+          ? `👑 +${pm.bounty}`
+          : `🔥${pm.streak}×`;
+      ctx.font = '900 10px "JetBrains Mono", monospace';
+      const badgeW = Math.max(hasCrown && hasStreak ? 76 : hasCrown ? 58 : 42, ctx.measureText(label).width + 14);
+      const badgeH = 17;
+      const bob = Math.sin(now * 4) * 1.5;
 
-        ctx.fillStyle = '#FFB800';
-        ctx.font = '900 10px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`👑 +${pm.bounty}`, bx, by - 0.5);
-      } else if (pm.streak >= 3) {
-        ctx.fillStyle = 'rgba(20, 12, 8, 0.85)';
-        ctx.strokeStyle = '#FF5E1A';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(bx - 21, by - 9, 42, 16, 5);
-        ctx.fill();
-        ctx.stroke();
+      const plate =
+        findDrawnNameplateNear(pm.x, pm.y - 36, 95, 52) ??
+        findDrawnNameplateNear(pm.x, pm.y, 95, 85);
 
-        ctx.fillStyle = '#FFB800';
-        ctx.font = '900 10px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`🔥${pm.streak}×`, bx, by - 0.5);
+      let bx = pm.x;
+      let by = pm.y - 62 + bob;
+
+      if (plate) {
+        if (plate.cy <= pm.y + 4) {
+          // Nameplate sits above the player: place badge cleanly above the nameplate
+          const aboveY = plate.ry - badgeH / 2 - 4 + bob;
+          if (aboveY - badgeH / 2 >= 8) {
+            bx = plate.cx;
+            by = aboveY;
+          } else {
+            // Near top edge of arena: place cleanly beside the nameplate
+            const rightX = plate.rx + plate.w + badgeW / 2 + 6;
+            bx =
+              rightX + badgeW / 2 <= ARENA_WIDTH - 10
+                ? rightX
+                : Math.max(badgeW / 2 + 10, plate.rx - badgeW / 2 - 6);
+            by = plate.cy;
+          }
+        } else {
+          // Nameplate sits below the player: place badge cleanly above the player sprite
+          const abovePlayerY = pm.y - 36 + bob;
+          if (abovePlayerY - badgeH / 2 >= 8) {
+            bx = pm.x;
+            by = abovePlayerY;
+          } else {
+            bx = plate.cx;
+            by = Math.min(ARENA_HEIGHT - badgeH / 2 - 8, plate.ry + plate.h + badgeH / 2 + 4);
+          }
+        }
+      } else {
+        by = Math.max(badgeH / 2 + 8, pm.y - 62 + bob);
       }
+
+      bx = Math.max(badgeW / 2 + 8, Math.min(ARENA_WIDTH - badgeW / 2 - 8, bx));
+      by = Math.max(badgeH / 2 + 6, Math.min(ARENA_HEIGHT - badgeH / 2 - 6, by));
+
+      ctx.fillStyle = hasCrown ? 'rgba(20, 18, 11, 0.9)' : 'rgba(20, 12, 8, 0.88)';
+      ctx.strokeStyle = hasCrown ? '#FFB800' : '#FF5E1A';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(bx - badgeW / 2, by - badgeH / 2, badgeW, badgeH, 5.5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#FFB800';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx, by + 0.5);
       ctx.restore();
     }
   }

@@ -1,5 +1,11 @@
 import { ARENA_WIDTH } from '../shared/types';
-import { drawHudChip, drawPopupTexts, getActiveCanvasLang, tCanvas } from './canvasHelpers';
+import {
+  drawHudChip,
+  drawPopupTexts,
+  getActiveCanvasLang,
+  recordDrawnNameplate,
+  tCanvas,
+} from './canvasHelpers';
 import {
   drawArenaSlab as coreDrawArenaSlab,
   drawCharacterPod3D as coreDrawCharacterPod3D,
@@ -72,9 +78,11 @@ export function drawNameplate(
   ctx.font = '800 12px "Plus Jakarta Sans", sans-serif';
   const w = ctx.measureText(label).width + 14;
   const h = 20;
+  const rx = x - w / 2;
+  const ry = y - h / 2;
   ctx.fillStyle = 'rgba(13, 15, 20, 0.9)';
   ctx.beginPath();
-  ctx.roundRect(x - w / 2, y - h / 2, w, h, 6);
+  ctx.roundRect(rx, ry, w, h, 6);
   ctx.fill();
   ctx.strokeStyle = colorHex;
   ctx.lineWidth = 1.6;
@@ -83,6 +91,7 @@ export function drawNameplate(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, x, y + 0.5);
+  recordDrawnNameplate(ctx, rx, ry, w, h);
   ctx.restore();
 }
 
