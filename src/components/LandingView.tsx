@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowRight,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   Dices,
@@ -44,20 +45,28 @@ import {
   getHostAuthToken,
   usePublicAccessOpen,
 } from '../lib/hostAuth';
+import tutorialPreviewImg from '../assets/images/ui_shot_03_game_lobby.png';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
   onStartPocket: (preferredGameId?: GameId) => void;
   onJoinController: (initialCode?: string) => void;
+  onOpenTutorial: () => void;
 }
 
-export function LandingView({ onHostRoom, onStartPocket, onJoinController }: LandingViewProps) {
+export function LandingView({
+  onHostRoom,
+  onStartPocket,
+  onJoinController,
+  onOpenTutorial,
+}: LandingViewProps) {
   const { lang, t } = useLanguage();
   const [quickCode, setQuickCode] = useState('');
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [previewGameId, setPreviewGameId] = useState<GameId | null>(null);
   const [hoveredGameId, setHoveredGameId] = useState<GameId | null>(null);
+  const [tutorialPhotoFailed, setTutorialPhotoFailed] = useState(false);
 
   // Horizontal Auto-Scrolling Games Rail State
   const gamesRailRef = useRef<HTMLDivElement | null>(null);
@@ -1245,6 +1254,72 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
           </div>
         </section>
 
+        {/* Interactive Tutorial Section */}
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 border-t border-[#1A2230]">
+          <div className="rounded-3xl bg-[#141A26] border border-[#243046] overflow-hidden">
+            <div className="grid grid-cols-1 lg:grid-cols-12 items-stretch">
+              <div className="lg:col-span-6 p-7 sm:p-10 lg:p-12 flex flex-col justify-center">
+                <div className="text-xs font-semibold uppercase tracking-wider text-[#00C2FF] flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span>{t('Platform Walkthrough', '全平台实景教程')}</span>
+                  <span aria-hidden="true" className="text-[#3B4659]">·</span>
+                  <span>{t('Interactive Sandbox', '互动按钮体验')}</span>
+                  <span aria-hidden="true" className="text-[#3B4659]">·</span>
+                  <span>{t('All Button Functions', '全部按钮详解')}</span>
+                </div>
+
+                <h2 className="mt-3 font-display text-2xl sm:text-4xl font-extrabold text-white tracking-tight text-balance">
+                  {t(
+                    'Want to know more about JoinStick Arcade?',
+                    '想更深入了解 JoinStick 街机派对吗？'
+                  )}
+                </h2>
+
+                <p className="mt-4 text-sm sm:text-base text-[#9CA3AF] leading-relaxed">
+                  {t(
+                    'Watch on our tutorial to explore real UI screenshots of every screen—learn how to create rooms, add AI robots, spin the Chaos Wheel, use Pocket Mode, and test every button interactively.',
+                    '查看我们的互动教程，浏览全套实机界面高清截图与可点击体验区，轻松学会创建房间、添加 AI 机器人、玩转混沌转盘与掌机模式，掌握每一个按钮的用法。'
+                  )}
+                </p>
+
+                <div className="mt-7 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onOpenTutorial}
+                    className="tactile-btn inline-flex items-center gap-2.5 px-6 py-3.5 rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#07151F] font-display font-extrabold text-sm sm:text-base shadow-[0_4px_0_#007FA8] cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>{t('Watch on Our Tutorial', '查看完整互动教程')}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="lg:col-span-6 relative min-h-[240px] sm:min-h-[300px] bg-[#090C12] border-t lg:border-t-0 lg:border-l border-[#20293B] flex items-center justify-center p-3 sm:p-4">
+                {tutorialPhotoFailed ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-8 text-center bg-gradient-to-br from-[#161E2E] to-[#0D1119]">
+                    <BookOpen className="w-10 h-10 text-[#00C2FF]" />
+                    <span className="text-sm font-semibold text-white">
+                      {t('Interactive JoinStick Arcade Tutorial', 'JoinStick 街机派对全平台教程')}
+                    </span>
+                  </div>
+                ) : (
+                  <img
+                    src={tutorialPreviewImg}
+                    alt={t(
+                      'Actual JoinStick Game Room lobby screenshot showing 200 games, Ready Check, Chaos Wheel, and 5-Game Cup',
+                      'JoinStick 游戏大厅实机界面截图，展示 200 款游戏、准备确认、混沌转盘与 5 局杯赛'
+                    )}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    onError={() => setTutorialPhotoFailed(true)}
+                    className="w-full h-full object-contain rounded-xl border border-[#243046]"
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Final CTA Banner */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16">
           <div className="rounded-3xl bg-gradient-to-r from-[#151B26] via-[#121722] to-[#151B26] border border-[#2A354A] p-8 sm:p-12 text-center shadow-2xl relative overflow-hidden">
@@ -1295,7 +1370,15 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
               {t('Created by Lucas Lim', '由 Lucas Lim 打造')}
             </span>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center justify-center gap-6">
+            <button
+              type="button"
+              onClick={onOpenTutorial}
+              className="hover:text-[#00C2FF] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>{t('Tutorial', '使用教程')}</span>
+            </button>
             <button
               type="button"
               onClick={() => requestHost(undefined, 'host')}

@@ -4,10 +4,11 @@ import { GameId } from './shared/types';
 import { LandingView } from './components/LandingView';
 import { HostMonitor } from './components/HostMonitor';
 import { PhoneController } from './components/PhoneController';
+import { TutorialView } from './components/TutorialView';
 import { LanguageProvider } from './lib/i18n';
 import { arcadeAudio } from './lib/audio';
 
-type AppMode = 'landing' | 'host' | 'controller' | 'pocket';
+type AppMode = 'landing' | 'host' | 'controller' | 'pocket' | 'tutorial';
 
 const VIEW_TRANSITION_VARIANTS = {
   initial: { opacity: 0 },
@@ -40,6 +41,9 @@ function readInitialRoute(): { mode: AppMode; roomCode: string } {
   }
   if (modeParam === 'host') {
     return { mode: 'host', roomCode: '' };
+  }
+  if (modeParam === 'tutorial') {
+    return { mode: 'tutorial', roomCode: '' };
   }
   return { mode: 'landing', roomCode: '' };
 }
@@ -87,7 +91,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (mode === 'landing') {
+    if (mode === 'landing' || mode === 'tutorial') {
       exitBrowserFullscreen();
     }
   }, [mode]);
@@ -150,6 +154,14 @@ export default function App() {
     setMode('controller');
   };
 
+  const handleOpenTutorial = () => {
+    exitBrowserFullscreen();
+    const url = new URL(window.location.href);
+    url.search = '?mode=tutorial';
+    window.history.pushState({}, '', url.toString());
+    setMode('tutorial');
+  };
+
   return (
     <LanguageProvider>
       <MotionConfig reducedMotion="user">
@@ -182,11 +194,19 @@ export default function App() {
                   initialRoomCode={initialRoomCode}
                   onExit={navigateHome}
                 />
+              ) : mode === 'tutorial' ? (
+                <TutorialView
+                  onBack={navigateHome}
+                  onHostRoom={handleHostRoom}
+                  onStartPocket={handleStartPocket}
+                  onJoinController={handleJoinController}
+                />
               ) : (
                 <LandingView
                   onHostRoom={handleHostRoom}
                   onStartPocket={handleStartPocket}
                   onJoinController={handleJoinController}
+                  onOpenTutorial={handleOpenTutorial}
                 />
               )}
             </motion.div>
