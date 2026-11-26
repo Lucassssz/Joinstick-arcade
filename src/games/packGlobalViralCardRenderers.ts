@@ -62,7 +62,7 @@ export function renderWordPulse(ctx: CanvasRenderingContext2D, snap: WordPulseSn
   ctx.textAlign = 'center';
   const isZh = getActiveCanvasLang() === 'zh';
   ctx.fillText(
-    `${tCanvas('HINT')}: ${isZh ? snap.categoryHintZh : `${snap.categoryHint} · ${snap.categoryHintZh}`}`,
+    `${tCanvas('HINT')}: ${isZh ? snap.categoryHintZh : snap.categoryHint}`,
     ARENA_WIDTH / 2,
     115
   );
@@ -190,7 +190,7 @@ export function renderCodeGrid(ctx: CanvasRenderingContext2D, snap: CodeGridSnap
   ctx.textAlign = 'center';
   const isZh = getActiveCanvasLang() === 'zh';
   ctx.fillText(
-    `${tCanvas('CLUE')}: ${isZh ? snap.clueWordZh : `${snap.clueWord} (${snap.clueWordZh})`} · ${snap.foundCount}/${snap.clueCount}`,
+    `${tCanvas('CLUE')}: ${isZh ? snap.clueWordZh : snap.clueWord} · ${snap.foundCount}/${snap.clueCount}`,
     ARENA_WIDTH / 2,
     66
   );
@@ -279,7 +279,7 @@ export function renderFibParty(ctx: CanvasRenderingContext2D, snap: FibPartySnap
       ctx.fillStyle = '#FFFFFF';
       ctx.font = '900 22px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(isZh ? c.textZh : `${c.text} · ${c.textZh}`, x + 22, y + 48, bw - 44);
+      ctx.fillText(isZh ? c.textZh : c.text, x + 22, y + 48, bw - 44);
       if (c.isTruth) {
         ctx.fillStyle = '#FEF08A';
         ctx.font = '900 15px "JetBrains Mono", monospace';

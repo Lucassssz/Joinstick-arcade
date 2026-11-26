@@ -45,6 +45,7 @@ import {
   Target,
   Trash2,
   Trophy,
+  Unlock,
   Users,
   Volume2,
   VolumeX,
@@ -106,6 +107,7 @@ import {
   ServerMessage,
 } from '../shared/types';
 import { ManagedWebSocket, SocketStatus } from '../lib/ws';
+import { createRoomSyncStore, useRoomSyncSnapshot } from '../lib/roomSyncStore';
 import { shareRoomInvite } from '../lib/shareInvite';
 import {
   claimInitialMasterPin,
@@ -113,7 +115,10 @@ import {
   consumeGuestSingleUseTokenLocally,
   fetchHostAuthStatus,
   getHostAuthToken,
+  getPublicAccessOpen,
+  setPublicAccessOpenLocally,
   useHostAuthSession,
+  usePublicAccessOpen,
   verifyHostCode,
   type HostAuthStatus,
 } from '../lib/hostAuth';
@@ -542,7 +547,8 @@ export function PhoneController({
     initialRoomCode.trim().length === 4 ? 'join' : initialMode
   );
   const hostSession = useHostAuthSession();
-  const pocketPinUnlocked = Boolean(hostSession?.token);
+  const publicAccessOpen = usePublicAccessOpen();
+  const pocketPinUnlocked = Boolean(hostSession?.token) || publicAccessOpen;
   const [pocketAuthStatus, setPocketAuthStatus] = useState<HostAuthStatus | null>(null);
   const [pocketPinInput, setPocketPinInput] = useState('');
   const [pocketConfirmPinInput, setPocketConfirmPinInput] = useState('');
@@ -550,19 +556,25 @@ export function PhoneController({
   const [pocketPinError, setPocketPinError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (entryMode !== 'pocket' || pocketPinUnlocked) return;
+    if (entryMode !== 'pocket') return;
     let cancelled = false;
     fetchHostAuthStatus()
       .then((res) => {
         if (!cancelled) setPocketAuthStatus(res);
       })
       .catch(() => {
-        if (!cancelled) setPocketAuthStatus({ masterConfigured: true, usingEnvPin: false });
+        if (!cancelled) {
+          setPocketAuthStatus({
+            masterConfigured: true,
+            usingEnvPin: false,
+            publicAccessOpen: false,
+          });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [entryMode, pocketPinUnlocked]);
+  }, [entryMode]);
 
   const [roomCode, setRoomCode] = useState(initialRoomCode.toUpperCase());
   const [playerName, setPlayerName] = useState(
@@ -582,10 +594,13 @@ export function PhoneController({
   });
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
-  const [wsConnected, setWsConnected] = useState(false);
-  const [socketStatus, setSocketStatus] = useState<SocketStatus>('connecting');
+  const syncStore = useMemo(() => createRoomSyncStore(), []);
+  const syncState = useRoomSyncSnapshot(syncStore);
+  const wsConnected = syncState.wsConnected;
+  const socketStatus = syncState.socketStatus;
+  const room = syncState.room;
+  const cardState = syncState.cardState;
   const [joinedPlayerId, setJoinedPlayerId] = useState<string | null>(null);
-  const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [closedReason, setClosedReason] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -595,7 +610,6 @@ export function PhoneController({
   const [controllerPrefs, setControllerPrefs] = useState<ControllerPrefs>(() => loadControllerPrefs());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repositionMode, setRepositionMode] = useState(false);
-  const [cardState, setCardState] = useState<CardPrivateState | null>(null);
   const [manualReconnecting, setManualReconnecting] = useState(false);
   const [joiningRoom, setJoiningRoom] = useState(false);
   const [autoTapPinned, setAutoTapPinned] = useState(false);
@@ -1071,7 +1085,7 @@ export function PhoneController({
     setPocketCardViewOverride('auto');
     prevCardTurnRef.current = null;
     if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN' && room?.status !== 'PAUSED') {
-      setCardState(null);
+      syncStore.applyCardState(null);
       latestSnapshotRef.current = null;
       latestCompetitiveRef.current = null;
       hasPocketSnapRef.current = false;
@@ -1161,6 +1175,11 @@ export function PhoneController({
     if (embedded || !joinedPlayerId) return;
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
+      if (wsRef.current?.isConnected()) {
+        syncStore.requestSync(true);
+      } else {
+        wsRef.current?.reconnectNow(false);
+      }
       try {
         const nav = navigator as Navigator & {
           wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
@@ -1290,8 +1309,7 @@ export function PhoneController({
   useEffect(() => {
     const socket = new ManagedWebSocket({
       onOpen: () => {
-        setWsConnected(true);
-        setSocketStatus('connected');
+        syncStore.setSocketStatus('connected');
         let savedRoom = '';
         try {
           savedRoom = sessionStorage.getItem(roomCodeSessionKey) || '';
@@ -1326,12 +1344,17 @@ export function PhoneController({
         }
       },
       onClose: () => {
-        setWsConnected(false);
+        syncStore.setSocketStatus('reconnecting');
         setJoiningRoom(false);
       },
+      onRecover: () => {
+        syncStore.requestSync(true);
+      },
+      onPendingOpsChange: (count) => {
+        syncStore.setPendingOpsCount(count);
+      },
       onStatusChange: (status) => {
-        setSocketStatus(status);
-        setWsConnected(status === 'connected');
+        syncStore.setSocketStatus(status);
       },
       onMessage: (msg: ServerMessage) => {
         switch (msg.type) {
@@ -1358,36 +1381,40 @@ export function PhoneController({
             setManualReconnecting(false);
             setJoiningRoom(false);
             setJoinedPlayerId(msg.playerId);
-            setRoom(msg.room);
-            setCardState(null);
+            syncStore.applyRoomAuthoritative(msg.room, true);
+            syncStore.applyCardState(null);
             setErrorMsg(null);
             setClosedReason(null);
             break;
           case 'room:snapshot':
             roomRef.current = msg.room;
-            setRoom(msg.room);
+            syncStore.applyRoomAuthoritative(msg.room);
             break;
           case 'game:tick': {
-            latestSnapshotRef.current = msg.snapshot;
-            latestCompetitiveRef.current = msg.competitive ?? null;
-            const nowMs = Date.now();
-            if (!hasPocketSnapRef.current) {
-              hasPocketSnapRef.current = true;
-              lastPocketHudBumpRef.current = nowMs;
-              setPocketTickVersion((v) => v + 1);
-            } else if (
-              roomRef.current?.roomMode === 'pocket' &&
-              CARD_GAME_IDS.has(roomRef.current.selectedGameId) &&
-              nowMs - lastPocketHudBumpRef.current >= 200
-            ) {
-              lastPocketHudBumpRef.current = nowMs;
-              setPocketTickVersion((v) => v + 1);
+            if (msg.snapshot) {
+              const { accepted } = syncStore.applyGameTick(msg);
+              if (!accepted) break;
+              latestSnapshotRef.current = syncStore.latestSnapshot;
+              latestCompetitiveRef.current = syncStore.latestCompetitive;
+              const nowMs = Date.now();
+              if (!hasPocketSnapRef.current) {
+                hasPocketSnapRef.current = true;
+                lastPocketHudBumpRef.current = nowMs;
+                setPocketTickVersion((v) => v + 1);
+              } else if (
+                roomRef.current?.roomMode === 'pocket' &&
+                CARD_GAME_IDS.has(roomRef.current.selectedGameId) &&
+                nowMs - lastPocketHudBumpRef.current >= 200
+              ) {
+                lastPocketHudBumpRef.current = nowMs;
+                setPocketTickVersion((v) => v + 1);
+              }
             }
             if (roomRef.current?.roomMode === 'pocket') {
               for (const s of msg.sounds) {
                 arcadeAudio.play(s);
               }
-              const snapRecord = msg.snapshot as unknown as { shake?: number };
+              const snapRecord = (msg.snapshot ?? {}) as { shake?: number };
               if (typeof snapRecord.shake === 'number' && snapRecord.shake > fxRef.current.shake) {
                 fxRef.current.shake = snapRecord.shake;
               }
@@ -1395,7 +1422,7 @@ export function PhoneController({
             break;
           }
           case 'player:card-state':
-            setCardState(msg.cardState);
+            syncStore.applyCardState(msg.cardState, msg.seq);
             break;
           case 'player:haptic':
             break;
@@ -1417,8 +1444,7 @@ export function PhoneController({
             setManualReconnecting(false);
             setJoiningRoom(false);
             setClosedReason(msg.reason);
-            setRoom(null);
-            setCardState(null);
+            syncStore.reset();
             setJoinedPlayerId(null);
             break;
           case 'error':
@@ -1427,6 +1453,10 @@ export function PhoneController({
             if (msg.code === 'HOST_AUTH_REQUIRED') {
               exitFullscreenAndUnlock();
               clearHostAuthSession();
+              setPublicAccessOpenLocally(false);
+              setPocketAuthStatus((prev) =>
+                prev ? { ...prev, publicAccessOpen: false } : null
+              );
               setPocketPinError(msg.message);
             } else if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
               exitFullscreenAndUnlock();
@@ -1443,8 +1473,7 @@ export function PhoneController({
                 // Ignore storage error
               }
               setJoinedPlayerId(null);
-              setRoom(null);
-              setCardState(null);
+              syncStore.reset();
             }
             setErrorMsg(msg.message);
             break;
@@ -1452,8 +1481,10 @@ export function PhoneController({
       },
     });
     wsRef.current = socket;
+    syncStore.attachSocket(socket);
 
     return () => {
+      syncStore.detachSocket();
       socket.close();
       wsRef.current = null;
       if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
@@ -1675,41 +1706,45 @@ export function PhoneController({
     if (entryMode === 'pocket') {
       if (pocketPinSubmitting || joiningRoom) return;
       let authToken = getHostAuthToken();
-      if (!authToken) {
-        const cleanedPin = pocketPinInput.trim();
-        if (!cleanedPin) {
-          setPocketPinError(
-            t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
-          );
-          return;
-        }
+      let isPublicOpen = getPublicAccessOpen();
+      if (!authToken && !isPublicOpen) {
         setPocketPinSubmitting(true);
         setPocketPinError(null);
         setErrorMsg(null);
         try {
-          const status = pocketAuthStatus ?? (await fetchHostAuthStatus());
+          const status = await fetchHostAuthStatus();
           setPocketAuthStatus(status);
-          if (!status.masterConfigured) {
-            if (cleanedPin.length < 4 || cleanedPin.length > 24) {
+          isPublicOpen = status.publicAccessOpen;
+          if (!isPublicOpen) {
+            const cleanedPin = pocketPinInput.trim();
+            if (!cleanedPin) {
               setPocketPinError(
-                t('Master PIN must be 4–24 characters.', '房主管理密码长度需为 4–24 位。')
+                t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
               );
               return;
             }
-            if (cleanedPin !== pocketConfirmPinInput.trim()) {
-              setPocketPinError(
-                t('PIN confirmation does not match.', '两次输入的密码不一致。')
-              );
-              return;
+            if (!status.masterConfigured) {
+              if (cleanedPin.length < 4 || cleanedPin.length > 24) {
+                setPocketPinError(
+                  t('Master PIN must be 4–24 characters.', '房主管理密码长度需为 4–24 位。')
+                );
+                return;
+              }
+              if (cleanedPin !== pocketConfirmPinInput.trim()) {
+                setPocketPinError(
+                  t('PIN confirmation does not match.', '两次输入的密码不一致。')
+                );
+                return;
+              }
+              const sess = await claimInitialMasterPin(cleanedPin);
+              authToken = sess.token;
+            } else {
+              const sess = await verifyHostCode(cleanedPin);
+              authToken = sess.token;
             }
-            const sess = await claimInitialMasterPin(cleanedPin);
-            authToken = sess.token;
-          } else {
-            const sess = await verifyHostCode(cleanedPin);
-            authToken = sess.token;
+            setPocketPinInput('');
+            setPocketConfirmPinInput('');
           }
-          setPocketPinInput('');
-          setPocketConfirmPinInput('');
         } catch (err) {
           setPocketPinError(
             err instanceof Error
@@ -1722,7 +1757,7 @@ export function PhoneController({
         }
       }
 
-      if (!authToken) return;
+      if (!authToken && !isPublicOpen) return;
       triggerRoomFullscreen();
       setErrorMsg(null);
       setJoiningRoom(true);
@@ -1739,7 +1774,7 @@ export function PhoneController({
         deviceId: getDeviceId('POCKET'),
         preferredColorId: preferredColor,
         avatarId: selectedAvatarId,
-        authToken,
+        ...(authToken ? { authToken } : {}),
       });
       return;
     }
@@ -1817,8 +1852,7 @@ export function PhoneController({
     exitFullscreenAndUnlock();
     manualExitFsRef.current = false;
     setJoinedPlayerId(null);
-    setRoom(null);
-    setCardState(null);
+    syncStore.reset();
     if (onExit) onExit();
   };
 
@@ -2454,7 +2488,11 @@ export function PhoneController({
                 }`}
               >
                 <Gamepad2 className="w-3.5 h-3.5" />
-                <span>{t('Pocket Mode (PIN)', '无大屏掌机建房')}</span>
+                <span>
+                  {publicAccessOpen
+                    ? t('Pocket Mode', '无大屏掌机建房')
+                    : t('Pocket Mode (PIN)', '无大屏掌机建房')}
+                </span>
               </button>
             </div>
           )}
@@ -2501,10 +2539,16 @@ export function PhoneController({
             ) : pocketPinUnlocked ? (
               <div className="p-3.5 rounded-xl bg-[#10D98B]/10 border border-[#10D98B]/35 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <ShieldCheck className="w-4 h-4 text-[#10D98B] shrink-0" />
+                  {hostSession?.token ? (
+                    <ShieldCheck className="w-4 h-4 text-[#10D98B] shrink-0" />
+                  ) : (
+                    <Unlock className="w-4 h-4 text-[#10D98B] shrink-0" />
+                  )}
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-white truncate">
-                      {hostSession?.role === 'guest'
+                      {!hostSession?.token
+                        ? t('Platform Open Access Active', '平台已全员免密开放')
+                        : hostSession.role === 'guest'
                         ? t(
                             `Guest Pass Active${hostSession.passLabel ? ` (${hostSession.passLabel})` : ''}`,
                             `访客口令已验证${hostSession.passLabel ? `（${hostSession.passLabel}）` : ''}`
@@ -2512,24 +2556,31 @@ export function PhoneController({
                         : t('Owner Access Unlocked', '房主权限已验证')}
                     </div>
                     <div className="text-[11px] text-[#9CA3AF]">
-                      {hostSession?.singleUse
+                      {!hostSession?.token
+                        ? t(
+                            'No invitation code required — ready to create a Pocket Party Room',
+                            '无需邀请码，可直接创建无大屏掌机房'
+                          )
+                        : hostSession.singleUse
                         ? t('Valid for 1 room creation', '可创建 1 次掌机房间')
                         : t('Ready to create Pocket Party Room', '可直接创建无大屏掌机房')}
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearHostAuthSession();
-                    setPocketPinInput('');
-                    setPocketConfirmPinInput('');
-                    setPocketPinError(null);
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-[#1A1E26] hover:bg-[#242A36] border border-[#2F3747] text-[11px] font-bold text-[#9CA3AF] hover:text-white shrink-0 cursor-pointer"
-                >
-                  {t('Lock', '锁定')}
-                </button>
+                {hostSession?.token && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearHostAuthSession();
+                      setPocketPinInput('');
+                      setPocketConfirmPinInput('');
+                      setPocketPinError(null);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-[#1A1E26] hover:bg-[#242A36] border border-[#2F3747] text-[11px] font-bold text-[#9CA3AF] hover:text-white shrink-0 cursor-pointer"
+                  >
+                    {t('Lock', '锁定')}
+                  </button>
+                )}
               </div>
             ) : pocketAuthStatus !== null && !pocketAuthStatus.masterConfigured ? (
               <div className="space-y-2.5 p-3.5 rounded-xl bg-[#10D98B]/10 border border-[#10D98B]/35">

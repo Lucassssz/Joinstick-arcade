@@ -29,7 +29,6 @@ import {
   Shuffle,
   Smartphone,
   Sparkles,
-  Ticket,
   Trophy,
   Users,
   Volume2,
@@ -78,6 +77,7 @@ import {
 } from '../shared/types';
 import { arcadeAudio } from '../lib/audio';
 import { getJoinUrl, ManagedWebSocket } from '../lib/ws';
+import { createRoomSyncStore, useRoomSyncSnapshot } from '../lib/roomSyncStore';
 import { copyRoomInvite, shareRoomInvite } from '../lib/shareInvite';
 import {
   getLocalizedDifficulty,
@@ -97,8 +97,10 @@ import { TestControllerDrawer } from './TestControllerDrawer';
 import {
   clearHostAuthSession,
   consumeGuestSingleUseTokenLocally,
+  fetchHostAuthStatus,
   getHostAuthToken,
-  useHostAuthSession,
+  getPublicAccessOpen,
+  setPublicAccessOpenLocally,
 } from '../lib/hostAuth';
 
 interface HostMonitorProps {
@@ -138,9 +140,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const { lang, t } = useLanguage();
   const langRef = useRef(lang);
   langRef.current = lang;
-  const [wsConnected, setWsConnected] = useState(false);
+  const syncStore = useMemo(() => createRoomSyncStore(), []);
+  const syncState = useRoomSyncSnapshot(syncStore);
+  const wsConnected = syncState.wsConnected;
+  const room = syncState.room;
   const [showDisconnectBanner, setShowDisconnectBanner] = useState(false);
-  const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -156,9 +160,34 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [isClosingRoom, setIsClosingRoom] = useState(false);
   const [chaosWheelOpen, setChaosWheelOpen] = useState(false);
-  const authSession = useHostAuthSession();
   const [hostUnlockNeeded, setHostUnlockNeeded] = useState(false);
+  const [ownerSettingsAuthOpen, setOwnerSettingsAuthOpen] = useState(false);
   const [guestPassOpen, setGuestPassOpen] = useState(false);
+  const secretTitleTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setGuestPassOpen(false);
+        setOwnerSettingsAuthOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleSecretTitleTap = () => {
+    const now = Date.now();
+    const prev = secretTitleTapRef.current;
+    const nextCount = now - prev.lastAt <= 2200 ? prev.count + 1 : 1;
+    secretTitleTapRef.current = { count: nextCount, lastAt: now };
+    if (nextCount >= 5) {
+      secretTitleTapRef.current = { count: 0, lastAt: 0 };
+      setGuestPassOpen(false);
+      setOwnerSettingsAuthOpen(true);
+    }
+  };
   const [rankShifts, setRankShifts] = useState<Record<string, number>>({});
   const [cardFlipDir, setCardFlipDir] = useState<1 | -1>(1);
   const [lobbySearchQuery, setLobbySearchQuery] = useState('');
@@ -319,6 +348,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         requestWakeLock();
         if (wsRef.current && !wsRef.current.isConnected()) {
           wsRef.current.reconnectNow(false);
+        } else {
+          syncStore.requestSync(true);
         }
       }
     };
@@ -357,12 +388,29 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         });
       } else {
         const authToken = getHostAuthToken();
-        if (!authToken) {
+        if (!authToken && !getPublicAccessOpen()) {
           clearReattachRetry();
-          setHostUnlockNeeded(true);
+          void fetchHostAuthStatus()
+            .then((status) => {
+              if (wsRef.current !== sock || !sock.isConnected() || roomRef.current) return;
+              if (status.publicAccessOpen) {
+                sock.send({ type: 'room:create', preferredGameId: initialGameId });
+              } else {
+                setHostUnlockNeeded(true);
+              }
+            })
+            .catch(() => {
+              if (wsRef.current === sock && !roomRef.current) {
+                setHostUnlockNeeded(true);
+              }
+            });
           return;
         }
-        sock.send({ type: 'room:create', preferredGameId: initialGameId, authToken });
+        sock.send({
+          type: 'room:create',
+          preferredGameId: initialGameId,
+          ...(authToken ? { authToken } : {}),
+        });
       }
       // Safety net: if the attach/create confirmation doesn't arrive within 3s while socket is open, retry automatically
       clearReattachRetry();
@@ -377,11 +425,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             });
           } else if (!roomRef.current) {
             const retryAuthToken = getHostAuthToken();
-            if (!retryAuthToken) {
+            if (!retryAuthToken && !getPublicAccessOpen()) {
               setHostUnlockNeeded(true);
               return;
             }
-            sock.send({ type: 'room:create', preferredGameId: initialGameId, authToken: retryAuthToken });
+            sock.send({
+              type: 'room:create',
+              preferredGameId: initialGameId,
+              ...(retryAuthToken ? { authToken: retryAuthToken } : {}),
+            });
           }
         }
       }, 3_000);
@@ -389,15 +441,21 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
     const socket = new ManagedWebSocket({
       onOpen: () => {
-        setWsConnected(true);
+        syncStore.setSocketStatus('connected');
         sendAttachOrCreate(socket);
       },
       onClose: () => {
         clearReattachRetry();
-        setWsConnected(false);
+        syncStore.setSocketStatus('reconnecting');
+      },
+      onRecover: () => {
+        syncStore.requestSync(true);
+      },
+      onPendingOpsChange: (count) => {
+        syncStore.setPendingOpsCount(count);
       },
       onStatusChange: (status) => {
-        setWsConnected(status === 'connected');
+        syncStore.setSocketStatus(status);
       },
       onMessage: (msg: ServerMessage) => {
         switch (msg.type) {
@@ -406,13 +464,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             consumeGuestSingleUseTokenLocally();
             setHostUnlockNeeded(false);
             saveHostSession(msg.code, msg.hostToken);
-            setRoom(msg.room);
+            syncStore.applyRoomAuthoritative(msg.room, true);
+            latestSnapshotRef.current = syncStore.latestSnapshot;
+            latestCompetitiveRef.current = syncStore.latestCompetitive;
             setErrorMsg(null);
             enterMonitorFullscreen();
             break;
           case 'room:snapshot':
             clearReattachRetry();
-            setRoom(msg.room);
+            syncStore.applyRoomAuthoritative(msg.room);
             setErrorMsg(null);
             break;
           case 'room:emote': {
@@ -429,54 +489,57 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             }, 2400);
             break;
           }
-          case 'game:tick':
+          case 'game:tick': {
             if (msg.snapshot) {
-              latestSnapshotRef.current = msg.snapshot;
-              latestCompetitiveRef.current = msg.competitive ?? null;
-              const snap = msg.snapshot;
-              if (CARD_GAME_IDS.has(snap.gameId)) {
-                const sAny = snap as unknown as {
-                  activePlayerId?: string;
-                  turnTotal?: number;
-                  turnTimeLeft?: number;
-                  phase?: string;
-                  lastClaimPlayerId?: string | null;
-                };
-                const elapsed = Math.max(
-                  0,
-                  Number(((sAny.turnTotal || 15) - (sAny.turnTimeLeft || 0)).toFixed(1))
-                );
-                const phase = sAny.phase ?? 'turn';
-                const lastClaim = sAny.lastClaimPlayerId ?? null;
-                const actId = sAny.activePlayerId ?? null;
-                setLiveTurnInfo((prev) => {
-                  if (
-                    prev.activePlayerId === actId &&
-                    Math.abs(prev.turnElapsedSec - elapsed) < 0.2 &&
-                    prev.phase === phase &&
-                    prev.lastClaimPlayerId === lastClaim
-                  ) {
-                    return prev;
-                  }
-                  return {
-                    activePlayerId: actId,
-                    turnElapsedSec: elapsed,
-                    phase,
-                    lastClaimPlayerId: lastClaim,
+              const { accepted } = syncStore.applyGameTick(msg);
+              if (accepted) {
+                latestSnapshotRef.current = syncStore.latestSnapshot;
+                latestCompetitiveRef.current = syncStore.latestCompetitive;
+                const snap = msg.snapshot;
+                if (CARD_GAME_IDS.has(snap.gameId)) {
+                  const sAny = snap as unknown as {
+                    activePlayerId?: string;
+                    turnTotal?: number;
+                    turnTimeLeft?: number;
+                    phase?: string;
+                    lastClaimPlayerId?: string | null;
                   };
-                });
-              } else if ('activePlayerId' in snap && typeof snap.activePlayerId === 'string') {
-                const actId = snap.activePlayerId;
-                setLiveTurnInfo((prev) =>
-                  prev.activePlayerId === actId
-                    ? prev
-                    : {
-                        activePlayerId: actId,
-                        turnElapsedSec: 0,
-                        phase: 'phase' in snap && typeof snap.phase === 'string' ? snap.phase : null,
-                        lastClaimPlayerId: null,
-                      }
-                );
+                  const elapsed = Math.max(
+                    0,
+                    Number(((sAny.turnTotal || 15) - (sAny.turnTimeLeft || 0)).toFixed(1))
+                  );
+                  const phase = sAny.phase ?? 'turn';
+                  const lastClaim = sAny.lastClaimPlayerId ?? null;
+                  const actId = sAny.activePlayerId ?? null;
+                  setLiveTurnInfo((prev) => {
+                    if (
+                      prev.activePlayerId === actId &&
+                      Math.abs(prev.turnElapsedSec - elapsed) < 0.2 &&
+                      prev.phase === phase &&
+                      prev.lastClaimPlayerId === lastClaim
+                    ) {
+                      return prev;
+                    }
+                    return {
+                      activePlayerId: actId,
+                      turnElapsedSec: elapsed,
+                      phase,
+                      lastClaimPlayerId: lastClaim,
+                    };
+                  });
+                } else if ('activePlayerId' in snap && typeof snap.activePlayerId === 'string') {
+                  const actId = snap.activePlayerId;
+                  setLiveTurnInfo((prev) =>
+                    prev.activePlayerId === actId
+                      ? prev
+                      : {
+                          activePlayerId: actId,
+                          turnElapsedSec: 0,
+                          phase: 'phase' in snap && typeof snap.phase === 'string' ? snap.phase : null,
+                          lastClaimPlayerId: null,
+                        }
+                  );
+                }
               }
             }
             if (msg.sounds && msg.sounds.length > 0) {
@@ -492,12 +555,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               }
             }
             break;
+          }
           case 'room:closed':
             clearReattachRetry();
             if (closeFallbackTimerRef.current) {
               clearTimeout(closeFallbackTimerRef.current);
               closeFallbackTimerRef.current = null;
             }
+            syncStore.reset();
+            latestSnapshotRef.current = null;
+            latestCompetitiveRef.current = null;
             exitMonitorFullscreen();
             clearHostSession();
             onExit();
@@ -506,15 +573,23 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             if (msg.code === 'ROOM_NOT_FOUND') {
               clearReattachRetry();
               clearHostSession();
+              syncStore.reset();
+              latestSnapshotRef.current = null;
+              latestCompetitiveRef.current = null;
               const authToken = getHostAuthToken();
-              if (authToken) {
-                socket.send({ type: 'room:create', preferredGameId: initialGameId, authToken });
+              if (authToken || getPublicAccessOpen()) {
+                socket.send({
+                  type: 'room:create',
+                  preferredGameId: initialGameId,
+                  ...(authToken ? { authToken } : {}),
+                });
               } else {
                 setHostUnlockNeeded(true);
               }
             } else if (msg.code === 'HOST_AUTH_REQUIRED') {
               clearReattachRetry();
               clearHostAuthSession();
+              setPublicAccessOpenLocally(false);
               setHostUnlockNeeded(true);
               setErrorMsg(msg.message);
             } else {
@@ -525,6 +600,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       },
     });
     wsRef.current = socket;
+    syncStore.attachSocket(socket);
 
     return () => {
       clearReattachRetry();
@@ -536,10 +612,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         clearTimeout(wheelAutoCloseTimerRef.current);
         wheelAutoCloseTimerRef.current = null;
       }
+      syncStore.detachSocket();
       socket.close();
       wsRef.current = null;
     };
-  }, [initialGameId]);
+  }, [initialGameId, syncStore]);
 
   // Playful BGM across the entire room (SETUP/LOBBY/BRIEFING/RESULTS), switching to competitive/frenzy BGM during gameplay
   useEffect(() => {
@@ -1253,8 +1330,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             setHostUnlockNeeded(false);
             setErrorMsg(null);
             const tok = getHostAuthToken();
-            if (tok && wsRef.current?.isConnected()) {
-              wsRef.current.send({ type: 'room:create', preferredGameId: initialGameId, authToken: tok });
+            if ((tok || getPublicAccessOpen()) && wsRef.current?.isConnected()) {
+              wsRef.current.send({
+                type: 'room:create',
+                preferredGameId: initialGameId,
+                ...(tok ? { authToken: tok } : {}),
+              });
             }
           }}
         />
@@ -1392,6 +1473,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         )}
       </AnimatePresence>
 
+      <HostUnlockModal
+        open={ownerSettingsAuthOpen}
+        target="passes"
+        onClose={() => setOwnerSettingsAuthOpen(false)}
+        onUnlocked={() => {
+          setOwnerSettingsAuthOpen(false);
+          setGuestPassOpen(true);
+        }}
+      />
+
       <GuestPassManagerModal open={guestPassOpen} onClose={() => setGuestPassOpen(false)} />
     </>
   );
@@ -1431,7 +1522,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 <ArrowLeft className="w-4 h-4" />
                 {t('Home', '首页')}
               </button>
-              <span className="font-display text-sm sm:text-lg font-extrabold text-white truncate">
+              <span
+                onClick={handleSecretTitleTap}
+                className="font-display text-sm sm:text-lg font-extrabold text-white truncate select-none"
+              >
                 {t('JoinStick Party Stage', 'JoinStick 派对舞台')}
               </span>
               <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[#9CA3AF] shrink-0">
@@ -1456,18 +1550,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
               {audioUnlockButton}
               <LanguageToggle compact className="h-9 sm:h-10 sm:px-3" />
-
-              {authSession?.role === 'master' && (
-                <button
-                  type="button"
-                  onClick={() => setGuestPassOpen(true)}
-                  title={t('Friend Guest Passes', '访客临时口令')}
-                  className="h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#00C2FF]/45 text-xs sm:text-sm font-bold text-[#7DE3FF] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Ticket className="w-4 h-4" />
-                  <span className="hidden sm:inline">{t('Guest Passes', '访客口令')}</span>
-                </button>
-              )}
 
               <button
                 type="button"
@@ -2026,7 +2108,10 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         {/* Slim Fullscreen TV Console Header */}
         <header className="min-h-13 sm:min-h-14 py-1.5 border-b border-[#242934] bg-[#151820] px-2.5 sm:px-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-4 shrink-0">
           <div className="flex items-center gap-2 sm:gap-3.5 min-w-0">
-            <span className="font-display text-sm sm:text-lg font-extrabold text-white truncate">
+            <span
+              onClick={handleSecretTitleTap}
+              className="font-display text-sm sm:text-lg font-extrabold text-white truncate select-none"
+            >
               {t('JoinStick Game Room', 'JoinStick 游戏厅')}
             </span>
             <span className="text-[11px] sm:text-xs font-mono text-[#9CA3AF] whitespace-nowrap shrink-0">
@@ -2081,18 +2166,6 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto sm:ml-0">
             {audioUnlockButton}
             <LanguageToggle compact className="h-8 sm:h-9" />
-
-            {authSession?.role === 'master' && (
-              <button
-                type="button"
-                onClick={() => setGuestPassOpen(true)}
-                title={t('Friend Guest Passes', '访客临时口令')}
-                className="h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg bg-[#1E232D] hover:bg-[#242A36] border border-[#00C2FF]/45 text-xs font-bold text-[#7DE3FF] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-              >
-                <Ticket className="w-3.5 h-3.5" />
-                <span className="hidden xl:inline">{t('Guest Passes', '访客口令')}</span>
-              </button>
-            )}
 
             <button
               type="button"

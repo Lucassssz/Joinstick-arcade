@@ -329,12 +329,12 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'lucky-21': CARD_PAD(
     'fan',
-    'Clear Hit / Stand / Double triggers for 21点',
+    'Clear Hit / Stand / Double triggers for Blackjack 21',
     '21 点清晰要牌/停牌/加倍大按钮'
   ),
   'ten-pair-showdown': CARD_PAD(
     'grid',
-    'Grid shows every tile pair for instant 牛牛 / 10-point matching',
+    'Grid shows every tile pair for instant Ngau / 10-point matching',
     '网格一眼配对 10 点组合，算牛更快'
   ),
 

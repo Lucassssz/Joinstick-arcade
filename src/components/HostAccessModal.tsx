@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Check,
   Clock,
   Copy,
   KeyRound,
   Lock,
+  MessageSquareText,
   Plus,
   ShieldCheck,
   Ticket,
   Trash2,
+  Unlock,
   X,
 } from 'lucide-react';
 import {
@@ -19,7 +21,9 @@ import {
   fetchHostAuthStatus,
   listGuestPasses,
   revokeGuestPass,
+  setPlatformPublicAccess,
   useHostAuthSession,
+  usePublicAccessOpen,
   verifyHostCode,
   type GuestPassMode,
   type GuestPassSummary,
@@ -29,7 +33,7 @@ import { useLanguage } from '../lib/i18n';
 
 interface HostUnlockModalProps {
   open: boolean;
-  target: 'host' | 'pocket';
+  target: 'host' | 'pocket' | 'passes';
   onClose: () => void;
   onUnlocked: () => void;
 }
@@ -42,22 +46,41 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
   const [confirmPinInput, setConfirmPinInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const onUnlockedRef = useRef(onUnlocked);
+  onUnlockedRef.current = onUnlocked;
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setCodeInput('');
     setConfirmPinInput('');
     setErrorMsg(null);
     setLoadingStatus(true);
     fetchHostAuthStatus()
-      .then((res) => setStatus(res))
-      .catch(() => setStatus({ masterConfigured: true, usingEnvPin: false }))
-      .finally(() => setLoadingStatus(false));
-  }, [open]);
+      .then((res) => {
+        if (cancelled) return;
+        setStatus(res);
+        if (res.publicAccessOpen && target !== 'passes') {
+          onUnlockedRef.current();
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus({ masterConfigured: true, usingEnvPin: false, publicAccessOpen: false });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingStatus(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, target]);
 
   if (!open) return null;
 
   const isFirstRunSetup = status !== null && !status.masterConfigured;
+  const isOwnerOnly = target === 'passes';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,6 +90,8 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
       setErrorMsg(
         isFirstRunSetup
           ? t('Enter a Master PIN (4–24 characters).', '请设置 4–24 位的房主管理密码。')
+          : isOwnerOnly
+          ? t('Enter your Owner Master PIN.', '请输入房主管理密码。')
           : t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
       );
       return;
@@ -97,12 +122,14 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      await verifyHostCode(trimmed);
+      await verifyHostCode(trimmed, { requireMaster: isOwnerOnly });
       onUnlocked();
     } catch (err) {
       setErrorMsg(
         err instanceof Error
           ? err.message
+          : isOwnerOnly
+          ? t('Invalid Owner Master PIN.', '房主管理密码错误。')
           : t('Invalid Master PIN or Guest Pass.', '密码或访客口令无效。')
       );
     } finally {
@@ -135,6 +162,8 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
         <h2 id="pin-modal-title" className="font-display text-2xl font-extrabold text-white">
           {isFirstRunSetup
             ? t('Set Your Owner Master PIN', '首次设置房主专属密码')
+            : target === 'passes'
+            ? t('Owner Sign-In', '房主身份验证')
             : target === 'pocket'
             ? t('Unlock Pocket Mode', '解锁掌机开房模式')
             : t('Unlock Host Monitor', '解锁大屏主持端')}
@@ -145,6 +174,11 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
             ? t(
                 'Create your private Master PIN now (or set HOST_MASTER_PIN in Server Secrets). Keep it private and mint temporary Guest Passes whenever lending to friends.',
                 '请先设置只有你知道的房主私密密码（也可在环境变量中配置 HOST_MASTER_PIN）。借给朋友游玩时，可在后台生成一次性或限时访客口令，绝不泄露主密码。'
+              )
+            : target === 'passes'
+            ? t(
+                'Enter your private Master PIN to manage Friend Guest Passes or unlock/lock the whole platform.',
+                '请输入你的房主管理密码，以管理访客口令或切换整个平台的开放/锁定状态。'
               )
             : target === 'pocket'
             ? t(
@@ -164,23 +198,29 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
         ) : (
           <form onSubmit={handleSubmit} className="mt-6 space-y-3.5">
             <input
-              type={isFirstRunSetup ? 'password' : 'text'}
+              type={isFirstRunSetup || isOwnerOnly ? 'password' : 'text'}
               maxLength={24}
               value={codeInput}
               onChange={(e) => {
                 setCodeInput(e.target.value);
                 setErrorMsg(null);
               }}
-              placeholder={isFirstRunSetup ? '••••••' : t('PIN or GP-XXXX-XXXX', '输入密码或访客口令')}
+              placeholder={
+                isFirstRunSetup || isOwnerOnly
+                  ? '••••••'
+                  : t('PIN or GP-XXXX-XXXX', '输入密码或访客口令')
+              }
               autoFocus
               autoComplete="off"
               aria-label={
                 isFirstRunSetup
                   ? t('New Master PIN', '设置新管理密码')
+                  : isOwnerOnly
+                  ? t('Owner Master PIN', '房主管理密码')
                   : t('Master PIN or Guest Pass', '管理密码或访客口令')
               }
               className={`w-full h-14 px-4 rounded-xl bg-[#0B0E14] border border-[#2A354A] focus:border-[#00C2FF] focus:outline-none font-mono text-lg sm:text-xl font-bold text-center text-white placeholder:text-[#4B5563] ${
-                isFirstRunSetup ? 'tracking-[0.35em]' : 'tracking-[0.14em] uppercase'
+                isFirstRunSetup || isOwnerOnly ? 'tracking-[0.35em]' : 'tracking-[0.14em] uppercase'
               }`}
             />
 
@@ -241,19 +281,26 @@ interface GuestPassManagerModalProps {
 }
 
 export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalProps) {
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
   const session = useHostAuthSession();
+  const publicAccessOpen = usePublicAccessOpen();
   const [passes, setPasses] = useState<GuestPassSummary[]>([]);
   const [usingEnvPin, setUsingEnvPin] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [togglingPublicAccess, setTogglingPublicAccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [friendLabel, setFriendLabel] = useState('');
   const [passMode, setPassMode] = useState<GuestPassMode>('single-use');
   const [timedHours, setTimedHours] = useState<number>(4);
   const [creating, setCreating] = useState(false);
-  const [latestCreatedCode, setLatestCreatedCode] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [latestCreated, setLatestCreated] = useState<{
+    code: string;
+    pass: GuestPassSummary;
+    recipientName: string | null;
+  } | null>(null);
+  const [generatedMessage, setGeneratedMessage] = useState<string | null>(null);
+  const [copiedTarget, setCopiedTarget] = useState<'code' | 'message' | null>(null);
 
   const [newPin, setNewPin] = useState('');
   const [pinSavedMsg, setPinSavedMsg] = useState<string | null>(null);
@@ -274,28 +321,79 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
 
   useEffect(() => {
     if (!open || session?.role !== 'master') return;
-    setLatestCreatedCode(null);
+    setLatestCreated(null);
+    setGeneratedMessage(null);
+    setCopiedTarget(null);
     setPinSavedMsg(null);
     setNewPin('');
     void refreshPasses();
   }, [open, session?.role, refreshPasses]);
 
+  const handleTogglePublicAccess = async () => {
+    if (togglingPublicAccess) return;
+    setTogglingPublicAccess(true);
+    setErrorMsg(null);
+    try {
+      await setPlatformPublicAccess(!publicAccessOpen);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : t('Failed to update platform lock state.', '更新平台开放状态失败。')
+      );
+    } finally {
+      setTogglingPublicAccess(false);
+    }
+  };
+
   if (!open) return null;
+
+  const copyTextToClipboard = async (text: string, target: 'code' | 'message') => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+      setCopiedTarget(target);
+      setTimeout(() => setCopiedTarget((prev) => (prev === target ? null : prev)), 2000);
+    } catch {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (ok) {
+          setCopiedTarget(target);
+          setTimeout(() => setCopiedTarget((prev) => (prev === target ? null : prev)), 2000);
+        }
+      } catch {
+        setCopiedTarget(null);
+      }
+    }
+  };
 
   const handleCreatePass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (creating) return;
+    const recipientName = friendLabel.trim() || null;
     setCreating(true);
     setErrorMsg(null);
     try {
       const created = await createGuestPass({
-        label: friendLabel.trim() || undefined,
+        label: recipientName || undefined,
         mode: passMode,
         hours: timedHours,
       });
-      setLatestCreatedCode(created.code);
+      setLatestCreated({ code: created.code, pass: created.pass, recipientName });
+      setGeneratedMessage(null);
       setFriendLabel('');
-      setCopied(false);
+      setCopiedTarget(null);
       await refreshPasses();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : t('Could not create pass', '生成口令失败'));
@@ -304,15 +402,60 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
     }
   };
 
-  const handleCopyCode = async () => {
-    if (!latestCreatedCode) return;
-    try {
-      await navigator.clipboard.writeText(latestCreatedCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
+  const handleCopyCode = () => {
+    if (!latestCreated) return;
+    void copyTextToClipboard(latestCreated.code, 'code');
+  };
+
+  const handleGenerateMessage = () => {
+    if (!latestCreated) return;
+    const { code, pass, recipientName } = latestCreated;
+    const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const expiresLabel = new Date(pass.expiresAt).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const msg =
+      lang === 'zh'
+        ? [
+            recipientName
+              ? `嗨 ${recipientName}！这是你的 JoinStick Arcade 访客临时口令，可以用来开房带大家一起玩：`
+              : `嗨！这是你的 JoinStick Arcade 访客临时口令，可以用来开房带大家一起玩：`,
+            '',
+            `访客口令：${code}`,
+            pass.mode === 'single-use'
+              ? `有效规则：单次开房有效（过期时间 ${expiresLabel}）`
+              : `有效规则：${pass.durationHours} 小时内无限开房（过期时间 ${expiresLabel}）`,
+            ...(appUrl ? [`游戏入口：${appUrl}`] : []),
+            '',
+            '使用方法：',
+            '1. 打开上方链接，选择「大屏主持端」或「掌机开房模式」。',
+            '2. 在解锁弹窗中输入上方访客口令，即可创建房间游玩！',
+          ].join('\n')
+        : [
+            recipientName
+              ? `Hey ${recipientName}! Here is your JoinStick Arcade Guest Pass to host a game room:`
+              : `Hey! Here is your JoinStick Arcade Guest Pass to host a game room:`,
+            '',
+            `Guest Pass: ${code}`,
+            pass.mode === 'single-use'
+              ? `Validity: 1-Time Room Unlock (expires ${expiresLabel})`
+              : `Validity: ${pass.durationHours}h Party Pass (expires ${expiresLabel})`,
+            ...(appUrl ? [`Play here: ${appUrl}`] : []),
+            '',
+            'How to use:',
+            '1. Open the link above and pick "Host Monitor" or "Pocket Mode".',
+            '2. Enter the Guest Pass code when prompted to unlock and create a room.',
+          ].join('\n');
+
+    setGeneratedMessage(msg);
+    setCopiedTarget(null);
+  };
+
+  const handleCopyMessage = () => {
+    if (!generatedMessage) return;
+    void copyTextToClipboard(generatedMessage, 'message');
   };
 
   const handleRevoke = async (id: string) => {
@@ -403,6 +546,76 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
           </div>
         ) : (
           <div className="mt-4 space-y-5">
+            {/* Whole-Platform Public Access Toggle */}
+            <div
+              className={`rounded-2xl border-2 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 transition-colors ${
+                publicAccessOpen
+                  ? 'bg-[#10D98B]/10 border-[#10D98B]/50'
+                  : 'bg-[#10141D] border-[#2A354A]'
+              }`}
+            >
+              <div className="flex items-start gap-3 min-w-0">
+                <div
+                  className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${
+                    publicAccessOpen
+                      ? 'bg-[#10D98B]/20 border-[#10D98B]/50 text-[#10D98B]'
+                      : 'bg-[#FF4D2E]/15 border-[#FF4D2E]/40 text-[#FF4D2E]'
+                  }`}
+                >
+                  {publicAccessOpen ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-white">
+                      {publicAccessOpen
+                        ? t('Whole Platform Unlocked', '整个平台已免密开放')
+                        : t('Platform Locked (Invite Only)', '平台已锁定（需邀请码）')}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${
+                        publicAccessOpen
+                          ? 'bg-[#10D98B]/20 text-[#10D98B] border-[#10D98B]/45'
+                          : 'bg-[#FF4D2E]/15 text-[#FF9B8A] border-[#FF4D2E]/40'
+                      }`}
+                    >
+                      {publicAccessOpen ? t('Open to Anyone', '全员可用') : t('Code Required', '需邀请码')}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#9CA3AF] mt-1 leading-relaxed">
+                    {publicAccessOpen
+                      ? t(
+                          'Anyone can create rooms and play right now without an invitation code. Lock it anytime to require codes again.',
+                          '当前任何人都可以直接开房游玩，无需邀请码。随时点击右侧按钮即可重新锁定。'
+                        )
+                      : t(
+                          'Normal mode: hosting a room requires your Master PIN or a Guest Pass. Unlock to let anyone use the platform freely.',
+                          '正常模式：创建房间需要房主密码或访客邀请码。点击解锁后全员均可免密开房。'
+                        )}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={togglingPublicAccess}
+                onClick={() => void handleTogglePublicAccess()}
+                className={`tactile-btn h-10 px-4 rounded-xl text-xs font-extrabold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+                  publicAccessOpen
+                    ? 'bg-[#FF4D2E] hover:bg-[#FF6145] text-white shadow-[0_3px_0_#B82E17]'
+                    : 'bg-[#10D98B] hover:bg-[#22E89B] text-[#071A12] shadow-[0_3px_0_#0A915D]'
+                }`}
+              >
+                {publicAccessOpen ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                <span>
+                  {togglingPublicAccess
+                    ? t('Updating...', '切换中...')
+                    : publicAccessOpen
+                    ? t('Lock Platform', '锁定平台')
+                    : t('Unlock Platform', '解锁整个平台')}
+                </span>
+              </button>
+            </div>
+
             {/* Mint Form */}
             <form
               onSubmit={handleCreatePass}
@@ -488,24 +701,69 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
             </form>
 
             {/* One-time reveal banner */}
-            {latestCreatedCode && (
-              <div className="rounded-2xl bg-[#10D98B]/10 border-2 border-[#10D98B]/50 p-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[#10D98B]">
-                    {t('Share This Code With Your Friend (Shown Once)', '请立刻复制发给好友（仅展示一次）')}
+            {latestCreated && (
+              <div className="rounded-2xl bg-[#10D98B]/10 border-2 border-[#10D98B]/50 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-[#10D98B]">
+                      {t('Share This Code With Your Friend (Shown Once)', '请立刻复制发给好友（仅展示一次）')}
+                    </div>
+                    <div className="font-mono text-2xl font-black tracking-wider text-white mt-0.5">
+                      {latestCreated.code}
+                    </div>
                   </div>
-                  <div className="font-mono text-2xl font-black tracking-wider text-white mt-0.5">
-                    {latestCreatedCode}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyCode}
+                      className="tactile-btn h-10 px-3.5 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#071A12] font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {copiedTarget === 'code' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      <span>{copiedTarget === 'code' ? t('Copied!', '已复制') : t('Copy Code', '复制口令')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGenerateMessage}
+                      className="tactile-btn h-10 px-3.5 rounded-xl bg-[#00C2FF] hover:bg-[#38D1FF] text-[#07131D] font-extrabold text-xs inline-flex items-center gap-1.5 shadow-[0_3px_0_#0084B0] cursor-pointer"
+                    >
+                      <MessageSquareText className="w-4 h-4" />
+                      <span>{t('Generate Message', '生成邀请消息')}</span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCopyCode}
-                  className="tactile-btn h-10 px-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#071A12] font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  <span>{copied ? t('Copied!', '已复制') : t('Copy Code', '复制口令')}</span>
-                </button>
+
+                {generatedMessage !== null && (
+                  <div className="pt-3 border-t border-[#10D98B]/25 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#00C2FF]">
+                        {t('Ready-to-Send Invite Message', '可直接发送的邀请消息')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopyMessage}
+                        className="h-8 px-3 rounded-lg bg-[#1E2636] hover:bg-[#273145] border border-[#2F3A4F] text-xs font-bold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        {copiedTarget === 'message' ? (
+                          <Check className="w-3.5 h-3.5 text-[#10D98B]" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5 text-[#00C2FF]" />
+                        )}
+                        <span>
+                          {copiedTarget === 'message'
+                            ? t('Message Copied!', '消息已复制')
+                            : t('Copy Message', '复制消息')}
+                        </span>
+                      </button>
+                    </div>
+                    <textarea
+                      rows={6}
+                      value={generatedMessage}
+                      onChange={(e) => setGeneratedMessage(e.target.value)}
+                      aria-label={t('Generated guest invite message', '生成的访客邀请消息')}
+                      className="w-full rounded-xl bg-[#0B0E14] border border-[#2A354A] focus:border-[#00C2FF] focus:outline-none p-3 text-xs leading-relaxed text-[#E5E7EB] resize-y arcade-scrollbar"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -628,7 +886,7 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
                 className="h-9 px-3.5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-[#FF9B8A] inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
               >
                 <Lock className="w-3.5 h-3.5" />
-                <span>{t('Lock Access', '锁定权限')}</span>
+                <span>{t('Sign Out Owner', '退出房主登录')}</span>
               </button>
             </div>
 

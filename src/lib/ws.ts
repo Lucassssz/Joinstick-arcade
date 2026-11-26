@@ -22,7 +22,9 @@ export function getJoinUrl(roomCode: string, lang?: 'en' | 'zh'): string {
 export interface ManagedSocketCallbacks {
   onOpen?: () => void;
   onClose?: () => void;
+  onRecover?: () => void;
   onStatusChange?: (status: SocketStatus) => void;
+  onPendingOpsChange?: (pendingCount: number) => void;
   onMessage: (msg: ServerMessage) => void;
 }
 
@@ -32,6 +34,44 @@ const SILENCE_TIMEOUT_MS = 28_000;
 const CONNECT_TIMEOUT_MS = 8_000;
 const INITIAL_RECONNECT_MS = 200;
 const MAX_RECONNECT_MS = 3_000;
+const PENDING_OP_TTL_MS = 10_000;
+
+const RELIABLE_OP_TYPES = new Set<ClientMessage['type']>([
+  'room:add-bot',
+  'room:remove-bot',
+  'room:kick-player',
+  'room:set-bot-difficulty',
+  'room:set-team-mode',
+  'room:set-player-team',
+  'room:shuffle-teams',
+  'room:set-host-player',
+  'room:set-mutator',
+  'room:spin-mutator',
+  'room:enter-game-room',
+  'room:return-setup',
+  'lobby:filter',
+  'player:ready',
+  'player:set-avatar',
+  'player:set-team',
+  'game:select',
+  'game:start',
+  'game:dismiss-briefing',
+  'game:pause',
+  'game:restart',
+  'game:return-lobby',
+  'tournament:start',
+  'tournament:vote',
+  'tournament:force-lock-vote',
+  'tournament:next',
+  'tournament:exit',
+  'card:action',
+]);
+
+interface PendingOpEntry {
+  opId: string;
+  msg: ClientMessage;
+  createdAt: number;
+}
 
 export class ManagedWebSocket {
   private ws: WebSocket | null = null;
@@ -48,6 +88,9 @@ export class ManagedWebSocket {
   private lastWatchdogTickAt = 0;
   private awaitingPongSince: number | null = null;
   private queue: ClientMessage[] = [];
+  private pendingOps: PendingOpEntry[] = [];
+  private opCounter = 0;
+  private readonly clientNonce = Math.random().toString(36).slice(2, 8);
   private callbacks: ManagedSocketCallbacks;
 
   constructor(callbacks: ManagedSocketCallbacks) {
@@ -70,6 +113,46 @@ export class ManagedWebSocket {
     return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
   }
 
+  public getPendingOpCount(): number {
+    this.pruneExpiredOps();
+    return this.pendingOps.length;
+  }
+
+  public getLastMessageAt(): number {
+    return this.lastMessageAt;
+  }
+
+  public clearPendingOps(): void {
+    if (this.pendingOps.length === 0) return;
+    this.pendingOps = [];
+    this.callbacks.onPendingOpsChange?.(0);
+  }
+
+  public requestSync(knownStateSeq?: number, knownTickSeq?: number): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      this.ws.send(
+        JSON.stringify({
+          type: 'room:sync',
+          knownStateSeq,
+          knownTickSeq,
+        })
+      );
+    } catch {
+      this.forceDropAndReconnect(true);
+    }
+  }
+
+  private pruneExpiredOps(): void {
+    if (this.pendingOps.length === 0) return;
+    const cutoff = Date.now() - PENDING_OP_TTL_MS;
+    const next = this.pendingOps.filter((op) => op.createdAt >= cutoff);
+    if (next.length !== this.pendingOps.length) {
+      this.pendingOps = next;
+      this.callbacks.onPendingOpsChange?.(this.pendingOps.length);
+    }
+  }
+
   private handleOnline = (): void => {
     if (this.closedManually) return;
     this.reconnectDelay = INITIAL_RECONNECT_MS;
@@ -77,6 +160,7 @@ export class ManagedWebSocket {
       this.reconnectNow(false);
     } else {
       this.sendHeartbeatProbe(7_000);
+      this.callbacks.onRecover?.();
     }
   };
 
@@ -108,6 +192,7 @@ export class ManagedWebSocket {
         this.lastMessageAt = now;
         this.sendHeartbeatProbe(7_000);
       }
+      this.callbacks.onRecover?.();
     }
   };
 
@@ -210,10 +295,31 @@ export class ManagedWebSocket {
       const pending = this.queue.splice(0, this.queue.length);
       this.callbacks.onOpen?.();
 
+      this.pruneExpiredOps();
+      const flushedOpIds = new Set<string>();
+      for (const op of this.pendingOps) {
+        if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) break;
+        flushedOpIds.add(op.opId);
+        try {
+          ws.send(JSON.stringify(op.msg));
+        } catch {
+          break;
+        }
+      }
+
       for (const msg of pending) {
         if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) break;
-        if (msg.type === 'room:host-reattach' || msg.type === 'room:join' || msg.type === 'room:create') {
-          continue; // Handled authoritatively by onOpen
+        if (
+          msg.type === 'room:host-reattach' ||
+          msg.type === 'room:join' ||
+          msg.type === 'room:create' ||
+          msg.type === 'room:sync'
+        ) {
+          continue; // Handled authoritatively by onOpen / requestSync
+        }
+        const maybeOpId = (msg as { opId?: string }).opId;
+        if (maybeOpId && flushedOpIds.has(maybeOpId)) {
+          continue;
         }
         try {
           ws.send(JSON.stringify(msg));
@@ -229,6 +335,15 @@ export class ManagedWebSocket {
       this.awaitingPongSince = null;
       try {
         const parsed = JSON.parse(event.data) as ServerMessage;
+        if (parsed.type === 'room:ack' && parsed.opId) {
+          const prevLen = this.pendingOps.length;
+          this.pendingOps = this.pendingOps.filter((op) => op.opId !== parsed.opId);
+          if (this.pendingOps.length !== prevLen) {
+            this.callbacks.onPendingOpsChange?.(this.pendingOps.length);
+          }
+        } else if (parsed.type === 'room:closed') {
+          this.clearPendingOps();
+        }
         this.callbacks.onMessage(parsed);
       } catch {
         // Ignore malformed messages
@@ -389,29 +504,47 @@ export class ManagedWebSocket {
   }
 
   public send(msg: ClientMessage): void {
+    let outbound = msg;
+    if (RELIABLE_OP_TYPES.has(msg.type)) {
+      const existingOpId = (msg as { opId?: string }).opId;
+      const opId = existingOpId || `${this.clientNonce}_${++this.opCounter}`;
+      outbound = { ...msg, opId } as ClientMessage;
+      this.pruneExpiredOps();
+      if (!this.pendingOps.some((op) => op.opId === opId)) {
+        if (this.pendingOps.length >= 16) {
+          this.pendingOps.shift();
+        }
+        this.pendingOps.push({ opId, msg: outbound, createdAt: Date.now() });
+        this.callbacks.onPendingOpsChange?.(this.pendingOps.length);
+      }
+    }
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
-        this.ws.send(JSON.stringify(msg));
+        this.ws.send(JSON.stringify(outbound));
       } catch {
         this.forceDropAndReconnect(true);
       }
     } else if (
-      msg.type !== 'controller:input' &&
-      msg.type !== 'ping' &&
-      msg.type !== 'remote:action'
+      outbound.type !== 'controller:input' &&
+      outbound.type !== 'ping' &&
+      outbound.type !== 'remote:action' &&
+      outbound.type !== 'room:sync' &&
+      !RELIABLE_OP_TYPES.has(outbound.type)
     ) {
-      if (msg.type === 'room:join' || msg.type === 'room:host-reattach') {
-        this.queue = this.queue.filter((queued) => queued.type !== msg.type);
+      if (outbound.type === 'room:join' || outbound.type === 'room:host-reattach') {
+        this.queue = this.queue.filter((queued) => queued.type !== outbound.type);
       }
-      // Queue essential state/session control messages until reconnected
+      // Queue non-op essential session control messages until reconnected
       if (this.queue.length < 12) {
-        this.queue.push(msg);
+        this.queue.push(outbound);
       }
     }
   }
 
   public close(): void {
     this.closedManually = true;
+    this.clearPendingOps();
     this.unbindLifecycleEvents();
     this.clearConnectTimer();
     this.stopHeartbeat();

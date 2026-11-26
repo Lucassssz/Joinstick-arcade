@@ -55,7 +55,7 @@ function drawFooterBar(
     ctx.fillText(p.name, x + w / 2, ARENA_HEIGHT - 51);
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 13px "JetBrains Mono", monospace';
-    ctx.fillText(`${Math.round(p.score)} PTS${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
+    ctx.fillText(`${tCanvas(`${Math.round(p.score)} PTS`)}${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
     ctx.restore();
   });
 }
@@ -74,7 +74,7 @@ export function renderRowSixBust(ctx: CanvasRenderingContext2D, snap: RowSixBust
     ctx.fill();
     ctx.fillStyle = '#FB923C';
     ctx.font = '900 14px "JetBrains Mono", monospace';
-    ctx.fillText(`ROW ${ri + 1}`, 158, ry + 48);
+    ctx.fillText(tCanvas(`ROW ${ri + 1}`), 158, ry + 48);
     ctx.restore();
 
     row.cards.forEach((c, ci) => {
@@ -98,7 +98,7 @@ export function renderRowSixBust(ctx: CanvasRenderingContext2D, snap: RowSixBust
     ctx.fillStyle = '#FCA5A5';
     ctx.font = '800 12px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('6TH BUST!', slot6X + 54, ry + 48);
+    ctx.fillText(tCanvas('6TH BUST!'), slot6X + 54, ry + 48);
     ctx.restore();
   });
 
@@ -124,7 +124,7 @@ export function renderSilentSync(ctx: CanvasRenderingContext2D, snap: SilentSync
   ctx.fillText(snap.lastPlayedNum > 0 ? `#${snap.lastPlayedNum}` : '01', ARENA_WIDTH / 2, 294);
   ctx.fillStyle = '#FACC15';
   ctx.font = '800 16px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText(`LEVEL ${snap.level} · STREAK ${snap.streak}`, ARENA_WIDTH / 2, 356);
+  ctx.fillText(tCanvas(`LEVEL ${snap.level} · STREAK ${snap.streak}`), ARENA_WIDTH / 2, 356);
   ctx.restore();
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s · ${snap.cardsRemaining} LEFT`, '#38BDF8');
@@ -154,7 +154,7 @@ export function renderDeepSeaOxygen(ctx: CanvasRenderingContext2D, snap: DeepSea
   ctx.fillStyle = '#FFFFFF';
   ctx.font = '900 14px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`SHARED OXYGEN: ${snap.oxygen} / ${snap.maxOxygen}`, ARENA_WIDTH / 2, 123);
+  ctx.fillText(tCanvas(`SHARED OXYGEN: ${snap.oxygen} / ${snap.maxOxygen}`), ARENA_WIDTH / 2, 123);
   ctx.restore();
 
   // Submarine Zone (Depth 0) + 10 Sea Floor Stones
@@ -162,7 +162,7 @@ export function renderDeepSeaOxygen(ctx: CanvasRenderingContext2D, snap: DeepSea
   ctx.fillStyle = '#14120B';
   ctx.font = '900 15px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('SUBMARINE DECK — RETURN HERE TO BANK TREASURE!', ARENA_WIDTH / 2, 177);
+  ctx.fillText(tCanvas('SUBMARINE DECK — RETURN HERE TO BANK TREASURE!'), ARENA_WIDTH / 2, 177);
 
   snap.depths.forEach((d, idx) => {
     const col = idx % 5;
@@ -174,9 +174,9 @@ export function renderDeepSeaOxygen(ctx: CanvasRenderingContext2D, snap: DeepSea
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 16px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`DEPTH ${d.depth}`, dx + 66, dy + 34);
+    ctx.fillText(tCanvas(`DEPTH ${d.depth}`), dx + 66, dy + 34);
     ctx.fillStyle = d.treasure > 0 ? '#FEF08A' : '#64748B';
-    ctx.fillText(d.treasure > 0 ? `💎 ×${d.treasure}` : 'LOOTED', dx + 66, dy + 64);
+    ctx.fillText(d.treasure > 0 ? `💎 ×${d.treasure}` : tCanvas('LOOTED'), dx + 66, dy + 64);
   });
 
   snap.players.forEach((p, idx) => {
@@ -227,11 +227,11 @@ export function renderOneCardCourt(ctx: CanvasRenderingContext2D, snap: OneCardC
     ctx.fillText(p.name, x + cardW / 2, y + 36);
     ctx.fillStyle = p.playedCard ? '#FACC15' : '#F472B6';
     ctx.font = '900 18px "JetBrains Mono", monospace';
-    ctx.fillText(p.playedCard ?? 'THINKING...', x + cardW / 2, y + 132);
+    ctx.fillText(p.playedCard ? tCanvas(p.playedCard) : tCanvas('THINKING...'), x + cardW / 2, y + 132);
     if (p.shielded) {
       ctx.fillStyle = '#38BDF8';
       ctx.font = '800 14px "Plus Jakarta Sans", sans-serif';
-      ctx.fillText('🛡 SHIELDED', x + cardW / 2, y + 185);
+      ctx.fillText(tCanvas('🛡 SHIELDED'), x + cardW / 2, y + 185);
     }
     ctx.fillStyle = '#CBD5E1';
     ctx.font = '800 14px "JetBrains Mono", monospace';
@@ -272,7 +272,7 @@ export function renderFireworkHints(ctx: CanvasRenderingContext2D, snap: Firewor
     ctx.fillStyle = col;
     ctx.font = '900 16px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`${st.color.toUpperCase()} NEXT: #${st.topVal + 1}`, x + 75, y + 322);
+    ctx.fillText(tCanvas(`${st.color.toUpperCase()} NEXT: #${st.topVal + 1}`), x + 75, y + 322);
   });
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s · HINTS ${snap.hintTokens}`, '#FACC15');
@@ -306,7 +306,7 @@ export function renderTunnelSaboteur(ctx: CanvasRenderingContext2D, snap: Tunnel
       ctx.font = '900 18px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.fillText(
-        kind === 'gold' ? 'GOLD' : kind === 'path' ? '══' : kind === 'rock' ? '🪨' : '',
+        kind === 'gold' ? tCanvas('GOLD') : kind === 'path' ? '══' : kind === 'rock' ? '🪨' : '',
         cx + (cw - 10) / 2,
         cy + (ch - 10) / 2 + 6
       );
@@ -464,7 +464,7 @@ export function renderWordTileCrossroads(ctx: CanvasRenderingContext2D, snap: Wo
     ctx.fillText(tw.word, ARENA_WIDTH / 2, y + 54);
     ctx.fillStyle = tw.claimedBy ? '#FACC15' : '#86EFAC';
     ctx.font = '800 14px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(tw.claimedBy ? `CLAIMED BY ${tw.claimedBy}` : `WORD BOUNTY +${tw.bonus}`, ARENA_WIDTH / 2, y + 82);
+    ctx.fillText(tCanvas(tw.claimedBy ? `CLAIMED BY ${tw.claimedBy}` : `WORD BOUNTY +${tw.bonus}`), ARENA_WIDTH / 2, y + 82);
   });
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s`, '#22C55E');

@@ -163,6 +163,10 @@ function createHostHapticTracker(): HostHapticTracker {
 interface RoomRecord {
   code: string;
   roomMode: RoomMode;
+  stateSeq: number;
+  tickSeq: number;
+  cardSeq: number;
+  processedOpIds: Map<string, number>;
   hostToken: string;
   hostWs: WebSocket | null;
   hostDisconnectedAt: number | null;
@@ -573,6 +577,8 @@ export class RoomManager {
     return {
       code: room.code,
       roomMode: room.roomMode,
+      stateSeq: room.stateSeq,
+      serverTime: Date.now(),
       status: room.status,
       selectedGameId: room.selectedGameId,
       gameSettingValue: room.gameSettingValue,
@@ -616,6 +622,7 @@ export class RoomManager {
   }
 
   private broadcastRoom(room: RoomRecord): void {
+    room.stateSeq += 1;
     const msg: ServerMessage = {
       type: 'room:snapshot',
       room: this.buildRoomSnapshot(room),
@@ -624,6 +631,68 @@ export class RoomManager {
     for (const p of room.players.values()) {
       if (p.connected && !p.isBot && p.ws) {
         this.send(p.ws, msg);
+      }
+    }
+  }
+
+  private sendRoomSync(
+    ws: WebSocket,
+    room: RoomRecord,
+    playerId?: string,
+    knownTickSeq?: number
+  ): void {
+    const binding = this.bindings.get(ws);
+    this.send(ws, {
+      type: 'room:snapshot',
+      room: this.buildRoomSnapshot(room),
+    });
+
+    if (
+      (binding?.role === 'host' || room.roomMode === 'pocket') &&
+      room.lastSnapshot &&
+      (knownTickSeq === undefined || knownTickSeq < room.tickSeq)
+    ) {
+      this.send(
+        ws,
+        room.lastCompetitiveSnapshot
+          ? {
+              type: 'game:tick',
+              snapshot: room.lastSnapshot,
+              competitive: room.lastCompetitiveSnapshot,
+              tickSeq: room.tickSeq,
+              sounds: [],
+            }
+          : {
+              type: 'game:tick',
+              snapshot: room.lastSnapshot,
+              tickSeq: room.tickSeq,
+              sounds: [],
+            }
+      );
+    }
+
+    if (playerId) {
+      if (
+        room.gameState &&
+        CARD_GAME_IDS.has(room.selectedGameId) &&
+        (room.status === 'BRIEFING' ||
+          room.status === 'COUNTDOWN' ||
+          room.status === 'PLAYING' ||
+          room.status === 'PAUSED')
+      ) {
+        const engine = SERVER_GAMES[room.selectedGameId];
+        const states = engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room));
+        this.send(ws, {
+          type: 'player:card-state',
+          cardState: states?.[playerId] ?? null,
+          seq: room.cardSeq,
+        });
+      } else {
+        this.send(ws, {
+          type: 'player:card-state',
+          cardState: null,
+          seq: room.cardSeq,
+        });
       }
     }
   }
@@ -645,9 +714,12 @@ export class RoomManager {
     sounds: SoundEvent[],
     competitive?: CompetitiveSnapshot | null
   ): void {
+    if (snapshot) {
+      room.tickSeq += 1;
+    }
     const msg: ServerMessage = competitive
-      ? { type: 'game:tick', snapshot, competitive, sounds }
-      : { type: 'game:tick', snapshot, sounds };
+      ? { type: 'game:tick', snapshot, competitive, tickSeq: room.tickSeq, sounds }
+      : { type: 'game:tick', snapshot, tickSeq: room.tickSeq, sounds };
     this.sendToScreenListeners(room, msg);
   }
 
@@ -778,6 +850,51 @@ export class RoomManager {
   }
 
   private handleMessage(ws: WebSocket, msg: ClientMessage): void {
+    const rawOpId =
+      typeof (msg as { opId?: unknown }).opId === 'string'
+        ? (msg as { opId: string }).opId.slice(0, 64)
+        : null;
+    if (rawOpId) {
+      const binding = this.bindings.get(ws);
+      const boundRoom = binding ? this.rooms.get(binding.roomCode) : undefined;
+      if (binding && boundRoom) {
+        const opKey = `${binding.role}:${binding.playerId ?? 'host'}:${rawOpId}`;
+        if (boundRoom.processedOpIds.has(opKey)) {
+          this.send(ws, {
+            type: 'room:ack',
+            opId: rawOpId,
+            stateSeq: boundRoom.stateSeq,
+            accepted: true,
+          });
+          this.sendRoomSync(ws, boundRoom, binding.playerId);
+          return;
+        }
+        const now = Date.now();
+        if (boundRoom.processedOpIds.size > 200) {
+          for (const [k, ts] of boundRoom.processedOpIds.entries()) {
+            if (now - ts > 60_000) boundRoom.processedOpIds.delete(k);
+          }
+        }
+        boundRoom.processedOpIds.set(opKey, now);
+        const seqBefore = boundRoom.stateSeq;
+        this.dispatchMessage(ws, msg);
+        const accepted = boundRoom.stateSeq > seqBefore || msg.type === 'card:action';
+        this.send(ws, {
+          type: 'room:ack',
+          opId: rawOpId,
+          stateSeq: boundRoom.stateSeq,
+          accepted,
+        });
+        if (!accepted) {
+          this.sendRoomSync(ws, boundRoom, binding.playerId);
+        }
+        return;
+      }
+    }
+    this.dispatchMessage(ws, msg);
+  }
+
+  private dispatchMessage(ws: WebSocket, msg: ClientMessage): void {
     switch (msg.type) {
       case 'ping': {
         const binding = this.bindings.get(ws);
@@ -788,6 +905,23 @@ export class RoomManager {
           }
         }
         this.send(ws, { type: 'pong' });
+        return;
+      }
+
+      case 'room:sync': {
+        const binding = this.bindings.get(ws);
+        if (!binding) return;
+        const room = this.rooms.get(binding.roomCode);
+        if (!room) {
+          this.send(ws, {
+            type: 'error',
+            code: 'ROOM_NOT_FOUND',
+            message: 'Room no longer exists.',
+          });
+          return;
+        }
+        room.lastActivityAt = Date.now();
+        this.sendRoomSync(ws, room, binding.playerId, msg.knownTickSeq);
         return;
       }
 
@@ -813,6 +947,10 @@ export class RoomManager {
         const room: RoomRecord = {
           code,
           roomMode: 'monitor',
+          stateSeq: 1,
+          tickSeq: 0,
+          cardSeq: 0,
+          processedOpIds: new Map(),
           hostToken,
           hostWs: ws,
           hostDisconnectedAt: null,
@@ -895,6 +1033,10 @@ export class RoomManager {
         const room: RoomRecord = {
           code,
           roomMode: 'pocket',
+          stateSeq: 1,
+          tickSeq: 0,
+          cardSeq: 0,
+          processedOpIds: new Map(),
           hostToken,
           hostWs: null,
           hostDisconnectedAt: null,
@@ -1015,6 +1157,7 @@ export class RoomManager {
         room.hostDisconnectedAt = null;
         room.lastActivityAt = Date.now();
         this.bindings.set(ws, { role: 'host', roomCode: room.code });
+        room.stateSeq += 1;
         this.send(ws, {
           type: 'room:created',
           code: room.code,
@@ -1022,7 +1165,23 @@ export class RoomManager {
           room: this.buildRoomSnapshot(room),
         });
         if (room.lastSnapshot) {
-          this.send(ws, { type: 'game:tick', snapshot: room.lastSnapshot, sounds: [] });
+          this.send(
+            ws,
+            room.lastCompetitiveSnapshot
+              ? {
+                  type: 'game:tick',
+                  snapshot: room.lastSnapshot,
+                  competitive: room.lastCompetitiveSnapshot,
+                  tickSeq: room.tickSeq,
+                  sounds: [],
+                }
+              : {
+                  type: 'game:tick',
+                  snapshot: room.lastSnapshot,
+                  tickSeq: room.tickSeq,
+                  sounds: [],
+                }
+          );
         }
         this.broadcastRoom(room);
         return;
@@ -1106,6 +1265,7 @@ export class RoomManager {
           }
           this.ensureHostPlayer(room);
           this.bindings.set(ws, { role: 'player', roomCode: code, playerId: existing.id });
+          room.stateSeq += 1;
           this.send(ws, {
             type: 'room:joined',
             playerId: existing.id,
@@ -1118,7 +1278,11 @@ export class RoomManager {
             const engine = SERVER_GAMES[room.selectedGameId];
             const states = engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room));
             if (states && states[existing.id]) {
-              this.send(ws, { type: 'player:card-state', cardState: states[existing.id] });
+              this.send(ws, {
+                type: 'player:card-state',
+                cardState: states[existing.id],
+                seq: room.cardSeq,
+              });
             }
           }
           if (room.roomMode === 'pocket' && room.lastSnapshot) {
@@ -1129,11 +1293,13 @@ export class RoomManager {
                     type: 'game:tick',
                     snapshot: room.lastSnapshot,
                     competitive: room.lastCompetitiveSnapshot,
+                    tickSeq: room.tickSeq,
                     sounds: [],
                   }
                 : {
                     type: 'game:tick',
                     snapshot: room.lastSnapshot,
+                    tickSeq: room.tickSeq,
                     sounds: [],
                   }
             );
@@ -1218,6 +1384,7 @@ export class RoomManager {
           room.lastSnapshot = engine.getSnapshot(room.gameState);
         }
 
+        room.stateSeq += 1;
         this.send(ws, {
           type: 'room:joined',
           playerId,
@@ -1231,11 +1398,13 @@ export class RoomManager {
                   type: 'game:tick',
                   snapshot: room.lastSnapshot,
                   competitive: room.lastCompetitiveSnapshot,
+                  tickSeq: room.tickSeq,
                   sounds: [],
                 }
               : {
                   type: 'game:tick',
                   snapshot: room.lastSnapshot,
+                  tickSeq: room.tickSeq,
                   sounds: [],
                 }
           );
@@ -1981,7 +2150,8 @@ export class RoomManager {
       });
       if (force || room.lastCardStateHashes.get(p.id) !== hash) {
         room.lastCardStateHashes.set(p.id, hash);
-        this.send(p.ws, { type: 'player:card-state', cardState: cs });
+        room.cardSeq += 1;
+        this.send(p.ws, { type: 'player:card-state', cardState: cs, seq: room.cardSeq });
       }
     }
   }
@@ -1990,9 +2160,10 @@ export class RoomManager {
     room.lastCardStateHashes.clear();
     room.hapticTracker.lastCardTurnByPlayer.clear();
     room.hapticTracker.lastCardActionReqByPlayer.clear();
+    room.cardSeq += 1;
     for (const p of room.players.values()) {
       if (!p.isBot && p.connected && p.ws) {
-        this.send(p.ws, { type: 'player:card-state', cardState: null });
+        this.send(p.ws, { type: 'player:card-state', cardState: null, seq: room.cardSeq });
       }
     }
   }

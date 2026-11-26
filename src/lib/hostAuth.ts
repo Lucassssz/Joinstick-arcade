@@ -14,6 +14,7 @@ export interface HostAuthSession {
 export interface HostAuthStatus {
   masterConfigured: boolean;
   usingEnvPin: boolean;
+  publicAccessOpen: boolean;
 }
 
 export interface GuestPassSummary {
@@ -31,10 +32,23 @@ export interface GuestPassSummary {
 
 // Held strictly in JS/React memory (never written to localStorage/sessionStorage).
 let currentSession: HostAuthSession | null = null;
+let currentPublicAccessOpen = false;
 const listeners = new Set<() => void>();
 
 function notifyListeners() {
   for (const fn of listeners) fn();
+}
+
+export function getPublicAccessOpen(): boolean {
+  return currentPublicAccessOpen;
+}
+
+export function setPublicAccessOpenLocally(open: boolean): void {
+  const next = Boolean(open);
+  if (currentPublicAccessOpen !== next) {
+    currentPublicAccessOpen = next;
+    notifyListeners();
+  }
 }
 
 export function getHostAuthSession(): HostAuthSession | null {
@@ -84,12 +98,31 @@ export function useHostAuthSession(): HostAuthSession | null {
   return session;
 }
 
+export function usePublicAccessOpen(): boolean {
+  const [open, setOpen] = useState<boolean>(() => getPublicAccessOpen());
+  useEffect(() => {
+    const sync = () => setOpen(getPublicAccessOpen());
+    listeners.add(sync);
+    return () => {
+      listeners.delete(sync);
+    };
+  }, []);
+  return open;
+}
+
 export async function fetchHostAuthStatus(): Promise<HostAuthStatus> {
   const res = await fetch('/api/host-auth/status', { cache: 'no-store' });
   if (!res.ok) {
     throw new Error('Failed to check host auth status');
   }
-  return (await res.json()) as HostAuthStatus;
+  const data = (await res.json()) as Partial<HostAuthStatus>;
+  const status: HostAuthStatus = {
+    masterConfigured: Boolean(data.masterConfigured),
+    usingEnvPin: Boolean(data.usingEnvPin),
+    publicAccessOpen: Boolean(data.publicAccessOpen),
+  };
+  setPublicAccessOpenLocally(status.publicAccessOpen);
+  return status;
 }
 
 export async function claimInitialMasterPin(pin: string): Promise<HostAuthSession> {
@@ -117,11 +150,14 @@ export async function claimInitialMasterPin(pin: string): Promise<HostAuthSessio
   return session;
 }
 
-export async function verifyHostCode(code: string): Promise<HostAuthSession> {
+export async function verifyHostCode(
+  code: string,
+  opts?: { requireMaster?: boolean }
+): Promise<HostAuthSession> {
   const res = await fetch('/api/host-auth/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, requireMaster: Boolean(opts?.requireMaster) }),
   });
   const data = (await res.json()) as {
     ok?: boolean;
@@ -146,7 +182,11 @@ export async function verifyHostCode(code: string): Promise<HostAuthSession> {
   return session;
 }
 
-export async function listGuestPasses(): Promise<{ passes: GuestPassSummary[]; usingEnvPin: boolean }> {
+export async function listGuestPasses(): Promise<{
+  passes: GuestPassSummary[];
+  usingEnvPin: boolean;
+  publicAccessOpen: boolean;
+}> {
   const token = getHostAuthToken();
   if (!token) throw new Error('Master session required');
   const res = await fetch('/api/host-auth/passes', {
@@ -156,12 +196,38 @@ export async function listGuestPasses(): Promise<{ passes: GuestPassSummary[]; u
   const data = (await res.json()) as {
     passes?: GuestPassSummary[];
     usingEnvPin?: boolean;
+    publicAccessOpen?: boolean;
     error?: string;
   };
   if (!res.ok || !Array.isArray(data.passes)) {
     throw new Error(data.error || 'Failed to load guest passes');
   }
-  return { passes: data.passes, usingEnvPin: Boolean(data.usingEnvPin) };
+  const publicAccessOpen = Boolean(data.publicAccessOpen);
+  setPublicAccessOpenLocally(publicAccessOpen);
+  return { passes: data.passes, usingEnvPin: Boolean(data.usingEnvPin), publicAccessOpen };
+}
+
+export async function setPlatformPublicAccess(open: boolean): Promise<boolean> {
+  const token = getHostAuthToken();
+  if (!token) throw new Error('Master session required');
+  const res = await fetch('/api/host-auth/public-access', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ open: Boolean(open) }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    publicAccessOpen?: boolean;
+    error?: string;
+  };
+  if (!res.ok || typeof data.publicAccessOpen !== 'boolean') {
+    throw new Error(data.error || 'Failed to update platform access');
+  }
+  setPublicAccessOpenLocally(data.publicAccessOpen);
+  return data.publicAccessOpen;
 }
 
 export async function createGuestPass(opts: {

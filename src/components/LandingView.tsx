@@ -11,7 +11,6 @@ import {
   QrCode,
   Search,
   Smartphone,
-  Ticket,
   Users,
   X,
   Zap,
@@ -40,7 +39,11 @@ import { preloadRuleClips } from './WatchAndPlayCardCanvas';
 import { RuleAnimationCard } from './RuleAnimationCard';
 import { GameShowcaseCard } from './GameShowcaseCard';
 import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
-import { getHostAuthToken, useHostAuthSession } from '../lib/hostAuth';
+import {
+  fetchHostAuthStatus,
+  getHostAuthToken,
+  usePublicAccessOpen,
+} from '../lib/hostAuth';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
@@ -81,12 +84,51 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
   const [manualResumeSeconds, setManualResumeSeconds] = useState(0);
   const [activeScrollIdx, setActiveScrollIdx] = useState(0);
 
-  // Host Unlock & Guest Pass State
-  const hostSession = useHostAuthSession();
+  // Host Unlock & Hidden Owner Settings State
+  const publicAccessOpen = usePublicAccessOpen();
+  const [showPlayModeModal, setShowPlayModeModal] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [showGuestPassModal, setShowGuestPassModal] = useState(false);
   const [pendingHostGameId, setPendingHostGameId] = useState<GameId | undefined>(undefined);
   const [pendingHostTarget, setPendingHostTarget] = useState<'host' | 'pocket' | 'passes'>('host');
+  const secretTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
+
+  useEffect(() => {
+    void fetchHostAuthStatus().catch(() => {});
+  }, []);
+
+  const openHiddenOwnerSettings = useCallback(() => {
+    setShowPlayModeModal(false);
+    setShowGuestPassModal(false);
+    setPendingHostGameId(undefined);
+    setPendingHostTarget('passes');
+    setShowPinModal(true);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        openHiddenOwnerSettings();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openHiddenOwnerSettings]);
+
+  const handleSecretBrandTap = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const now = Date.now();
+    const prev = secretTapRef.current;
+    const nextCount = now - prev.lastAt <= 2200 ? prev.count + 1 : 1;
+    secretTapRef.current = { count: nextCount, lastAt: now };
+    if (nextCount >= 2) {
+      e.preventDefault();
+    }
+    if (nextCount >= 5) {
+      secretTapRef.current = { count: 0, lastAt: 0 };
+      openHiddenOwnerSettings();
+    }
+  };
 
   // Part 3 & 4 Scrollytelling State
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -258,19 +300,13 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
   }, [gameTypesAnimated, gameTypeCounts]);
 
   const requestHost = (gameId?: GameId, target: 'host' | 'pocket' | 'passes' = 'host') => {
-    const token = getHostAuthToken();
     if (target === 'passes') {
-      if (token && hostSession?.role === 'master') {
-        setShowGuestPassModal(true);
-      } else {
-        setPendingHostGameId(undefined);
-        setPendingHostTarget('passes');
-        setShowPinModal(true);
-      }
+      openHiddenOwnerSettings();
       return;
     }
 
-    if (token) {
+    const token = getHostAuthToken();
+    if (token || publicAccessOpen) {
       if (target === 'pocket') {
         onStartPocket(gameId);
       } else {
@@ -283,7 +319,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     }
   };
 
-  const handleHostUnlocked = () => {
+  const handleHostUnlocked = useCallback(() => {
     setShowPinModal(false);
     if (pendingHostTarget === 'passes') {
       setShowGuestPassModal(true);
@@ -292,7 +328,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     } else {
       onHostRoom(pendingHostGameId);
     }
-  };
+  }, [pendingHostTarget, pendingHostGameId, onStartPocket, onHostRoom]);
 
   const filteredGames = useMemo(() => {
     const base = filterGamesByPlayerMode(playerFilter);
@@ -643,7 +679,8 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           <a
             href="#top"
-            className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0 flex items-center gap-2.5"
+            onClick={handleSecretBrandTap}
+            className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0 flex items-center gap-2.5 select-none"
           >
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#FF4D2E] to-[#00C2FF] flex items-center justify-center text-white shadow-[0_0_15px_rgba(255,77,46,0.3)]">
               <Gamepad2 className="w-4 h-4" />
@@ -655,19 +692,10 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
             <LanguageToggle compact className="sm:h-9 sm:px-2.5 sm:text-xs" />
             <button
               type="button"
-              onClick={() => requestHost(undefined, 'passes')}
-              title={t('Friend Guest Passes', '生成访客临时口令')}
-              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-[#151B26] hover:bg-[#1E2636] border border-[#2A354A] text-[#00C2FF] text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <Ticket className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('Guest Passes', '访客口令')}</span>
-            </button>
-            <button
-              type="button"
               onClick={() => requestHost()}
               className="tactile-btn px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 shadow-[0_3px_0_#B82E17] inline-flex items-center gap-1.5 cursor-pointer transition-transform active:translate-y-0.5"
             >
-              <Lock className="w-3.5 h-3.5 text-white/80" />
+              {!publicAccessOpen && <Lock className="w-3.5 h-3.5 text-white/80" />}
               <span>{t('Host Monitor', '开启大屏房间')}</span>
             </button>
           </div>
@@ -686,45 +714,27 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
 
           <h1 className="font-display text-4xl sm:text-6xl lg:text-[4.25rem] font-extrabold tracking-tight leading-[1.08] text-white max-w-4xl text-balance">
             {t(
-              'Turn every phone into a live arcade controller.',
-              '让每部手机秒变实时街机手柄。'
+              'One room. Every phone. Instant party arcade.',
+              '一间房，全员手机开玩。随时开局的派对街机。'
             )}
           </h1>
 
           <p className="mt-6 text-base sm:text-xl text-[#9CA3AF] leading-relaxed max-w-2xl text-balance">
             {t(
-              `Launch a secure room on any laptop or TV browser. Friends scan the QR code with their phones and jump straight into ${totalGamesCount} multiplayer games with adaptive virtual joysticks.`,
-              `在电脑或电视浏览器一键开房，好友手机扫码即刻加入！低延迟实时同步，虚拟摇杆和技能按键会随 ${totalGamesCount} 款不同游戏自动切换。`
+              `Host on any TV or laptop—or launch a room directly on your phone in Pocket Mode. Friends scan a QR code to play ${totalGamesCount} arcade, board, and card games with zero downloads.`,
+              `支持电脑电视大屏开房，也支持手机掌机模式直接当主机。好友扫码无需下载即刻加入，畅玩 ${totalGamesCount} 款街机、桌游与派对卡牌。`
             )}
           </p>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-3.5 sm:gap-4">
+          <div className="mt-10 flex items-center justify-center">
             <button
               type="button"
-              onClick={() => requestHost(undefined, 'host')}
-              className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold text-base shadow-[0_4px_0_#B82E17] whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5"
+              onClick={() => setShowPlayModeModal(true)}
+              className="tactile-btn inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-[#FF4D2E] via-[#FF5E3A] to-[#FF4D2E] hover:brightness-110 text-white font-display font-extrabold text-base sm:text-lg shadow-[0_4px_0_#B82E17,0_12px_30px_rgba(255,77,46,0.28)] whitespace-nowrap cursor-pointer transition-all active:translate-y-0.5"
             >
-              <Lock className="w-5 h-5" />
-              {t('Create Game Room', '创建大屏房间')}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => requestHost(undefined, 'pocket')}
-              className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-extrabold text-base shadow-[0_4px_0_#0A915D] whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5"
-            >
-              <Lock className="w-4 h-4" />
               <Gamepad2 className="w-5 h-5" />
-              {t('Pocket Mode (No Monitor)', '掌机模式（无需大屏）')}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onJoinController()}
-              className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#151B26] hover:bg-[#1E2636] text-white border border-[#2A354A] font-bold text-base whitespace-nowrap cursor-pointer transition-transform active:translate-y-0.5 shadow-lg"
-            >
-              <Smartphone className="w-5 h-5 text-[#00C2FF]" />
-              {t('Join with Phone', '手机加入游戏')}
+              <span>{t('Start Playing', '立即开玩')}</span>
+              <ArrowRight className="w-4 h-4 opacity-90" />
             </button>
           </div>
 
@@ -1254,7 +1264,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
                 onClick={() => requestHost(undefined, 'host')}
                 className="tactile-btn inline-flex items-center gap-2.5 px-8 py-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold text-base shadow-[0_4px_0_#B82E17] cursor-pointer"
               >
-                <Lock className="w-5 h-5" />
+                {!publicAccessOpen && <Lock className="w-5 h-5" />}
                 {t('Create Game Room', '创建游戏房间')}
               </button>
               <button
@@ -1262,7 +1272,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
                 onClick={() => requestHost(undefined, 'pocket')}
                 className="tactile-btn inline-flex items-center gap-2.5 px-7 py-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-extrabold text-base shadow-[0_4px_0_#0A915D] cursor-pointer"
               >
-                <Lock className="w-4 h-4" />
+                {!publicAccessOpen && <Lock className="w-4 h-4" />}
                 <Gamepad2 className="w-5 h-5" />
                 {t('Pocket Mode (No Monitor)', '掌机模式（无需大屏）')}
               </button>
@@ -1273,19 +1283,25 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
 
       <footer className="border-t border-[#1A2230] py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#9CA3AF]">
-          <span>
-            {t(
-              'JoinStick Arcade · Multi-Device Browser Party Console',
-              'JoinStick 街机派对 · 多设备浏览器聚会游戏主机'
-            )}
-          </span>
+          <div className="flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 text-center sm:text-left">
+            <span>
+              {t(
+                'JoinStick Arcade · Multi-Device Browser Party Console',
+                'JoinStick 街机派对 · 多设备浏览器聚会游戏主机'
+              )}
+            </span>
+            <span className="hidden sm:inline text-[#3B4659]">·</span>
+            <span className="text-[#CBD5E1] font-medium">
+              {t('Created by Lucas Lim', '由 Lucas Lim 打造')}
+            </span>
+          </div>
           <div className="flex items-center gap-6">
             <button
               type="button"
               onClick={() => requestHost(undefined, 'host')}
               className="hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5"
             >
-              <Lock className="w-3.5 h-3.5" />
+              {!publicAccessOpen && <Lock className="w-3.5 h-3.5" />}
               <span>{t('Host Monitor', '大屏主机')}</span>
             </button>
             <button
@@ -1293,7 +1309,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
               onClick={() => requestHost(undefined, 'pocket')}
               className="hover:text-[#10D98B] transition-colors cursor-pointer inline-flex items-center gap-1.5"
             >
-              <Lock className="w-3.5 h-3.5" />
+              {!publicAccessOpen && <Lock className="w-3.5 h-3.5" />}
               <span>{t('Pocket Mode', '掌机模式')}</span>
             </button>
             <button
@@ -1307,10 +1323,123 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
         </div>
       </footer>
 
+      {/* Play Mode Selector Modal (Combined from 3 Hero CTAs) */}
+      {showPlayModeModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="play-mode-title"
+          onClick={() => setShowPlayModeModal(false)}
+          className="fixed inset-0 z-50 bg-[#0B0E14]/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-md w-full rounded-3xl bg-[#151B26] border-2 border-[#2A354A] shadow-2xl p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="play-mode-title" className="font-display text-xl font-extrabold text-white">
+                  {t('Choose How to Play', '选择游玩方式')}
+                </h2>
+                <p className="text-xs text-[#9CA3AF] mt-1">
+                  {t('Host on a shared screen, run on your phone, or join a room.', '开启大屏房间、使用掌机模式，或用手机加入好友房间。')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlayModeModal(false)}
+                aria-label={t('Close', '关闭')}
+                className="h-9 w-9 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-[#9CA3AF] hover:text-white flex items-center justify-center shrink-0 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPlayModeModal(false);
+                  requestHost(undefined, 'host');
+                }}
+                className="w-full p-4 rounded-2xl bg-[#FF4D2E]/12 hover:bg-[#FF4D2E]/20 border border-[#FF4D2E]/40 text-left flex items-center justify-between gap-3 cursor-pointer transition-colors"
+              >
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-[#FF4D2E] text-white flex items-center justify-center shrink-0 shadow-[0_3px_0_#B82E17]">
+                    {publicAccessOpen ? (
+                      <Play className="w-5 h-5 fill-current" />
+                    ) : (
+                      <Lock className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-display text-sm font-extrabold text-white">
+                      {t('Create Game Room', '创建大屏房间')}
+                    </div>
+                    <div className="text-xs text-[#9CA3AF] mt-0.5">
+                      {t('Host on TV or laptop · QR code join', '电视或电脑开房 · 好友扫码加入')}
+                    </div>
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-[#FF4D2E] shrink-0" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPlayModeModal(false);
+                  requestHost(undefined, 'pocket');
+                }}
+                className="w-full p-4 rounded-2xl bg-[#10D98B]/12 hover:bg-[#10D98B]/20 border border-[#10D98B]/40 text-left flex items-center justify-between gap-3 cursor-pointer transition-colors"
+              >
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-[#10D98B] text-[#071A12] flex items-center justify-center shrink-0 shadow-[0_3px_0_#0A915D]">
+                    <Gamepad2 className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-display text-sm font-extrabold text-white">
+                      {t('Pocket Mode (No Monitor)', '掌机模式（无需大屏）')}
+                    </div>
+                    <div className="text-xs text-[#9CA3AF] mt-0.5">
+                      {t('Host & play directly on your phone', '手机直接开房并显示游戏画面')}
+                    </div>
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-[#10D98B] shrink-0" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPlayModeModal(false);
+                  onJoinController();
+                }}
+                className="w-full p-4 rounded-2xl bg-[#00C2FF]/10 hover:bg-[#00C2FF]/18 border border-[#00C2FF]/35 text-left flex items-center justify-between gap-3 cursor-pointer transition-colors"
+              >
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-[#1E2636] border border-[#00C2FF]/50 text-[#00C2FF] flex items-center justify-center shrink-0">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-display text-sm font-extrabold text-white">
+                      {t('Join with Phone', '手机加入游戏')}
+                    </div>
+                    <div className="text-xs text-[#9CA3AF] mt-0.5">
+                      {t('Enter a 4-letter room code as controller', '输入 4 位房间码变身无线手柄')}
+                    </div>
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-[#00C2FF] shrink-0" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Server-Verified Master PIN / Disposable Guest Pass Unlock Modal */}
       <HostUnlockModal
         open={showPinModal}
-        target={pendingHostTarget === 'pocket' ? 'pocket' : 'host'}
+        target={pendingHostTarget}
         onClose={() => setShowPinModal(false)}
         onUnlocked={handleHostUnlocked}
       />
@@ -1419,7 +1548,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
                   }}
                   className="tactile-btn h-10 px-4 rounded-xl bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913] font-display font-extrabold text-sm shadow-[0_3px_0_#0A915D] inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Lock className="w-3.5 h-3.5" />
+                  {!publicAccessOpen && <Lock className="w-3.5 h-3.5" />}
                   <span>{t('Pocket Mode', '掌机开玩')}</span>
                 </button>
                 <button
@@ -1431,8 +1560,12 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
                   }}
                   className="tactile-btn h-10 px-5 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-extrabold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
                 >
-                  <Lock className="w-4 h-4" />
-                  <span>{t('Host Room (PIN)', '大屏开玩')}</span>
+                  {!publicAccessOpen && <Lock className="w-4 h-4" />}
+                  <span>
+                    {publicAccessOpen
+                      ? t('Host Room', '大屏开玩')
+                      : t('Host Room (PIN)', '大屏开玩')}
+                  </span>
                 </button>
               </div>
             </div>

@@ -49,6 +49,7 @@ class HostAuthService {
   private readonly revokedTokens = new Set<string>();
   private readonly revokedPassIds = new Set<string>();
   private readonly rateLimits = new Map<string, RateBucket>();
+  private publicAccessOpen = false;
 
   constructor() {
     this.signingSecret =
@@ -65,6 +66,25 @@ class HostAuthService {
 
   public isUsingEnvPin(): boolean {
     return Boolean(this.getEnvPin());
+  }
+
+  public isPublicAccessOpen(): boolean {
+    return this.publicAccessOpen;
+  }
+
+  public setPublicAccess(
+    token: string | null | undefined,
+    open: boolean
+  ): { ok: true; publicAccessOpen: boolean } | { ok: false; status: number; error: string } {
+    const session = this.verifyToken(token);
+    if (!session || session.role !== 'master') {
+      return { ok: false, status: 403, error: 'Master authorization required.' };
+    }
+    if (typeof open !== 'boolean') {
+      return { ok: false, status: 400, error: 'Invalid public access state.' };
+    }
+    this.publicAccessOpen = open;
+    return { ok: true, publicAccessOpen: this.publicAccessOpen };
   }
 
   private normalizeCode(raw: string): string {
@@ -256,7 +276,8 @@ class HostAuthService {
 
   public verifyCode(
     rawCode: string,
-    clientKey: string
+    clientKey: string,
+    opts?: { requireMaster?: boolean }
   ):
     | {
         ok: true;
@@ -267,6 +288,7 @@ class HostAuthService {
         singleUse?: boolean;
       }
     | { ok: false; status: number; error: string } {
+    const requireMaster = Boolean(opts?.requireMaster);
     const rate = this.checkRateLimit(clientKey);
     if (!rate.allowed) {
       return {
@@ -286,7 +308,13 @@ class HostAuthService {
 
     const input = typeof rawCode === 'string' ? rawCode.trim() : '';
     if (!input) {
-      return { ok: false, status: 400, error: 'Enter your Master PIN or Guest Pass.' };
+      return {
+        ok: false,
+        status: 400,
+        error: requireMaster
+          ? 'Enter your Owner Master PIN.'
+          : 'Enter your Master PIN or Guest Pass.',
+      };
     }
 
     // 1. Check Master PIN first
@@ -301,6 +329,15 @@ class HostAuthService {
         exp,
       });
       return { ok: true, token, role: 'master', expiresAt: exp };
+    }
+
+    if (requireMaster) {
+      this.recordFailure(clientKey);
+      return {
+        ok: false,
+        status: 401,
+        error: 'Invalid Owner Master PIN.',
+      };
     }
 
     // 2. Check disposable Guest Pass codes
@@ -362,6 +399,21 @@ class HostAuthService {
 
   public consumeRoomCreation(token?: string | null): { ok: true; session: HostSessionPayload } | { ok: false; error: string } {
     const session = this.verifyToken(token);
+    if (session && session.role === 'master') {
+      return { ok: true, session };
+    }
+    if (this.publicAccessOpen) {
+      const now = Date.now();
+      return {
+        ok: true,
+        session: session ?? {
+          jti: 'public-open',
+          role: 'guest',
+          iat: now,
+          exp: now + SESSION_TTL_MS,
+        },
+      };
+    }
     if (!session) {
       return { ok: false, error: 'Host unlock required. Enter Master PIN or a Guest Pass.' };
     }
@@ -442,7 +494,9 @@ class HostAuthService {
 
   public listGuestPasses(
     token: string | null | undefined
-  ): { ok: true; passes: GuestPassSummary[]; usingEnvPin: boolean } | { ok: false; status: number; error: string } {
+  ):
+    | { ok: true; passes: GuestPassSummary[]; usingEnvPin: boolean; publicAccessOpen: boolean }
+    | { ok: false; status: number; error: string } {
     const session = this.verifyToken(token);
     if (!session || session.role !== 'master') {
       return { ok: false, status: 403, error: 'Master authorization required.' };
@@ -451,7 +505,12 @@ class HostAuthService {
     const passes = Array.from(this.guestPasses.values())
       .sort((a, b) => b.createdAt - a.createdAt)
       .map(({ codeHash: _ignored, ...summary }) => summary);
-    return { ok: true, passes, usingEnvPin: this.isUsingEnvPin() };
+    return {
+      ok: true,
+      passes,
+      usingEnvPin: this.isUsingEnvPin(),
+      publicAccessOpen: this.publicAccessOpen,
+    };
   }
 
   public revokeGuestPass(

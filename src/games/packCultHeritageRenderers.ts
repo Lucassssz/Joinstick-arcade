@@ -21,6 +21,7 @@ import {
   drawShadowOval,
   drawSphere3D,
   drawStudioBackdrop,
+  getActiveCanvasLang,
   shadeHex,
   tCanvas,
 } from './packRenderHelpers';
@@ -48,7 +49,7 @@ function drawFooterBar(
     ctx.fillText(p.name, x + w / 2, ARENA_HEIGHT - 51);
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 13px "JetBrains Mono", monospace';
-    ctx.fillText(`${Math.round(p.score)} PTS${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
+    ctx.fillText(`${tCanvas(`${Math.round(p.score)} PTS`)}${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
     ctx.restore();
   });
 }
@@ -116,7 +117,7 @@ export function renderPegFeverBounce(ctx: CanvasRenderingContext2D, snap: PegFev
   ctx.fillStyle = '#14120B';
   ctx.font = '900 13px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('FREE +110', snap.bucketX, ARENA_HEIGHT - 107);
+  ctx.fillText(tCanvas('FREE +110'), snap.bucketX, ARENA_HEIGHT - 107);
 
   for (const b of snap.balls) {
     drawSphere3D(ctx, b.x, b.y, 12, '#E2E8F0', b.colorHex);
@@ -171,7 +172,7 @@ export function renderHalfpipeSkateCombo(ctx: CanvasRenderingContext2D, snap: Ha
     drawExtrudedBox3D(ctx, -26, -8, 52, 16, 6, p.colorHex, shadeHex(p.colorHex, -0.4), 6);
     ctx.restore();
     drawCharacterPod3D(ctx, p.x, p.y - 16, 16, p.colorHex, 0, p.airborne ? 10 : 2);
-    drawNameplate(ctx, p.x, p.y - 48, p.trickName ? `${p.name}: ${p.trickName}` : `${p.name} (${p.combo}×)`, p.colorHex);
+    drawNameplate(ctx, p.x, p.y - 48, p.trickName ? `${p.name}: ${tCanvas(p.trickName)}` : `${p.name} (${p.combo}×)`, p.colorHex);
   }
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s`, '#00C2FF');
@@ -199,7 +200,7 @@ export function renderFiveSecondMicrogames(ctx: CanvasRenderingContext2D, snap: 
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 20px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('SAW!', snap.hazardX, snap.hazardY + 6);
+    ctx.fillText(tCanvas('SAW!'), snap.hazardX, snap.hazardY + 6);
   }
 
   for (const p of snap.players) {
@@ -209,7 +210,8 @@ export function renderFiveSecondMicrogames(ctx: CanvasRenderingContext2D, snap: 
   }
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s · R${snap.round}`, '#FF3B9A');
-  drawBoardBanner(ctx, `${snap.promptEn} (${snap.microTimer.toFixed(1)}s)`, '#FACC15', 16);
+  const isZh = getActiveCanvasLang() === 'zh';
+  drawBoardBanner(ctx, `${isZh ? snap.promptZh : snap.promptEn} (${snap.microTimer.toFixed(1)}${isZh ? '秒' : 's'})`, '#FACC15', 16);
   drawFooterBar(
     ctx,
     snap.players.map((p) => ({ name: p.name, colorHex: p.colorHex, score: p.score, badge: `${p.wins} ★` }))
@@ -237,7 +239,7 @@ export function renderCorridorFencing(ctx: CanvasRenderingContext2D, snap: Corri
     ctx.lineTo(p.x + p.facing * reach, p.y + stanceOff);
     ctx.stroke();
     ctx.restore();
-    drawNameplate(ctx, p.x, p.y - 34, `${p.name} [${p.stance.toUpperCase()}]`, p.colorHex);
+    drawNameplate(ctx, p.x, p.y - 34, `${p.name} [${tCanvas(p.stance.toUpperCase())}]`, p.colorHex);
   }
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s`, '#EF4444');

@@ -2603,6 +2603,8 @@ export type RoomMode = 'monitor' | 'pocket';
 export interface RoomSnapshot {
   code: string;
   roomMode: RoomMode;
+  stateSeq: number;
+  serverTime: number;
   status: RoomStatus;
   selectedGameId: GameId;
   gameSettingValue: number;
@@ -2649,39 +2651,40 @@ export type ClientMessage =
       preferredColorId?: string;
       avatarId?: string;
     }
-  | { type: 'room:add-bot'; difficulty?: BotDifficulty }
-  | { type: 'room:remove-bot'; botId: string }
-  | { type: 'room:kick-player'; playerId: string }
-  | { type: 'room:set-bot-difficulty'; difficulty: BotDifficulty; botId?: string }
-  | { type: 'room:set-team-mode'; teamMode: TeamMode }
-  | { type: 'room:set-player-team'; playerId: string; teamId: TeamId }
-  | { type: 'room:shuffle-teams' }
-  | { type: 'room:set-host-player'; playerId: string }
-  | { type: 'room:set-mutator'; mutatorId: MutatorId }
-  | { type: 'room:spin-mutator' }
-  | { type: 'room:enter-game-room' }
-  | { type: 'room:return-setup' }
+  | { type: 'room:sync'; knownStateSeq?: number; knownTickSeq?: number }
+  | { type: 'room:add-bot'; difficulty?: BotDifficulty; opId?: string }
+  | { type: 'room:remove-bot'; botId: string; opId?: string }
+  | { type: 'room:kick-player'; playerId: string; opId?: string }
+  | { type: 'room:set-bot-difficulty'; difficulty: BotDifficulty; botId?: string; opId?: string }
+  | { type: 'room:set-team-mode'; teamMode: TeamMode; opId?: string }
+  | { type: 'room:set-player-team'; playerId: string; teamId: TeamId; opId?: string }
+  | { type: 'room:shuffle-teams'; opId?: string }
+  | { type: 'room:set-host-player'; playerId: string; opId?: string }
+  | { type: 'room:set-mutator'; mutatorId: MutatorId; opId?: string }
+  | { type: 'room:spin-mutator'; opId?: string }
+  | { type: 'room:enter-game-room'; opId?: string }
+  | { type: 'room:return-setup'; opId?: string }
   | { type: 'room:close' }
-  | { type: 'lobby:filter'; filter: PlayerFilterMode }
+  | { type: 'lobby:filter'; filter: PlayerFilterMode; opId?: string }
   | { type: 'room:layout'; gameCols: number; actionCols: number }
   | { type: 'remote:action'; action: RemoteDirection }
-  | { type: 'player:ready'; ready: boolean }
-  | { type: 'player:set-avatar'; avatarId: string }
-  | { type: 'player:set-team'; teamId: TeamId }
+  | { type: 'player:ready'; ready: boolean; opId?: string }
+  | { type: 'player:set-avatar'; avatarId: string; opId?: string }
+  | { type: 'player:set-team'; teamId: TeamId; opId?: string }
   | { type: 'player:emote'; emoji: string }
   | { type: 'player:leave' }
-  | { type: 'game:select'; gameId: GameId; settingValue?: number }
-  | { type: 'game:start' }
-  | { type: 'game:dismiss-briefing' }
-  | { type: 'game:pause'; paused: boolean }
-  | { type: 'game:restart' }
-  | { type: 'game:return-lobby' }
-  | { type: 'tournament:start' }
-  | { type: 'tournament:vote'; gameId: GameId }
-  | { type: 'tournament:force-lock-vote' }
-  | { type: 'tournament:next' }
-  | { type: 'tournament:exit' }
-  | { type: 'card:action'; action: CardClientAction }
+  | { type: 'game:select'; gameId: GameId; settingValue?: number; opId?: string }
+  | { type: 'game:start'; opId?: string }
+  | { type: 'game:dismiss-briefing'; opId?: string }
+  | { type: 'game:pause'; paused: boolean; opId?: string }
+  | { type: 'game:restart'; opId?: string }
+  | { type: 'game:return-lobby'; opId?: string }
+  | { type: 'tournament:start'; opId?: string }
+  | { type: 'tournament:vote'; gameId: GameId; opId?: string }
+  | { type: 'tournament:force-lock-vote'; opId?: string }
+  | { type: 'tournament:next'; opId?: string }
+  | { type: 'tournament:exit'; opId?: string }
+  | { type: 'card:action'; action: CardClientAction; opId?: string }
   | { type: 'controller:input'; input: ControllerInput }
   | {
       type: 'host:ui-haptic';
@@ -2751,6 +2754,7 @@ export type ServerMessage =
   | { type: 'room:created'; code: string; hostToken: string; room: RoomSnapshot }
   | { type: 'room:joined'; playerId: string; room: RoomSnapshot }
   | { type: 'room:snapshot'; room: RoomSnapshot }
+  | { type: 'room:ack'; opId: string; stateSeq: number; accepted: boolean }
   | {
       type: 'room:emote';
       id: string;
@@ -2763,9 +2767,10 @@ export type ServerMessage =
       type: 'game:tick';
       snapshot: GameSnapshot;
       competitive?: CompetitiveSnapshot;
+      tickSeq?: number;
       sounds: SoundEvent[];
     }
-  | { type: 'player:card-state'; cardState: CardPrivateState | null }
+  | { type: 'player:card-state'; cardState: CardPrivateState | null; seq?: number }
   | {
       type: 'player:haptic';
       pattern: number | number[];

@@ -55,7 +55,7 @@ function drawFooterBar(
     ctx.fillText(p.name, x + w / 2, ARENA_HEIGHT - 51);
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 13px "JetBrains Mono", monospace';
-    ctx.fillText(`${Math.round(p.score)} PTS${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
+    ctx.fillText(`${tCanvas(`${Math.round(p.score)} PTS`)}${p.badge ? ` · ${tCanvas(p.badge)}` : ''}`, x + w / 2, ARENA_HEIGHT - 30);
     ctx.restore();
   });
 }
@@ -81,7 +81,7 @@ export function renderMosaicTileDraft(ctx: CanvasRenderingContext2D, snap: Mosai
     ctx.fillStyle = '#CBD5E1';
     ctx.font = '800 12px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`PLATE ${idx + 1}`, px, py - 52);
+    ctx.fillText(tCanvas(`PLATE ${idx + 1}`), px, py - 52);
     ctx.restore();
 
     fac.tiles.forEach((t, ti) => {
@@ -98,7 +98,7 @@ export function renderMosaicTileDraft(ctx: CanvasRenderingContext2D, snap: Mosai
       ctx.beginPath();
       ctx.arc(px, py, 82 + ci * 7, 0, Math.PI * 2);
       ctx.stroke();
-      drawNameplate(ctx, px, py + 92 + ci * 20, `${p.name} (${p.pickColor.toUpperCase()})`, p.colorHex);
+      drawNameplate(ctx, px, py + 92 + ci * 20, `${p.name} (${tCanvas(p.pickColor.toUpperCase())})`, p.colorHex);
       ctx.restore();
     });
   });
@@ -310,7 +310,7 @@ export function renderCamelStackDerby(ctx: CanvasRenderingContext2D, snap: Camel
     ctx.fillStyle = isFinish ? '#14120B' : '#FEF3C7';
     ctx.font = '900 14px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(isFinish ? 'FINISH' : `${i + 1}`, tx + tileW / 2, 404);
+    ctx.fillText(isFinish ? tCanvas('FINISH') : `${i + 1}`, tx + tileW / 2, 404);
   }
 
   const ordered = [...snap.camels].sort((a, b) => a.stackOrder - b.stackOrder);
@@ -321,7 +321,7 @@ export function renderCamelStackDerby(ctx: CanvasRenderingContext2D, snap: Camel
     ctx.fillStyle = '#0F172A';
     ctx.font = '900 12px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(c.name.split(' ')[0], cx, cy + 5);
+    ctx.fillText(tCanvas(c.name.split(' ')[0]), cx, cy + 5);
   }
 
   if (snap.lastRollText) {
@@ -415,13 +415,13 @@ export function renderGemEngineGuild(ctx: CanvasRenderingContext2D, snap: GemEng
     ctx.fillStyle = accent;
     ctx.font = '900 15px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`TIER ${m.tier} · ${m.color.toUpperCase()}`, x + 18, y + 34);
+    ctx.fillText(tCanvas(`TIER ${m.tier} · ${m.color.toUpperCase()}`), x + 18, y + 34);
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 32px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(`+${m.pts} PTS`, x + 18, y + 86);
+    ctx.fillText(tCanvas(`+${m.pts} PTS`), x + 18, y + 86);
     ctx.fillStyle = '#CBD5E1';
     ctx.font = '800 15px "JetBrains Mono", monospace';
-    ctx.fillText(`COST: ${m.cost} GEMS`, x + 18, y + 126);
+    ctx.fillText(tCanvas(`COST: ${m.cost} GEMS`), x + 18, y + 126);
     ctx.restore();
   });
 
@@ -476,7 +476,7 @@ export function renderHexIslandSettlers(ctx: CanvasRenderingContext2D, snap: Hex
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 18px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(h.resource.toUpperCase(), h.x, h.y - 26);
+    ctx.fillText(tCanvas(h.resource.toUpperCase()), h.x, h.y - 26);
     drawSphere3D(ctx, h.x, h.y + 6, 22, '#0F172A', '#FACC15');
     ctx.fillStyle = '#FACC15';
     ctx.font = '900 18px "JetBrains Mono", monospace';
@@ -495,7 +495,7 @@ export function renderHexIslandSettlers(ctx: CanvasRenderingContext2D, snap: Hex
     ctx.beginPath();
     ctx.arc(h.x, h.y, 64 + idx * 6, 0, Math.PI * 2);
     ctx.stroke();
-    drawNameplate(ctx, h.x, h.y - 54 - idx * 18, `${p.name} (${p.resources} RES)`, p.colorHex);
+    drawNameplate(ctx, h.x, h.y - 54 - idx * 18, `${p.name} (${tCanvas(`${p.resources} RES`)})`, p.colorHex);
     ctx.restore();
   });
 
@@ -551,7 +551,7 @@ export function renderHexInsectChess(ctx: CanvasRenderingContext2D, snap: HexIns
     ctx.beginPath();
     ctx.arc(cx, cy, 34, 0, Math.PI * 2);
     ctx.stroke();
-    drawNameplate(ctx, cx, cy - 40, `${p.name} · ${p.pickBug.toUpperCase()}`, p.colorHex);
+    drawNameplate(ctx, cx, cy - 40, `${p.name} · ${tCanvas(p.pickBug.toUpperCase())}`, p.colorHex);
     ctx.restore();
   }
 
@@ -591,7 +591,7 @@ export function renderSecretRankFlags(ctx: CanvasRenderingContext2D, snap: Secre
     ctx.font = '900 13px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(u.revealedRank ? u.revealedRank.slice(0, 7).toUpperCase() : 'SECRET', cx, cy - 3);
+    ctx.fillText(tCanvas(u.revealedRank ? u.revealedRank.slice(0, 7).toUpperCase() : 'SECRET'), cx, cy - 3);
   }
 
   drawHudChip(ctx, 24, 22, `${Math.ceil(snap.timeLeft)}s`, '#EF4444');

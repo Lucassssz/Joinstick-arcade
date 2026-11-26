@@ -46,6 +46,7 @@ async function startServer() {
     res.json({
       masterConfigured: hostAuth.isMasterConfigured(),
       usingEnvPin: hostAuth.isUsingEnvPin(),
+      publicAccessOpen: hostAuth.isPublicAccessOpen(),
     });
   });
 
@@ -63,7 +64,8 @@ async function startServer() {
   app.post('/api/host-auth/verify', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const code = typeof req.body?.code === 'string' ? req.body.code : '';
-    const result = hostAuth.verifyCode(code, getClientKey(req));
+    const requireMaster = req.body?.requireMaster === true;
+    const result = hostAuth.verifyCode(code, getClientKey(req), { requireMaster });
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
@@ -119,6 +121,20 @@ async function startServer() {
       return;
     }
     res.json({ ok: true });
+  });
+
+  app.post('/api/host-auth/public-access', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (typeof req.body?.open !== 'boolean') {
+      res.status(400).json({ error: 'Invalid open flag. Expected boolean.' });
+      return;
+    }
+    const result = hostAuth.setPublicAccess(extractBearer(req), req.body.open);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json(result);
   });
 
   app.get('/api/demo-snapshot/:gameId', async (req, res) => {
