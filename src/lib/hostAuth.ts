@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { GameId, RoomMode, RoomStatus } from '../shared/types';
 
 export type HostAuthRole = 'master' | 'guest';
 export type GuestPassMode = 'single-use' | 'timed';
@@ -28,6 +29,57 @@ export interface GuestPassSummary {
   expiresAt: number;
   revoked: boolean;
   usedAt: number | null;
+}
+
+export interface RoomActivityEvent {
+  id: string;
+  roomCode: string;
+  timestamp: number;
+  kind:
+    | 'room-created'
+    | 'player-joined'
+    | 'player-left'
+    | 'lobby'
+    | 'game-selected'
+    | 'match-started'
+    | 'match-finished'
+    | 'room-closed';
+  summaryEn: string;
+  summaryZh: string;
+}
+
+export interface OwnerRoomPlayerSummary {
+  id: string;
+  name: string;
+  colorHex: string;
+  isBot: boolean;
+  connected: boolean;
+  ready: boolean;
+  isHost: boolean;
+  score: number;
+}
+
+export interface OwnerActiveRoomSummary {
+  code: string;
+  roomMode: RoomMode;
+  status: RoomStatus;
+  selectedGameId: GameId;
+  createdAt: number;
+  lastActivityAt: number;
+  matchElapsedSec: number;
+  hostConnected: boolean;
+  playerCount: number;
+  humanCount: number;
+  connectedHumanCount: number;
+  botCount: number;
+  players: OwnerRoomPlayerSummary[];
+  activity: RoomActivityEvent[];
+}
+
+export interface OwnerRoomsDashboard {
+  rooms: OwnerActiveRoomSummary[];
+  recentActivity: RoomActivityEvent[];
+  serverTime: number;
 }
 
 // Held strictly in JS/React memory (never written to localStorage/sessionStorage).
@@ -283,5 +335,38 @@ export async function changeMasterPin(newPin: string): Promise<void> {
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(data.error || 'Failed to update PIN');
+  }
+}
+
+export async function fetchOwnerRoomsDashboard(): Promise<OwnerRoomsDashboard> {
+  const token = getHostAuthToken();
+  if (!token) throw new Error('Master session required');
+  const res = await fetch('/api/owner/rooms', {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  const data = (await res.json().catch(() => ({}))) as Partial<OwnerRoomsDashboard> & {
+    error?: string;
+  };
+  if (!res.ok || !Array.isArray(data.rooms)) {
+    throw new Error(data.error || 'Failed to load active rooms');
+  }
+  return {
+    rooms: data.rooms,
+    recentActivity: Array.isArray(data.recentActivity) ? data.recentActivity : [],
+    serverTime: typeof data.serverTime === 'number' ? data.serverTime : Date.now(),
+  };
+}
+
+export async function closeActiveRoomByOwner(code: string): Promise<void> {
+  const token = getHostAuthToken();
+  if (!token) throw new Error('Master session required');
+  const res = await fetch(`/api/owner/rooms/${encodeURIComponent(code.trim().toUpperCase())}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || 'Failed to close room');
   }
 }

@@ -137,6 +137,36 @@ async function startServer() {
     res.json(result);
   });
 
+  app.get('/api/owner/rooms', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const session = hostAuth.verifyToken(extractBearer(req));
+    if (!session || session.role !== 'master') {
+      res.status(403).json({ error: 'Master authorization required.' });
+      return;
+    }
+    res.json(roomManager.getOwnerDashboardSnapshot());
+  });
+
+  app.delete('/api/owner/rooms/:code', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const session = hostAuth.verifyToken(extractBearer(req));
+    if (!session || session.role !== 'master') {
+      res.status(403).json({ error: 'Master authorization required.' });
+      return;
+    }
+    const rawCode = typeof req.params.code === 'string' ? req.params.code.trim().toUpperCase() : '';
+    if (!/^[A-Z0-9]{4,8}$/.test(rawCode)) {
+      res.status(400).json({ error: 'Invalid room code.' });
+      return;
+    }
+    const closed = roomManager.closeRoomByOwner(rawCode);
+    if (!closed) {
+      res.status(404).json({ error: 'Active room not found.' });
+      return;
+    }
+    res.json({ ok: true, code: rawCode });
+  });
+
   app.get('/api/demo-snapshot/:gameId', async (req, res) => {
     const gameId = req.params.gameId as GameId;
     try {

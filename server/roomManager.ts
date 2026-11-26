@@ -160,6 +160,57 @@ function createHostHapticTracker(): HostHapticTracker {
   };
 }
 
+export interface RoomActivityEvent {
+  id: string;
+  roomCode: string;
+  timestamp: number;
+  kind:
+    | 'room-created'
+    | 'player-joined'
+    | 'player-left'
+    | 'lobby'
+    | 'game-selected'
+    | 'match-started'
+    | 'match-finished'
+    | 'room-closed';
+  summaryEn: string;
+  summaryZh: string;
+}
+
+export interface OwnerRoomPlayerSummary {
+  id: string;
+  name: string;
+  colorHex: string;
+  isBot: boolean;
+  connected: boolean;
+  ready: boolean;
+  isHost: boolean;
+  score: number;
+}
+
+export interface OwnerActiveRoomSummary {
+  code: string;
+  roomMode: RoomMode;
+  status: RoomStatus;
+  selectedGameId: GameId;
+  createdAt: number;
+  lastActivityAt: number;
+  matchElapsedSec: number;
+  hostConnected: boolean;
+  playerCount: number;
+  humanCount: number;
+  connectedHumanCount: number;
+  botCount: number;
+  players: OwnerRoomPlayerSummary[];
+  activity: RoomActivityEvent[];
+}
+
+export interface OwnerRoomsDashboardSnapshot {
+  rooms: OwnerActiveRoomSummary[];
+  recentActivity: RoomActivityEvent[];
+  serverTime: number;
+}
+
 interface RoomRecord {
   code: string;
   roomMode: RoomMode;
@@ -198,6 +249,7 @@ interface RoomRecord {
   lastCardStateHashes: Map<string, string>;
   hapticTracker: HostHapticTracker;
   rankings: RankingEntry[];
+  activityLog: RoomActivityEvent[];
   createdAt: number;
   lastActivityAt: number;
   tickInterval: ReturnType<typeof setInterval> | null;
@@ -238,12 +290,92 @@ export class RoomManager {
   private bindings = new Map<WebSocket, SocketBinding>();
   private socketAlive = new Map<WebSocket, boolean>();
   private socketLastSeen = new Map<WebSocket, number>();
+  private globalActivityLog: RoomActivityEvent[] = [];
   private cleanupInterval: ReturnType<typeof setInterval>;
   private heartbeatInterval: ReturnType<typeof setInterval>;
 
   constructor() {
     this.cleanupInterval = setInterval(() => this.pruneExpired(), 2_000);
     this.heartbeatInterval = setInterval(() => this.checkHeartbeats(), WS_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private recordActivity(
+    roomCode: string,
+    kind: RoomActivityEvent['kind'],
+    summaryEn: string,
+    summaryZh: string,
+    room?: RoomRecord
+  ): void {
+    const evt: RoomActivityEvent = {
+      id: crypto.randomUUID(),
+      roomCode,
+      timestamp: Date.now(),
+      kind,
+      summaryEn,
+      summaryZh,
+    };
+    if (room) {
+      room.activityLog.unshift(evt);
+      if (room.activityLog.length > 25) {
+        room.activityLog.length = 25;
+      }
+    }
+    this.globalActivityLog.unshift(evt);
+    if (this.globalActivityLog.length > 60) {
+      this.globalActivityLog.length = 60;
+    }
+  }
+
+  public getOwnerDashboardSnapshot(): OwnerRoomsDashboardSnapshot {
+    const rooms: OwnerActiveRoomSummary[] = Array.from(this.rooms.values())
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+      .map((room) => {
+        const players: OwnerRoomPlayerSummary[] = Array.from(room.players.values())
+          .sort((a, b) => a.slotIndex - b.slotIndex)
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            colorHex: p.color.hex,
+            isBot: p.isBot,
+            connected: p.connected,
+            ready: p.ready,
+            isHost: room.hostPlayerId === p.id,
+            score: Math.round(p.score),
+          }));
+        const humans = players.filter((p) => !p.isBot);
+        const connectedHumans = humans.filter((p) => p.connected);
+        const bots = players.filter((p) => p.isBot);
+        return {
+          code: room.code,
+          roomMode: room.roomMode,
+          status: room.status,
+          selectedGameId: room.selectedGameId,
+          createdAt: room.createdAt,
+          lastActivityAt: room.lastActivityAt,
+          matchElapsedSec: Math.round(room.matchElapsedSec),
+          hostConnected: room.roomMode === 'monitor' ? Boolean(room.hostWs) : connectedHumans.length > 0,
+          playerCount: players.length,
+          humanCount: humans.length,
+          connectedHumanCount: connectedHumans.length,
+          botCount: bots.length,
+          players,
+          activity: room.activityLog.slice(0, 15),
+        };
+      });
+
+    return {
+      rooms,
+      recentActivity: this.globalActivityLog.slice(0, 30),
+      serverTime: Date.now(),
+    };
+  }
+
+  public closeRoomByOwner(code: string): boolean {
+    const normalized = code.trim().toUpperCase();
+    const room = this.rooms.get(normalized);
+    if (!room) return false;
+    this.closeRoom(room, 'This room was closed by the platform owner.');
+    return true;
   }
 
   public dispose(): void {
@@ -988,6 +1120,7 @@ export class RoomManager {
           lastCardStateHashes: new Map(),
           hapticTracker: createHostHapticTracker(),
           rankings: [],
+          activityLog: [],
           createdAt: Date.now(),
           lastActivityAt: Date.now(),
           tickInterval: null,
@@ -997,6 +1130,13 @@ export class RoomManager {
 
         this.rooms.set(code, room);
         this.bindings.set(ws, { role: 'host', roomCode: code });
+        this.recordActivity(
+          code,
+          'room-created',
+          `Host Monitor room ${code} created (${meta.name})`,
+          `大屏房间 ${code} 已创建（${meta.name}）`,
+          room
+        );
         this.send(ws, {
           type: 'room:created',
           code,
@@ -1074,6 +1214,7 @@ export class RoomManager {
           lastCardStateHashes: new Map(),
           hapticTracker: createHostHapticTracker(),
           rankings: [],
+          activityLog: [],
           createdAt: Date.now(),
           lastActivityAt: Date.now(),
           tickInterval: null,
@@ -1122,6 +1263,13 @@ export class RoomManager {
         room.hostPlayerId = playerId;
         this.rooms.set(code, room);
         this.bindings.set(ws, { role: 'player', roomCode: code, playerId });
+        this.recordActivity(
+          code,
+          'room-created',
+          `Pocket Mode room ${code} created by ${cleanName}`,
+          `${cleanName} 创建了掌机房间 ${code}`,
+          room
+        );
         this.send(ws, {
           type: 'room:joined',
           playerId,
@@ -1385,6 +1533,13 @@ export class RoomManager {
         }
 
         room.stateSeq += 1;
+        this.recordActivity(
+          room.code,
+          'player-joined',
+          `${player.name} joined Room ${room.code}`,
+          `${player.name} 加入了房间 ${room.code}`,
+          room
+        );
         this.send(ws, {
           type: 'room:joined',
           playerId,
@@ -1642,6 +1797,13 @@ export class RoomManager {
           p.prevB = false;
         }
         room.lastActivityAt = Date.now();
+        this.recordActivity(
+          room.code,
+          'lobby',
+          `Entered Game Room lobby (${room.players.size} players)`,
+          `进入游戏大厅（当前 ${room.players.size} 名玩家）`,
+          room
+        );
         this.playHostSound(room, 'confirm');
         this.broadcastHapticToRoom(room, {
           pattern: [22, 28, 34],
@@ -1850,6 +2012,13 @@ export class RoomManager {
           room.remoteFocus = { ...room.remoteFocus, zone: 'games', index: gameIdx };
         }
         room.lastActivityAt = Date.now();
+        this.recordActivity(
+          room.code,
+          'game-selected',
+          `Selected game: ${meta.name}`,
+          `切换游戏：${meta.name}`,
+          room
+        );
         this.playHostSound(room, 'nav');
         this.broadcastRoom(room);
         return;
@@ -3263,6 +3432,14 @@ export class RoomManager {
     }
     room.rankings = [];
     room.lastActivityAt = Date.now();
+    const startedMeta = getGameMeta(room.selectedGameId);
+    this.recordActivity(
+      room.code,
+      'match-started',
+      `Started match: ${startedMeta.name} (${room.players.size} players)`,
+      `开始对局：${startedMeta.name}（${room.players.size} 人）`,
+      room
+    );
     this.pushCardStates(room, undefined, true);
 
     if (showBriefing) {
@@ -3638,6 +3815,14 @@ export class RoomManager {
         room.frenzy.freezing = false;
         room.remoteFocus.modalIndex = 0;
         this.clearCardStates(room);
+        const finishedMeta = getGameMeta(room.selectedGameId);
+        this.recordActivity(
+          room.code,
+          'match-finished',
+          `Finished match: ${finishedMeta.name}`,
+          `对局结束：${finishedMeta.name}`,
+          room
+        );
 
         const baseRankings = result.rankings ?? engine.getRankings(room.gameState, currentInputs);
         const anyBonus = [...room.players.values()].some((p) => p.bonusScore > 0);
@@ -4222,6 +4407,17 @@ export class RoomManager {
   private closeRoom(room: RoomRecord, reason: string): void {
     this.stopGameLoop(room);
     const closedMsg: ServerMessage = { type: 'room:closed', reason };
+    const closedByOwner = reason.toLowerCase().includes('platform owner');
+    this.recordActivity(
+      room.code,
+      'room-closed',
+      closedByOwner
+        ? `Room ${room.code} closed manually by Owner`
+        : `Room ${room.code} closed (${reason})`,
+      closedByOwner
+        ? `房间 ${room.code} 已被房主手动关闭`
+        : `房间 ${room.code} 已关闭`
+    );
 
     if (room.hostWs) {
       this.send(room.hostWs, closedMsg);
