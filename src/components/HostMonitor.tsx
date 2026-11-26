@@ -29,6 +29,7 @@ import {
   Shuffle,
   Smartphone,
   Sparkles,
+  Ticket,
   Trophy,
   Users,
   Volume2,
@@ -91,7 +92,14 @@ import { createRenderFxState, renderGameSnapshot } from '../games/renderers';
 import { preloadGameRenderer } from '../games/rendererRegistry';
 import { getStylizedGameThumbnail } from '../games/thumbnailGenerator';
 import { ChaosWheelModal } from './ChaosWheelModal';
+import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
 import { TestControllerDrawer } from './TestControllerDrawer';
+import {
+  clearHostAuthSession,
+  consumeGuestSingleUseTokenLocally,
+  getHostAuthToken,
+  useHostAuthSession,
+} from '../lib/hostAuth';
 
 interface HostMonitorProps {
   initialGameId?: GameId;
@@ -148,6 +156,9 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [isClosingRoom, setIsClosingRoom] = useState(false);
   const [chaosWheelOpen, setChaosWheelOpen] = useState(false);
+  const authSession = useHostAuthSession();
+  const [hostUnlockNeeded, setHostUnlockNeeded] = useState(false);
+  const [guestPassOpen, setGuestPassOpen] = useState(false);
   const [rankShifts, setRankShifts] = useState<Record<string, number>>({});
   const [cardFlipDir, setCardFlipDir] = useState<1 | -1>(1);
   const [lobbySearchQuery, setLobbySearchQuery] = useState('');
@@ -345,7 +356,13 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           hostToken: saved.hostToken,
         });
       } else {
-        sock.send({ type: 'room:create', preferredGameId: initialGameId });
+        const authToken = getHostAuthToken();
+        if (!authToken) {
+          clearReattachRetry();
+          setHostUnlockNeeded(true);
+          return;
+        }
+        sock.send({ type: 'room:create', preferredGameId: initialGameId, authToken });
       }
       // Safety net: if the attach/create confirmation doesn't arrive within 3s while socket is open, retry automatically
       clearReattachRetry();
@@ -359,7 +376,12 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               hostToken: retrySaved.hostToken,
             });
           } else if (!roomRef.current) {
-            sock.send({ type: 'room:create', preferredGameId: initialGameId });
+            const retryAuthToken = getHostAuthToken();
+            if (!retryAuthToken) {
+              setHostUnlockNeeded(true);
+              return;
+            }
+            sock.send({ type: 'room:create', preferredGameId: initialGameId, authToken: retryAuthToken });
           }
         }
       }, 3_000);
@@ -381,6 +403,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         switch (msg.type) {
           case 'room:created':
             clearReattachRetry();
+            consumeGuestSingleUseTokenLocally();
+            setHostUnlockNeeded(false);
             saveHostSession(msg.code, msg.hostToken);
             setRoom(msg.room);
             setErrorMsg(null);
@@ -474,6 +498,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
               clearTimeout(closeFallbackTimerRef.current);
               closeFallbackTimerRef.current = null;
             }
+            exitMonitorFullscreen();
             clearHostSession();
             onExit();
             break;
@@ -481,7 +506,17 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             if (msg.code === 'ROOM_NOT_FOUND') {
               clearReattachRetry();
               clearHostSession();
-              socket.send({ type: 'room:create', preferredGameId: initialGameId });
+              const authToken = getHostAuthToken();
+              if (authToken) {
+                socket.send({ type: 'room:create', preferredGameId: initialGameId, authToken });
+              } else {
+                setHostUnlockNeeded(true);
+              }
+            } else if (msg.code === 'HOST_AUTH_REQUIRED') {
+              clearReattachRetry();
+              clearHostAuthSession();
+              setHostUnlockNeeded(true);
+              setErrorMsg(msg.message);
             } else {
               setErrorMsg(msg.message);
             }
@@ -641,19 +676,31 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     }
   };
 
+  const exitMonitorFullscreen = () => {
+    if (typeof document === 'undefined') return;
+    userExitedFullscreenRef.current = true;
+    try {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element;
+        webkitExitFullscreen?: () => Promise<void> | void;
+      };
+      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().catch(() => {});
+      } else if (doc.webkitFullscreenElement && typeof doc.webkitExitFullscreen === 'function') {
+        doc.webkitExitFullscreen();
+      }
+    } catch {
+      // Ignore exit errors
+    }
+  };
+
   const toggleMonitorFullscreen = () => {
     if (typeof document === 'undefined') return;
     const doc = document as Document & {
       webkitFullscreenElement?: Element;
-      webkitExitFullscreen?: () => Promise<void> | void;
     };
     if (document.fullscreenElement || doc.webkitFullscreenElement) {
-      userExitedFullscreenRef.current = true;
-      if (typeof document.exitFullscreen === 'function') {
-        document.exitFullscreen().catch(() => {});
-      } else if (typeof doc.webkitExitFullscreen === 'function') {
-        doc.webkitExitFullscreen();
-      }
+      exitMonitorFullscreen();
     } else {
       userExitedFullscreenRef.current = false;
       enterMonitorFullscreen();
@@ -1148,6 +1195,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   }, []);
 
   const handleLeaveHost = () => {
+    exitMonitorFullscreen();
     clearHostSession();
     onExit();
   };
@@ -1156,6 +1204,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     if (isClosingRoom) return;
     setIsClosingRoom(true);
     setCloseConfirmOpen(false);
+    exitMonitorFullscreen();
     clearHostSession();
     if (wsRef.current && wsConnected) {
       wsRef.current.send({ type: 'room:close' });
@@ -1186,11 +1235,29 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           <span className="sr-only">{t('Loading', '加载中')}</span>
         </div>
         <div className="font-display text-2xl font-bold text-center">
-          {t('Creating Game Room...', '正在创建游戏房间...')}
+          {hostUnlockNeeded
+            ? t('Host Access Required', '需要房主验证')
+            : t('Creating Game Room...', '正在创建游戏房间...')}
         </div>
         <p className="mt-2 text-sm text-[#9CA3AF] text-center">
-          {t('Connecting to live multiplayer server', '正在连接实时多人服务器')}
+          {hostUnlockNeeded
+            ? t('Enter your Master PIN or a Friend Guest Pass to open a room', '请输入房主管理密码或访客临时口令以创建房间')
+            : t('Connecting to live multiplayer server', '正在连接实时多人服务器')}
         </p>
+
+        <HostUnlockModal
+          open={hostUnlockNeeded}
+          target="host"
+          onClose={handleLeaveHost}
+          onUnlocked={() => {
+            setHostUnlockNeeded(false);
+            setErrorMsg(null);
+            const tok = getHostAuthToken();
+            if (tok && wsRef.current?.isConnected()) {
+              wsRef.current.send({ type: 'room:create', preferredGameId: initialGameId, authToken: tok });
+            }
+          }}
+        />
       </div>
     );
   }
@@ -1324,6 +1391,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           </div>
         )}
       </AnimatePresence>
+
+      <GuestPassManagerModal open={guestPassOpen} onClose={() => setGuestPassOpen(false)} />
     </>
   );
 
@@ -1387,6 +1456,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
               {audioUnlockButton}
               <LanguageToggle compact className="h-9 sm:h-10 sm:px-3" />
+
+              {authSession?.role === 'master' && (
+                <button
+                  type="button"
+                  onClick={() => setGuestPassOpen(true)}
+                  title={t('Friend Guest Passes', '访客临时口令')}
+                  className="h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-xl bg-[#1E232D] hover:bg-[#242A36] border border-[#00C2FF]/45 text-xs sm:text-sm font-bold text-[#7DE3FF] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Ticket className="w-4 h-4" />
+                  <span className="hidden sm:inline">{t('Guest Passes', '访客口令')}</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -1683,11 +1764,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                 <motion.div
                   animate={{ scale: [1, 1.06, 1] }}
                   transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
-                  className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#1A1E26] border border-[#2A303D] text-[#00C2FF] mb-4"
+                  className="mx-auto flex items-center justify-center w-16 h-16 rounded-2xl bg-[#1A1E26] border border-[#2A303D] text-[#00C2FF] mb-5"
                 >
                   <Smartphone className="w-8 h-8" />
                 </motion.div>
-                <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white inline-flex items-center justify-center gap-2.5">
+                <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white flex items-center justify-center gap-3">
                   <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 text-[#00C2FF] animate-spin shrink-0" aria-hidden="true" />
                   <span>{t('Waiting for players to join...', '等待玩家加入...')}</span>
                 </h2>
@@ -2000,6 +2081,18 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto sm:ml-0">
             {audioUnlockButton}
             <LanguageToggle compact className="h-8 sm:h-9" />
+
+            {authSession?.role === 'master' && (
+              <button
+                type="button"
+                onClick={() => setGuestPassOpen(true)}
+                title={t('Friend Guest Passes', '访客临时口令')}
+                className="h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg bg-[#1E232D] hover:bg-[#242A36] border border-[#00C2FF]/45 text-xs font-bold text-[#7DE3FF] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+              >
+                <Ticket className="w-3.5 h-3.5" />
+                <span className="hidden xl:inline">{t('Guest Passes', '访客口令')}</span>
+              </button>
+            )}
 
             <button
               type="button"

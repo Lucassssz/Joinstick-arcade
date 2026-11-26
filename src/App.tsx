@@ -60,7 +60,40 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  const exitBrowserFullscreen = () => {
+    if (typeof document === 'undefined') return;
+    try {
+      const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
+      orientation?.unlock?.();
+    } catch {
+      // Ignore orientation unlock errors
+    }
+    try {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element;
+        webkitExitFullscreen?: () => Promise<void> | void;
+        msExitFullscreen?: () => Promise<void> | void;
+      };
+      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().catch(() => {});
+      } else if (doc.webkitFullscreenElement && typeof doc.webkitExitFullscreen === 'function') {
+        doc.webkitExitFullscreen();
+      } else if (typeof doc.msExitFullscreen === 'function') {
+        doc.msExitFullscreen();
+      }
+    } catch {
+      // Ignore exitFullscreen errors
+    }
+  };
+
+  useEffect(() => {
+    if (mode === 'landing') {
+      exitBrowserFullscreen();
+    }
+  }, [mode]);
+
   const navigateHome = () => {
+    exitBrowserFullscreen();
     const url = new URL(window.location.href);
     url.search = '';
     window.history.replaceState({}, '', url.toString());

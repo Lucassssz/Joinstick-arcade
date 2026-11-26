@@ -23,6 +23,7 @@ import {
   HelpCircle,
   Home,
   Loader2,
+  Lock,
   LogOut,
   Maximize2,
   Minimize2,
@@ -37,6 +38,7 @@ import {
   RotateCcw,
   Share2,
   Shield,
+  ShieldCheck,
   SlidersHorizontal,
   Smile,
   Sparkles,
@@ -105,6 +107,16 @@ import {
 } from '../shared/types';
 import { ManagedWebSocket, SocketStatus } from '../lib/ws';
 import { shareRoomInvite } from '../lib/shareInvite';
+import {
+  claimInitialMasterPin,
+  clearHostAuthSession,
+  consumeGuestSingleUseTokenLocally,
+  fetchHostAuthStatus,
+  getHostAuthToken,
+  useHostAuthSession,
+  verifyHostCode,
+  type HostAuthStatus,
+} from '../lib/hostAuth';
 import {
   getLocalizedDifficulty,
   getLocalizedFilterLabel,
@@ -529,16 +541,28 @@ export function PhoneController({
   const [entryMode, setEntryMode] = useState<'join' | 'pocket'>(() =>
     initialRoomCode.trim().length === 4 ? 'join' : initialMode
   );
-  const [pocketPinUnlocked, setPocketPinUnlocked] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.sessionStorage.getItem('joystick_host_pin_unlocked') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const hostSession = useHostAuthSession();
+  const pocketPinUnlocked = Boolean(hostSession?.token);
+  const [pocketAuthStatus, setPocketAuthStatus] = useState<HostAuthStatus | null>(null);
   const [pocketPinInput, setPocketPinInput] = useState('');
-  const [pocketPinError, setPocketPinError] = useState(false);
+  const [pocketConfirmPinInput, setPocketConfirmPinInput] = useState('');
+  const [pocketPinSubmitting, setPocketPinSubmitting] = useState(false);
+  const [pocketPinError, setPocketPinError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (entryMode !== 'pocket' || pocketPinUnlocked) return;
+    let cancelled = false;
+    fetchHostAuthStatus()
+      .then((res) => {
+        if (!cancelled) setPocketAuthStatus(res);
+      })
+      .catch(() => {
+        if (!cancelled) setPocketAuthStatus({ masterConfigured: true, usingEnvPin: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entryMode, pocketPinUnlocked]);
 
   const [roomCode, setRoomCode] = useState(initialRoomCode.toUpperCase());
   const [playerName, setPlayerName] = useState(
@@ -820,20 +844,46 @@ export function PhoneController({
     enterFullscreenAndLandscape(true);
   };
 
+  const exitFullscreenAndUnlock = () => {
+    if (embedded || typeof document === 'undefined') return;
+    userExitedPhoneFsRef.current = true;
+    try {
+      const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
+      orientation?.unlock?.();
+    } catch {
+      // Ignore unlock error
+    }
+    try {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    } catch {
+      // Ignore wakeLock release error
+    }
+    try {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element;
+        webkitExitFullscreen?: () => Promise<void> | void;
+      };
+      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().catch(() => {});
+      } else if (doc.webkitFullscreenElement && typeof doc.webkitExitFullscreen === 'function') {
+        doc.webkitExitFullscreen();
+      }
+    } catch {
+      // Ignore exitFullscreen error
+    }
+  };
+
   const toggleFullscreen = () => {
     if (embedded || typeof document === 'undefined') return;
     const doc = document as Document & {
       webkitFullscreenElement?: Element;
-      webkitExitFullscreen?: () => Promise<void> | void;
     };
     if (document.fullscreenElement || doc.webkitFullscreenElement) {
-      userExitedPhoneFsRef.current = true;
       manualExitFsRef.current = true;
-      if (typeof document.exitFullscreen === 'function') {
-        document.exitFullscreen().catch(() => {});
-      } else if (typeof doc.webkitExitFullscreen === 'function') {
-        doc.webkitExitFullscreen();
-      }
+      exitFullscreenAndUnlock();
     } else {
       triggerRoomFullscreen();
     }
@@ -841,6 +891,11 @@ export function PhoneController({
 
   // Trigger fullscreen automatically when entering a game room or starting a match (unless user manually exited)
   useEffect(() => {
+    if (closedReason) {
+      manualExitFsRef.current = false;
+      exitFullscreenAndUnlock();
+      return;
+    }
     const status = room?.status ?? null;
     const prev = prevRoomStatusRef.current;
     prevRoomStatusRef.current = status;
@@ -855,7 +910,7 @@ export function PhoneController({
       enterFullscreenAndLandscape(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room?.status, joinedPlayerId, embedded]);
+  }, [room?.status, joinedPlayerId, embedded, closedReason]);
 
   const simSlot: 'P1' | 'P2' = useMemo(() => {
     const raw = (defaultName || 'Test P1').trim().toUpperCase();
@@ -1294,6 +1349,7 @@ export function PhoneController({
             }
             if (msg.room.roomMode === 'pocket') {
               arcadeAudio.unlock();
+              consumeGuestSingleUseTokenLocally();
             }
             if (manualReconnectTimerRef.current) {
               clearTimeout(manualReconnectTimerRef.current);
@@ -1344,7 +1400,7 @@ export function PhoneController({
           case 'player:haptic':
             break;
           case 'room:closed':
-            userExitedPhoneFsRef.current = true;
+            exitFullscreenAndUnlock();
             manualExitFsRef.current = false;
             storedPlayerIdRef.current = undefined;
             joinedPlayerIdRef.current = null;
@@ -1368,7 +1424,12 @@ export function PhoneController({
           case 'error':
             setManualReconnecting(false);
             setJoiningRoom(false);
-            if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
+            if (msg.code === 'HOST_AUTH_REQUIRED') {
+              exitFullscreenAndUnlock();
+              clearHostAuthSession();
+              setPocketPinError(msg.message);
+            } else if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
+              exitFullscreenAndUnlock();
               storedPlayerIdRef.current = undefined;
               joinedPlayerIdRef.current = null;
               roomRef.current = null;
@@ -1609,24 +1670,59 @@ export function PhoneController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keyboardProfile, joinedPlayerId]);
 
-  const handleJoinSubmit = (e: React.FormEvent) => {
+  const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (entryMode === 'pocket') {
-      if (!pocketPinUnlocked) {
+      if (pocketPinSubmitting || joiningRoom) return;
+      let authToken = getHostAuthToken();
+      if (!authToken) {
         const cleanedPin = pocketPinInput.trim();
-        if (cleanedPin !== '1234' && cleanedPin !== '8888') {
-          setPocketPinError(true);
+        if (!cleanedPin) {
+          setPocketPinError(
+            t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
+          );
           return;
         }
+        setPocketPinSubmitting(true);
+        setPocketPinError(null);
+        setErrorMsg(null);
         try {
-          sessionStorage.setItem('joystick_host_pin_unlocked', 'true');
-        } catch {
-          // Ignore storage error
+          const status = pocketAuthStatus ?? (await fetchHostAuthStatus());
+          setPocketAuthStatus(status);
+          if (!status.masterConfigured) {
+            if (cleanedPin.length < 4 || cleanedPin.length > 24) {
+              setPocketPinError(
+                t('Master PIN must be 4–24 characters.', '房主管理密码长度需为 4–24 位。')
+              );
+              return;
+            }
+            if (cleanedPin !== pocketConfirmPinInput.trim()) {
+              setPocketPinError(
+                t('PIN confirmation does not match.', '两次输入的密码不一致。')
+              );
+              return;
+            }
+            const sess = await claimInitialMasterPin(cleanedPin);
+            authToken = sess.token;
+          } else {
+            const sess = await verifyHostCode(cleanedPin);
+            authToken = sess.token;
+          }
+          setPocketPinInput('');
+          setPocketConfirmPinInput('');
+        } catch (err) {
+          setPocketPinError(
+            err instanceof Error
+              ? err.message
+              : t('Invalid Master PIN or Guest Pass.', '密码或访客口令无效。')
+          );
+          return;
+        } finally {
+          setPocketPinSubmitting(false);
         }
-        setPocketPinUnlocked(true);
-        setPocketPinError(false);
       }
 
+      if (!authToken) return;
       triggerRoomFullscreen();
       setErrorMsg(null);
       setJoiningRoom(true);
@@ -1643,6 +1739,7 @@ export function PhoneController({
         deviceId: getDeviceId('POCKET'),
         preferredColorId: preferredColor,
         avatarId: selectedAvatarId,
+        authToken,
       });
       return;
     }
@@ -1717,25 +1814,8 @@ export function PhoneController({
     } catch {
       // Ignore storage error
     }
-    if (!embedded) {
-      userExitedPhoneFsRef.current = true;
-      manualExitFsRef.current = false;
-      try {
-        const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
-        orientation?.unlock?.();
-        const doc = document as Document & {
-          webkitFullscreenElement?: Element;
-          webkitExitFullscreen?: () => Promise<void> | void;
-        };
-        if (document.fullscreenElement) {
-          document.exitFullscreen?.().catch(() => {});
-        } else if (doc.webkitFullscreenElement) {
-          doc.webkitExitFullscreen?.();
-        }
-      } catch {
-        // Ignore unlock/exit errors
-      }
-    }
+    exitFullscreenAndUnlock();
+    manualExitFsRef.current = false;
     setJoinedPlayerId(null);
     setRoom(null);
     setCardState(null);
@@ -2418,36 +2498,110 @@ export function PhoneController({
                   className="w-full h-14 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#00C2FF] focus:outline-none font-mono text-2xl font-bold tracking-[0.35em] text-center text-white uppercase"
                 />
               </div>
-            ) : (
-              !pocketPinUnlocked && (
-                <div>
-                  <label
-                    htmlFor={`pocket-pin-${sessionKey}`}
-                    className="block text-xs font-semibold text-[#A5AEBD] mb-2"
-                  >
-                    {t('Host Master PIN (Default: 1234)', '房主管理密码（默认：1234）')}
-                  </label>
-                  <input
-                    id={`pocket-pin-${sessionKey}`}
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={6}
-                    autoComplete="off"
-                    value={pocketPinInput}
-                    onChange={(e) => {
-                      setPocketPinInput(e.target.value);
-                      setPocketPinError(false);
-                    }}
-                    placeholder="••••"
-                    className="w-full h-13 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#FF4D2E] focus:outline-none font-mono text-2xl font-bold tracking-[0.4em] text-center text-white"
-                  />
-                  {pocketPinError && (
-                    <p className="mt-1.5 text-xs font-semibold text-[#FF4D2E] text-center">
-                      {t('Incorrect PIN. Try 1234 or 8888.', '密码错误，请尝试 1234 或 8888。')}
-                    </p>
-                  )}
+            ) : pocketPinUnlocked ? (
+              <div className="p-3.5 rounded-xl bg-[#10D98B]/10 border border-[#10D98B]/35 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ShieldCheck className="w-4 h-4 text-[#10D98B] shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">
+                      {hostSession?.role === 'guest'
+                        ? t(
+                            `Guest Pass Active${hostSession.passLabel ? ` (${hostSession.passLabel})` : ''}`,
+                            `访客口令已验证${hostSession.passLabel ? `（${hostSession.passLabel}）` : ''}`
+                          )
+                        : t('Owner Access Unlocked', '房主权限已验证')}
+                    </div>
+                    <div className="text-[11px] text-[#9CA3AF]">
+                      {hostSession?.singleUse
+                        ? t('Valid for 1 room creation', '可创建 1 次掌机房间')
+                        : t('Ready to create Pocket Party Room', '可直接创建无大屏掌机房')}
+                    </div>
+                  </div>
                 </div>
-              )
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearHostAuthSession();
+                    setPocketPinInput('');
+                    setPocketConfirmPinInput('');
+                    setPocketPinError(null);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#1A1E26] hover:bg-[#242A36] border border-[#2F3747] text-[11px] font-bold text-[#9CA3AF] hover:text-white shrink-0 cursor-pointer"
+                >
+                  {t('Lock', '锁定')}
+                </button>
+              </div>
+            ) : pocketAuthStatus !== null && !pocketAuthStatus.masterConfigured ? (
+              <div className="space-y-2.5 p-3.5 rounded-xl bg-[#10D98B]/10 border border-[#10D98B]/35">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#10D98B]">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>{t('First-Run Setup: Create Your Owner Master PIN', '首次使用：请设置房主专属管理密码')}</span>
+                </div>
+                <input
+                  id={`pocket-pin-${sessionKey}`}
+                  type="password"
+                  maxLength={24}
+                  autoComplete="off"
+                  value={pocketPinInput}
+                  onChange={(e) => {
+                    setPocketPinInput(e.target.value);
+                    setPocketPinError(null);
+                  }}
+                  placeholder={t('New PIN (4–24 chars)', '设置密码（4–24位）')}
+                  aria-label={t('New Master PIN', '设置新管理密码')}
+                  className="w-full h-12 px-4 rounded-xl bg-[#121419] border border-[#2F3747] focus:border-[#10D98B] focus:outline-none font-mono text-lg font-bold tracking-[0.25em] text-center text-white placeholder:text-xs placeholder:tracking-normal placeholder:font-sans"
+                />
+                <input
+                  type="password"
+                  maxLength={24}
+                  autoComplete="off"
+                  value={pocketConfirmPinInput}
+                  onChange={(e) => {
+                    setPocketConfirmPinInput(e.target.value);
+                    setPocketPinError(null);
+                  }}
+                  placeholder={t('Confirm Master PIN', '再次确认管理密码')}
+                  aria-label={t('Confirm Master PIN', '再次确认管理密码')}
+                  className="w-full h-11 px-4 rounded-xl bg-[#121419] border border-[#2F3747] focus:border-[#10D98B] focus:outline-none font-mono text-base font-bold tracking-[0.25em] text-center text-white placeholder:text-xs placeholder:tracking-normal placeholder:font-sans"
+                />
+                {pocketPinError && (
+                  <p className="text-xs font-semibold text-[#FF4D2E] text-center">{pocketPinError}</p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label
+                  htmlFor={`pocket-pin-${sessionKey}`}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-[#A5AEBD] mb-2"
+                >
+                  <Lock className="w-3.5 h-3.5 text-[#FF4D2E]" />
+                  <span>{t('Master PIN or Friend Guest Pass', '房主管理密码或访客临时口令')}</span>
+                </label>
+                <input
+                  id={`pocket-pin-${sessionKey}`}
+                  type="text"
+                  maxLength={24}
+                  autoComplete="off"
+                  value={pocketPinInput}
+                  onChange={(e) => {
+                    setPocketPinInput(e.target.value);
+                    setPocketPinError(null);
+                  }}
+                  placeholder={t('PIN or GP-XXXX-XXXX', '输入管理密码或访客口令')}
+                  className="w-full h-13 px-4 rounded-xl bg-[#1A1E26] border border-[#2F3747] focus:border-[#FF4D2E] focus:outline-none font-mono text-lg font-bold tracking-[0.16em] text-center text-white placeholder:text-xs placeholder:tracking-normal placeholder:font-sans uppercase"
+                />
+                <p className="mt-1.5 text-[11px] text-[#9CA3AF]">
+                  {t(
+                    'Ask the host for a single-use or timed Guest Pass (GP-XXXX-XXXX) so the Master PIN stays private.',
+                    '朋友借用时请使用房主生成的一次性或限时访客口令（GP-XXXX-XXXX），无需知晓主密码。'
+                  )}
+                </p>
+                {pocketPinError && (
+                  <p className="mt-1.5 text-xs font-semibold text-[#FF4D2E] text-center">
+                    {pocketPinError}
+                  </p>
+                )}
+              </div>
             )}
 
             <div>
@@ -2546,10 +2700,10 @@ export function PhoneController({
 
             <button
               type="submit"
-              disabled={!wsConnected || joiningRoom}
+              disabled={!wsConnected || joiningRoom || pocketPinSubmitting}
               className="tactile-btn w-full h-13 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] disabled:opacity-50 text-white font-bold text-base shadow-[0_4px_0_#B82E17] inline-flex items-center justify-center gap-2 cursor-pointer"
             >
-              {(!wsConnected || joiningRoom) && (
+              {(!wsConnected || joiningRoom || pocketPinSubmitting) && (
                 <Loader2 className="w-5 h-5 animate-spin shrink-0" aria-hidden="true" />
               )}
               <span>
@@ -2557,6 +2711,8 @@ export function PhoneController({
                   ? isDisconnectedAfterAttempt
                     ? t('Reconnecting to Server...', '正在重新连接服务器...')
                     : t('Connecting to Server...', '正在连接服务器...')
+                  : pocketPinSubmitting
+                  ? t('Verifying Access...', '正在验证口令...')
                   : joiningRoom
                   ? entryMode === 'pocket'
                     ? t('Creating Pocket Room...', '正在创建掌机房间...')

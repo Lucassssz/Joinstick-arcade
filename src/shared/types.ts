@@ -2627,10 +2627,11 @@ export interface RoomSnapshot {
 // --- WebSocket Protocol ---
 
 export type ClientMessage =
-  | { type: 'room:create'; preferredGameId?: GameId }
+  | { type: 'room:create'; preferredGameId?: GameId; authToken?: string }
   | {
       type: 'room:create-pocket';
       preferredGameId?: GameId;
+      authToken?: string;
       name: string;
       playerId?: string;
       deviceId?: string;

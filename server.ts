@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './server/roomManager.ts';
+import { hostAuth, type GuestPassMode } from './server/hostAuth.ts';
 import {
   getOrGenerateDemoClipAsync,
   getOrGenerateDemoSnapshotAsync,
@@ -26,6 +27,98 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ ok: true, service: 'joinstick-arcade' });
+  });
+
+  const extractBearer = (req: express.Request): string | null => {
+    const auth = req.headers.authorization;
+    if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+      return auth.slice(7).trim();
+    }
+    return null;
+  };
+
+  const getClientKey = (req: express.Request): string => {
+    return req.ip || req.socket.remoteAddress || 'unknown';
+  };
+
+  app.get('/api/host-auth/status', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      masterConfigured: hostAuth.isMasterConfigured(),
+      usingEnvPin: hostAuth.isUsingEnvPin(),
+    });
+  });
+
+  app.post('/api/host-auth/claim-pin', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
+    const result = hostAuth.claimInitialMasterPin(pin, getClientKey(req));
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.post('/api/host-auth/verify', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    const result = hostAuth.verifyCode(code, getClientKey(req));
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.post('/api/host-auth/logout', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    hostAuth.revokeSessionToken(extractBearer(req));
+    res.json({ ok: true });
+  });
+
+  app.post('/api/host-auth/change-pin', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const newPin = typeof req.body?.pin === 'string' ? req.body.pin : '';
+    const result = hostAuth.changeMasterPin(extractBearer(req), newPin);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  app.get('/api/host-auth/passes', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = hostAuth.listGuestPasses(extractBearer(req));
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.post('/api/host-auth/passes', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const mode: GuestPassMode = req.body?.mode === 'timed' ? 'timed' : 'single-use';
+    const label = typeof req.body?.label === 'string' ? req.body.label : undefined;
+    const hours = typeof req.body?.hours === 'number' ? req.body.hours : undefined;
+    const result = hostAuth.createGuestPass(extractBearer(req), { label, mode, hours });
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(result);
+  });
+
+  app.delete('/api/host-auth/passes/:id', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = hostAuth.revokeGuestPass(extractBearer(req), req.params.id);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   app.get('/api/demo-snapshot/:gameId', async (req, res) => {

@@ -56,6 +56,7 @@ import {
   type MutatorId,
 } from '../src/shared/modifiers.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
+import { hostAuth } from './hostAuth.ts';
 import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
 import {
   biasBotInputForCompetitiveDrops,
@@ -791,6 +792,15 @@ export class RoomManager {
       }
 
       case 'room:create': {
+        const authCheck = hostAuth.consumeRoomCreation(msg.authToken);
+        if (!authCheck.ok) {
+          this.send(ws, {
+            type: 'error',
+            code: 'HOST_AUTH_REQUIRED',
+            message: authCheck.error,
+          });
+          return;
+        }
         this.detachSocket(ws);
         const code = this.generateRoomCode();
         const hostToken = crypto.randomUUID();
@@ -859,6 +869,15 @@ export class RoomManager {
       }
 
       case 'room:create-pocket': {
+        const authCheck = hostAuth.consumeRoomCreation(msg.authToken);
+        if (!authCheck.ok) {
+          this.send(ws, {
+            type: 'error',
+            code: 'HOST_AUTH_REQUIRED',
+            message: authCheck.error,
+          });
+          return;
+        }
         this.detachSocket(ws);
         const code = this.generateRoomCode();
         const hostToken = crypto.randomUUID();

@@ -11,6 +11,7 @@ import {
   QrCode,
   Search,
   Smartphone,
+  Ticket,
   Users,
   X,
   Zap,
@@ -38,6 +39,8 @@ import { GameHoverPreview, preloadDemoClip } from './GameHoverPreview';
 import { preloadRuleClips } from './WatchAndPlayCardCanvas';
 import { RuleAnimationCard } from './RuleAnimationCard';
 import { GameShowcaseCard } from './GameShowcaseCard';
+import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
+import { getHostAuthToken, useHostAuthSession } from '../lib/hostAuth';
 
 interface LandingViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
@@ -78,12 +81,12 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
   const [manualResumeSeconds, setManualResumeSeconds] = useState(0);
   const [activeScrollIdx, setActiveScrollIdx] = useState(0);
 
-  // PIN Protection State for Host / Create Room / Pocket Mode
+  // Host Unlock & Guest Pass State
+  const hostSession = useHostAuthSession();
   const [showPinModal, setShowPinModal] = useState(false);
+  const [showGuestPassModal, setShowGuestPassModal] = useState(false);
   const [pendingHostGameId, setPendingHostGameId] = useState<GameId | undefined>(undefined);
-  const [pendingHostTarget, setPendingHostTarget] = useState<'host' | 'pocket'>('host');
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState(false);
+  const [pendingHostTarget, setPendingHostTarget] = useState<'host' | 'pocket' | 'passes'>('host');
 
   // Part 3 & 4 Scrollytelling State
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -254,9 +257,20 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     return () => cancelAnimationFrame(rafId);
   }, [gameTypesAnimated, gameTypeCounts]);
 
-  const requestHost = (gameId?: GameId, target: 'host' | 'pocket' = 'host') => {
-    const unlocked = sessionStorage.getItem('joystick_host_pin_unlocked') === 'true';
-    if (unlocked) {
+  const requestHost = (gameId?: GameId, target: 'host' | 'pocket' | 'passes' = 'host') => {
+    const token = getHostAuthToken();
+    if (target === 'passes') {
+      if (token && hostSession?.role === 'master') {
+        setShowGuestPassModal(true);
+      } else {
+        setPendingHostGameId(undefined);
+        setPendingHostTarget('passes');
+        setShowPinModal(true);
+      }
+      return;
+    }
+
+    if (token) {
       if (target === 'pocket') {
         onStartPocket(gameId);
       } else {
@@ -265,24 +279,18 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     } else {
       setPendingHostGameId(gameId);
       setPendingHostTarget(target);
-      setPinInput('');
-      setPinError(false);
       setShowPinModal(true);
     }
   };
 
-  const handlePinSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pinInput.trim() === '1234' || pinInput.trim() === '8888') {
-      sessionStorage.setItem('joystick_host_pin_unlocked', 'true');
-      setShowPinModal(false);
-      if (pendingHostTarget === 'pocket') {
-        onStartPocket(pendingHostGameId);
-      } else {
-        onHostRoom(pendingHostGameId);
-      }
+  const handleHostUnlocked = () => {
+    setShowPinModal(false);
+    if (pendingHostTarget === 'passes') {
+      setShowGuestPassModal(true);
+    } else if (pendingHostTarget === 'pocket') {
+      onStartPocket(pendingHostGameId);
     } else {
-      setPinError(true);
+      onHostRoom(pendingHostGameId);
     }
   };
 
@@ -643,24 +651,17 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
             <span>{t('JoinStick Arcade', 'JoinStick 街机派对')}</span>
           </a>
 
-          <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-[#9CA3AF]">
-            <a href="#games" className="hover:text-white transition-colors whitespace-nowrap shrink-0">
-              {t('Games', '游戏列表')}
-            </a>
-            <a href="#how-it-works" className="hover:text-white transition-colors whitespace-nowrap shrink-0">
-              {t('How It Works', '怎么玩')}
-            </a>
-            <button
-              type="button"
-              onClick={() => onJoinController()}
-              className="hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              {t('Join Room', '加入房间')}
-            </button>
-          </nav>
-
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <LanguageToggle compact className="sm:h-9 sm:px-2.5 sm:text-xs" />
+            <button
+              type="button"
+              onClick={() => requestHost(undefined, 'passes')}
+              title={t('Friend Guest Passes', '生成访客临时口令')}
+              className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-[#151B26] hover:bg-[#1E2636] border border-[#2A354A] text-[#00C2FF] text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <Ticket className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t('Guest Passes', '访客口令')}</span>
+            </button>
             <button
               type="button"
               onClick={() => requestHost()}
@@ -1306,80 +1307,19 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
         </div>
       </footer>
 
-      {/* PIN Verification Modal */}
-      {showPinModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="pin-modal-title"
-          onClick={() => setShowPinModal(false)}
-          className="fixed inset-0 z-50 bg-[#0B0E14]/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-md w-full rounded-3xl bg-[#151B26] border-2 border-[#2A354A] shadow-2xl p-6 sm:p-8 text-center"
-          >
-            <div className="w-14 h-14 rounded-2xl bg-[#FF4D2E]/20 border border-[#FF4D2E]/40 flex items-center justify-center mx-auto text-[#FF4D2E] mb-4">
-              <Lock className="w-7 h-7" />
-            </div>
+      {/* Server-Verified Master PIN / Disposable Guest Pass Unlock Modal */}
+      <HostUnlockModal
+        open={showPinModal}
+        target={pendingHostTarget === 'pocket' ? 'pocket' : 'host'}
+        onClose={() => setShowPinModal(false)}
+        onUnlocked={handleHostUnlocked}
+      />
 
-            <h2 id="pin-modal-title" className="font-display text-2xl font-extrabold text-white">
-              {pendingHostTarget === 'pocket'
-                ? t('Enter PIN for Pocket Mode', '请输入掌机开房密码')
-                : t('Enter Host Master PIN', '请输入主持管理密码')}
-            </h2>
-            <p className="mt-2 text-sm text-[#9CA3AF] leading-relaxed">
-              {pendingHostTarget === 'pocket'
-                ? t(
-                    'Please enter your security PIN to create a Pocket Mode room on your phone. (Default: 1234)',
-                    '请输入安全密码以在手机端创建掌机联机房。(默认: 1234)'
-                  )
-                : t(
-                    'Please enter your security PIN to open the Host Monitor. (Default: 1234)',
-                    '请输入安全密码以打开大屏主机。(默认: 1234)'
-                  )}
-            </p>
-
-            <form onSubmit={handlePinSubmit} className="mt-6 space-y-4">
-              <input
-                type="password"
-                maxLength={6}
-                value={pinInput}
-                onChange={(e) => {
-                  setPinInput(e.target.value);
-                  setPinError(false);
-                }}
-                placeholder="••••"
-                autoFocus
-                aria-label={t('Master PIN', '管理密码')}
-                className="w-full h-14 rounded-xl bg-[#0B0E14] border border-[#2A354A] focus:border-[#00C2FF] focus:outline-none font-mono text-2xl font-bold tracking-[0.4em] text-center text-white placeholder:text-[#4B5563]"
-              />
-
-              {pinError && (
-                <p className="text-xs font-semibold text-[#FF4D2E]">
-                  {t('Incorrect PIN. Try 1234 or 8888.', '密码错误，请尝试 1234 或 8888。')}
-                </p>
-              )}
-
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPinModal(false)}
-                  className="flex-1 h-12 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-sm font-bold text-white cursor-pointer"
-                >
-                  {t('Cancel', '取消')}
-                </button>
-                <button
-                  type="submit"
-                  className="tactile-btn flex-1 h-12 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-sm font-bold shadow-[0_3px_0_#B82E17] cursor-pointer"
-                >
-                  {t('Unlock', '解锁进入')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Owner Guest Pass Generator & Revocation Manager */}
+      <GuestPassManagerModal
+        open={showGuestPassModal}
+        onClose={() => setShowGuestPassModal(false)}
+      />
 
       {/* Unified Game Details, Live 5s Preview & Animated Rules Modal */}
       {previewGame && (
