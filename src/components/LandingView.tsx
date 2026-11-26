@@ -2,15 +2,12 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowRight,
   BookOpen,
-  ChevronLeft,
-  ChevronRight,
-  Dices,
+  ChevronDown,
   Gamepad2,
   Lock,
-  Pause,
   Play,
   QrCode,
-  Search,
+  SlidersHorizontal,
   Smartphone,
   Users,
   X,
@@ -63,7 +60,7 @@ export function LandingView({
   const { lang, t } = useLanguage();
   const [quickCode, setQuickCode] = useState('');
   const [playerFilter, setPlayerFilter] = useState<PlayerFilterMode>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
   const [previewGameId, setPreviewGameId] = useState<GameId | null>(null);
   const [hoveredGameId, setHoveredGameId] = useState<GameId | null>(null);
   const [tutorialPhotoFailed, setTutorialPhotoFailed] = useState(false);
@@ -88,9 +85,6 @@ export function LandingView({
     startScrollLeft: number;
     moved: boolean;
   }>({ active: false, startX: 0, startScrollLeft: 0, moved: false });
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
-  const [manualPaused, setManualPaused] = useState(false);
-  const [manualResumeSeconds, setManualResumeSeconds] = useState(0);
   const [activeScrollIdx, setActiveScrollIdx] = useState(0);
 
   // Host Unlock & Hidden Owner Settings State
@@ -341,30 +335,8 @@ export function LandingView({
 
   const filteredGames = useMemo(() => {
     const base = filterGamesByPlayerMode(playerFilter);
-    const q = searchQuery.trim().toLowerCase();
-    const localized = base.map((raw) => ({
-      raw,
-      loc: getLocalizedGameMeta(raw, lang),
-    }));
-    if (!q) return localized.map((item) => item.loc);
-    return localized
-      .filter(({ raw, loc }) => {
-        const haystack = [
-          raw.name,
-          raw.category,
-          raw.tagline,
-          raw.description,
-          loc.name,
-          loc.category,
-          loc.tagline,
-          loc.description,
-        ]
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(q);
-      })
-      .map((item) => item.loc);
-  }, [playerFilter, searchQuery, lang]);
+    return base.map((raw) => getLocalizedGameMeta(raw, lang));
+  }, [playerFilter, lang]);
 
   const syncActiveCardFromRail = useCallback(() => {
     const el = gamesRailRef.current;
@@ -387,7 +359,7 @@ export function LandingView({
     setActiveScrollIdx((prev) => (prev === bestIdx ? prev : bestIdx));
   }, []);
 
-  // Reset rail position when category filter or search changes
+  // Reset rail position when category filter changes
   useEffect(() => {
     setActiveScrollIdx(0);
     setHoveredGameId(null);
@@ -397,7 +369,7 @@ export function LandingView({
     if (el) {
       el.scrollLeft = 0;
     }
-  }, [playerFilter, searchQuery]);
+  }, [playerFilter]);
 
   // Predictive warming while scrolling — mirrors HostMonitor's game-chooser preloader
   // so the next coming games already have their thumbnail, 5s demo clip, and rule clips ready
@@ -426,7 +398,7 @@ export function LandingView({
   // Smooth automatic horizontal scrolling when no manual scroll is detected;
   // automatically resumes 5 seconds after manual scrolling stops
   useEffect(() => {
-    if (!autoScrollEnabled || filteredGames.length <= 1 || previewGameId) return;
+    if (filteredGames.length <= 1 || previewGameId) return;
     const reducedMotion =
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -452,17 +424,7 @@ export function LandingView({
 
       if (isPaused) {
         if (el) virtualScrollLeftRef.current = el.scrollLeft;
-        const shouldShowManualPause = isActivelyInteracting || remainingManualMs > 0;
-        setManualPaused((prev) => (prev === shouldShowManualPause ? prev : shouldShowManualPause));
-        const nextCountdownSec = isActivelyInteracting
-          ? Math.ceil(MANUAL_SCROLL_RESUME_MS / 1000)
-          : remainingManualMs > 0
-          ? Math.ceil(remainingManualMs / 1000)
-          : 0;
-        setManualResumeSeconds((prev) => (prev === nextCountdownSec ? prev : nextCountdownSec));
       } else {
-        setManualPaused((prev) => (prev ? false : prev));
-        setManualResumeSeconds((prev) => (prev === 0 ? prev : 0));
         if (now - lastHoverAtRef.current > 1200) {
           setHoveredGameId((prev) => (prev === null ? prev : null));
         }
@@ -500,25 +462,11 @@ export function LandingView({
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [autoScrollEnabled, filteredGames.length, previewGameId, syncActiveCardFromRail]);
+  }, [filteredGames.length, previewGameId, syncActiveCardFromRail]);
 
   const markManualScroll = useCallback((pauseMs = MANUAL_SCROLL_RESUME_MS) => {
     manualPauseUntilRef.current = performance.now() + pauseMs;
-    setManualPaused(true);
-    const nextSec = Math.ceil(pauseMs / 1000);
-    setManualResumeSeconds((prev) => (prev === nextSec ? prev : nextSec));
   }, []);
-
-  const scrollRailByCards = (dir: -1 | 1) => {
-    const el = gamesRailRef.current;
-    if (!el) return;
-    markManualScroll(MANUAL_SCROLL_RESUME_MS);
-    smoothScrollUntilRef.current = performance.now() + 700;
-    const step = Math.min(el.clientWidth * 0.85, 680);
-    const targetLeft = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, el.scrollLeft + dir * step));
-    virtualScrollLeftRef.current = targetLeft;
-    el.scrollTo({ left: targetLeft, behavior: 'smooth' });
-  };
 
   const handleOpenCardDetails = useCallback((gameId: GameId) => {
     if (pointerDragRef.current.moved) {
@@ -530,16 +478,6 @@ export function LandingView({
     void preloadRuleClips(gameId);
     setPreviewGameId(gameId);
   }, []);
-
-  const handleSurpriseMe = () => {
-    const pool = filteredGames.length > 0 ? filteredGames : GAME_CATALOG;
-    if (pool.length === 0) return;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    preloadGameRenderer(pick.id);
-    void preloadDemoClip(pick.id);
-    void preloadRuleClips(pick.id);
-    setPreviewGameId(pick.id);
-  };
 
   const previewGame = previewGameId
     ? getLocalizedGameMeta(getGameMeta(previewGameId), lang)
@@ -957,148 +895,80 @@ export function LandingView({
               </p>
             </div>
 
-            {/* Filter Tabs + Search + Surprise Me */}
-            <div className="flex flex-col gap-3 lg:items-end">
-              <div
-                role="tablist"
-                aria-label={t('Filter games by player mode', '按玩家模式筛选游戏')}
-                className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-[#121722] border border-[#222B3B]"
+            {/* Collapsible Filter */}
+            <div className="flex flex-col gap-2.5 lg:items-end">
+              <button
+                type="button"
+                onClick={() => setFilterOpen((prev) => !prev)}
+                aria-expanded={filterOpen}
+                aria-controls="games-filter-panel"
+                className="inline-flex items-center gap-2.5 h-10 px-4 rounded-xl bg-[#121722] hover:bg-[#192030] border border-[#222B3B] text-xs font-semibold text-white whitespace-nowrap self-start lg:self-end cursor-pointer transition-colors"
               >
-                {PLAYER_FILTER_OPTIONS.map((opt) => {
-                  const active = playerFilter === opt.id;
-                  const count = filterGamesByPlayerMode(opt.id).length;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setPlayerFilter(opt.id)}
-                      className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                        active
-                          ? 'bg-[#FF4D2E] text-white shadow'
-                          : 'text-[#9CA3AF] hover:text-white'
-                      }`}
-                    >
-                      {getLocalizedFilterLabel(opt.id, lang, false)}{' '}
-                      <span className="font-mono opacity-85 tabular-nums">({count})</span>
-                    </button>
-                  );
-                })}
-              </div>
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[#00C2FF]" />
+                <span>
+                  {t('Filter', '筛选')}:{' '}
+                  <strong className="text-[#FF4D2E]">
+                    {getLocalizedFilterLabel(playerFilter, lang, false)}
+                  </strong>{' '}
+                  <span className="font-mono text-[#9CA3AF] tabular-nums">
+                    ({filteredGames.length})
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-[#9CA3AF] transition-transform duration-200 ${
+                    filterOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
 
-              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full lg:w-auto">
-                <div className="relative flex-1 sm:w-72">
-                  <Search className="w-4 h-4 text-[#6B7280] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={t('Search games...', '搜索游戏名称...')}
-                    aria-label={t('Search games', '搜索游戏')}
-                    className="w-full h-10 pl-9 pr-8 rounded-xl bg-[#121722] border border-[#222B3B] focus:border-[#00C2FF] focus:outline-none text-xs sm:text-sm text-white placeholder:text-[#6B7280]"
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery('')}
-                      aria-label={t('Clear search', '清除搜索')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-white cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleSurpriseMe}
-                  className="tactile-btn h-10 px-4 rounded-xl bg-[#151B26] hover:bg-[#1E2636] border border-[#2A354A] text-xs font-bold text-[#00C2FF] inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow"
+              {filterOpen && (
+                <div
+                  id="games-filter-panel"
+                  role="tablist"
+                  aria-label={t('Filter games by player mode', '按玩家模式筛选游戏')}
+                  className="inline-flex flex-wrap items-center gap-1 p-1 rounded-xl bg-[#121722] border border-[#222B3B]"
                 >
-                  <Dices className="w-4 h-4" />
-                  <span>{t('Surprise Me', '随机挑一款')}</span>
-                </button>
-              </div>
+                  {PLAYER_FILTER_OPTIONS.map((opt) => {
+                    const active = playerFilter === opt.id;
+                    const count = filterGamesByPlayerMode(opt.id).length;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setPlayerFilter(opt.id)}
+                        className={`px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-[#FF4D2E] text-white shadow'
+                            : 'text-[#9CA3AF] hover:text-white'
+                        }`}
+                      >
+                        {getLocalizedFilterLabel(opt.id, lang, false)}{' '}
+                        <span className="font-mono opacity-85 tabular-nums">({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
           {filteredGames.length === 0 ? (
             <div className="rounded-2xl bg-[#141A26] border border-[#20293B] p-12 text-center">
               <p className="text-base font-bold text-white">
-                {t('No games match your search.', '没有找到匹配的游戏。')}
+                {t('No games match your filter.', '没有找到匹配的游戏。')}
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setPlayerFilter('all');
-                }}
+                onClick={() => setPlayerFilter('all')}
                 className="mt-4 px-4 py-2 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs font-bold cursor-pointer"
               >
-                {t('Reset Filters', '重置筛选')}
+                {t('Reset Filter', '重置筛选')}
               </button>
             </div>
           ) : (
             <>
-              {/* Rail Controls & Spotlight Counter */}
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <div className="flex items-center gap-3 text-xs text-[#9CA3AF]">
-                  <span className="font-mono font-bold text-white tabular-nums">
-                    {String(Math.min(activeScrollIdx + 1, filteredGames.length)).padStart(2, '0')} /{' '}
-                    {String(filteredGames.length).padStart(2, '0')}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>
-                    {autoScrollEnabled && !manualPaused
-                      ? t('Auto-scrolling · Manual scroll pauses for 5s', '自动横向滚动中 · 手动滑动后将暂停 5 秒')
-                      : manualPaused && autoScrollEnabled
-                      ? t(
-                          `Paused after manual scroll · Resuming in ${Math.max(1, manualResumeSeconds)}s`,
-                          `手动滑动暂停中 · ${Math.max(1, manualResumeSeconds)} 秒后恢复自动滚动`
-                        )
-                      : t('Auto-scroll paused · Click a card for rules & animated demo', '自动滚动已暂停 · 点击卡片查看规则与动画演示')}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setAutoScrollEnabled((prev) => !prev)}
-                    className="h-9 px-3 rounded-xl bg-[#141A26] hover:bg-[#1E2636] border border-[#222B3B] text-xs font-semibold text-[#D1D5DB] hover:text-white inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
-                  >
-                    {autoScrollEnabled ? (
-                      <>
-                        <Pause className="w-3.5 h-3.5 text-[#00C2FF]" />
-                        <span>{t('Pause Scroll', '暂停滚动')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3.5 h-3.5 text-[#10D98B] fill-current" />
-                        <span>{t('Auto Scroll', '自动滚动')}</span>
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => scrollRailByCards(-1)}
-                    aria-label={t('Scroll games left', '向左滚动游戏')}
-                    className="h-9 w-9 rounded-xl bg-[#141A26] hover:bg-[#1E2636] border border-[#222B3B] text-white inline-flex items-center justify-center cursor-pointer transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => scrollRailByCards(1)}
-                    aria-label={t('Scroll games right', '向右滚动游戏')}
-                    className="h-9 w-9 rounded-xl bg-[#141A26] hover:bg-[#1E2636] border border-[#222B3B] text-white inline-flex items-center justify-center cursor-pointer transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
               {/* Horizontal Auto-Scrolling Game Rail (Zero Play Buttons on Cards) */}
               <div
                 ref={setGamesRailNode}

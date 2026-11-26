@@ -177,31 +177,6 @@ export async function fetchHostAuthStatus(): Promise<HostAuthStatus> {
   return status;
 }
 
-export async function claimInitialMasterPin(pin: string): Promise<HostAuthSession> {
-  const res = await fetch('/api/host-auth/claim-pin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin }),
-  });
-  const data = (await res.json()) as {
-    ok?: boolean;
-    token?: string;
-    role?: HostAuthRole;
-    expiresAt?: number;
-    error?: string;
-  };
-  if (!res.ok || !data.token || !data.role || !data.expiresAt) {
-    throw new Error(data.error || 'Failed to set Master PIN');
-  }
-  const session: HostAuthSession = {
-    token: data.token,
-    role: data.role,
-    expiresAt: data.expiresAt,
-  };
-  setHostAuthSession(session);
-  return session;
-}
-
 export async function verifyHostCode(
   code: string,
   opts?: { requireMaster?: boolean }

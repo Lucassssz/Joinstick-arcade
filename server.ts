@@ -52,13 +52,8 @@ async function startServer() {
 
   app.post('/api/host-auth/claim-pin', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
-    const result = hostAuth.claimInitialMasterPin(pin, getClientKey(req));
-    if (!result.ok) {
-      res.status(result.status).json({ error: result.error });
-      return;
-    }
-    res.json(result);
+    const result = hostAuth.claimInitialMasterPin('', getClientKey(req));
+    res.status(result.status).json({ error: result.error });
   });
 
   app.post('/api/host-auth/verify', (req, res) => {

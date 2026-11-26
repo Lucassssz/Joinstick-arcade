@@ -17,7 +17,6 @@ import {
   Power,
   RefreshCw,
   Share2,
-  ShieldCheck,
   SlidersHorizontal,
   Smartphone,
   Ticket,
@@ -28,7 +27,6 @@ import {
 } from 'lucide-react';
 import {
   changeMasterPin,
-  claimInitialMasterPin,
   clearHostAuthSession,
   closeActiveRoomByOwner,
   createGuestPass,
@@ -42,7 +40,6 @@ import {
   verifyHostCode,
   type GuestPassMode,
   type GuestPassSummary,
-  type HostAuthStatus,
   type OwnerActiveRoomSummary,
   type OwnerRoomsDashboard,
   type RoomActivityEvent,
@@ -60,10 +57,8 @@ interface HostUnlockModalProps {
 
 export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnlockModalProps) {
   const { t } = useLanguage();
-  const [status, setStatus] = useState<HostAuthStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [codeInput, setCodeInput] = useState('');
-  const [confirmPinInput, setConfirmPinInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const onUnlockedRef = useRef(onUnlocked);
@@ -73,21 +68,17 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
     if (!open) return;
     let cancelled = false;
     setCodeInput('');
-    setConfirmPinInput('');
     setErrorMsg(null);
     setLoadingStatus(true);
     fetchHostAuthStatus()
       .then((res) => {
         if (cancelled) return;
-        setStatus(res);
         if (res.publicAccessOpen && target !== 'passes') {
           onUnlockedRef.current();
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setStatus({ masterConfigured: true, usingEnvPin: false, publicAccessOpen: false });
-        }
+        // Keep modal ready to verify against server
       })
       .finally(() => {
         if (!cancelled) setLoadingStatus(false);
@@ -99,7 +90,6 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
 
   if (!open) return null;
 
-  const isFirstRunSetup = status !== null && !status.masterConfigured;
   const isOwnerOnly = target === 'passes';
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -108,34 +98,10 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
     const trimmed = codeInput.trim();
     if (!trimmed) {
       setErrorMsg(
-        isFirstRunSetup
-          ? t('Enter a Master PIN (4–24 characters).', '请设置 4–24 位的房主管理密码。')
-          : isOwnerOnly
+        isOwnerOnly
           ? t('Enter your Owner Master PIN.', '请输入房主管理密码。')
           : t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
       );
-      return;
-    }
-
-    if (isFirstRunSetup) {
-      if (trimmed.length < 4 || trimmed.length > 24) {
-        setErrorMsg(t('Master PIN must be 4–24 characters.', '房主管理密码长度需为 4–24 位。'));
-        return;
-      }
-      if (trimmed !== confirmPinInput.trim()) {
-        setErrorMsg(t('PIN confirmation does not match.', '两次输入的密码不一致。'));
-        return;
-      }
-      setSubmitting(true);
-      setErrorMsg(null);
-      try {
-        await claimInitialMasterPin(trimmed);
-        onUnlocked();
-      } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : t('Failed to save PIN.', '设置失败，请重试。'));
-      } finally {
-        setSubmitting(false);
-      }
       return;
     }
 
@@ -171,26 +137,16 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
       >
         <div
           className={`w-14 h-14 rounded-2xl border flex items-center justify-center mx-auto mb-4 ${
-            isFirstRunSetup
-              ? 'bg-[#10D98B]/15 border-[#10D98B]/40 text-[#10D98B]'
-              : isOwnerOnly
+            isOwnerOnly
               ? 'bg-[#00C2FF]/15 border-[#00C2FF]/40 text-[#00C2FF]'
               : 'bg-[#FF4D2E]/20 border-[#FF4D2E]/40 text-[#FF4D2E]'
           }`}
         >
-          {isFirstRunSetup ? (
-            <ShieldCheck className="w-7 h-7" />
-          ) : isOwnerOnly ? (
-            <SlidersHorizontal className="w-7 h-7" />
-          ) : (
-            <Lock className="w-7 h-7" />
-          )}
+          {isOwnerOnly ? <SlidersHorizontal className="w-7 h-7" /> : <Lock className="w-7 h-7" />}
         </div>
 
         <h2 id="pin-modal-title" className="font-display text-2xl font-extrabold text-white">
-          {isFirstRunSetup
-            ? t('Set Your Owner Master PIN', '首次设置房主专属密码')
-            : isOwnerOnly
+          {isOwnerOnly
             ? t('Owner Settings', '房主设置')
             : target === 'pocket'
             ? t('Unlock Pocket Mode', '解锁掌机开房模式')
@@ -198,12 +154,7 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
         </h2>
 
         <p className="mt-2 text-sm text-[#9CA3AF] leading-relaxed">
-          {isFirstRunSetup
-            ? t(
-                'Create your private Master PIN now (or set HOST_MASTER_PIN in Server Secrets). Keep it private and mint temporary Guest Passes whenever lending to friends.',
-                '请先设置只有你知道的房主私密密码（也可在环境变量中配置 HOST_MASTER_PIN）。借给朋友游玩时，可在房主设置中生成一次性或限时访客口令，绝不泄露主密码。'
-              )
-            : isOwnerOnly
+          {isOwnerOnly
             ? t(
                 'Enter your private Master PIN to open Owner Settings, monitor active rooms, share the platform, and manage access.',
                 '请输入你的房主管理密码以进入房主设置、监控活跃房间、分享平台及管理访客权限。'
@@ -226,7 +177,7 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
         ) : (
           <form onSubmit={handleSubmit} className="mt-6 space-y-3.5">
             <input
-              type={isFirstRunSetup || isOwnerOnly ? 'password' : 'text'}
+              type={isOwnerOnly ? 'password' : 'text'}
               maxLength={24}
               value={codeInput}
               onChange={(e) => {
@@ -234,39 +185,21 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
                 setErrorMsg(null);
               }}
               placeholder={
-                isFirstRunSetup || isOwnerOnly
-                  ? '••••••'
+                isOwnerOnly
+                  ? '••••••••'
                   : t('PIN or GP-XXXX-XXXX', '输入密码或访客口令')
               }
               autoFocus
               autoComplete="off"
               aria-label={
-                isFirstRunSetup
-                  ? t('New Master PIN', '设置新管理密码')
-                  : isOwnerOnly
+                isOwnerOnly
                   ? t('Owner Master PIN', '房主管理密码')
                   : t('Master PIN or Guest Pass', '管理密码或访客口令')
               }
               className={`w-full h-14 px-4 rounded-xl bg-[#0B0E14] border border-[#2A354A] focus:border-[#00C2FF] focus:outline-none font-mono text-lg sm:text-xl font-bold text-center text-white placeholder:text-[#4B5563] ${
-                isFirstRunSetup || isOwnerOnly ? 'tracking-[0.35em]' : 'tracking-[0.14em] uppercase'
+                isOwnerOnly ? 'tracking-[0.35em]' : 'tracking-[0.14em] uppercase'
               }`}
             />
-
-            {isFirstRunSetup && (
-              <input
-                type="password"
-                maxLength={24}
-                value={confirmPinInput}
-                onChange={(e) => {
-                  setConfirmPinInput(e.target.value);
-                  setErrorMsg(null);
-                }}
-                placeholder={t('Confirm Master PIN', '再次确认管理密码')}
-                autoComplete="off"
-                aria-label={t('Confirm Master PIN', '再次确认管理密码')}
-                className="w-full h-12 px-4 rounded-xl bg-[#0B0E14] border border-[#2A354A] focus:border-[#10D98B] focus:outline-none font-mono text-base font-bold tracking-[0.25em] text-center text-white placeholder:text-[#4B5563]"
-              />
-            )}
 
             {errorMsg && (
               <p className="text-xs font-semibold text-[#FF4D2E]">{errorMsg}</p>
@@ -283,17 +216,9 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
               <button
                 type="submit"
                 disabled={submitting}
-                className={`tactile-btn flex-1 h-12 rounded-xl text-sm font-bold cursor-pointer disabled:opacity-60 ${
-                  isFirstRunSetup
-                    ? 'bg-[#10D98B] hover:bg-[#22E89B] text-[#071A12] shadow-[0_3px_0_#0A915D]'
-                    : 'bg-[#FF4D2E] hover:bg-[#FF6145] text-white shadow-[0_3px_0_#B82E17]'
-                }`}
+                className="tactile-btn flex-1 h-12 rounded-xl text-sm font-bold cursor-pointer disabled:opacity-60 bg-[#FF4D2E] hover:bg-[#FF6145] text-white shadow-[0_3px_0_#B82E17]"
               >
-                {submitting
-                  ? t('Verifying...', '验证中...')
-                  : isFirstRunSetup
-                  ? t('Save & Unlock', '保存并解锁')
-                  : t('Unlock', '解锁进入')}
+                {submitting ? t('Verifying...', '验证中...') : t('Unlock', '解锁进入')}
               </button>
             </div>
           </form>
@@ -348,7 +273,6 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
 
   // Access, Sharing & Guest Passes State
   const [passes, setPasses] = useState<GuestPassSummary[]>([]);
-  const [usingEnvPin, setUsingEnvPin] = useState(false);
   const [loadingPasses, setLoadingPasses] = useState(false);
   const [togglingPublicAccess, setTogglingPublicAccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -369,6 +293,7 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
   const [copiedTarget, setCopiedTarget] = useState<'code' | 'message' | 'platform' | null>(null);
 
   const [newPin, setNewPin] = useState('');
+  const [confirmNewPin, setConfirmNewPin] = useState('');
   const [pinSavedMsg, setPinSavedMsg] = useState<string | null>(null);
 
   const refreshPasses = useCallback(async () => {
@@ -376,7 +301,6 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
     try {
       const data = await listGuestPasses();
       setPasses(data.passes);
-      setUsingEnvPin(data.usingEnvPin);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : t('Failed to load passes', '加载失败'));
     } finally {
@@ -618,11 +542,21 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
       setErrorMsg(t('New PIN must be 4–24 characters.', '新密码需为 4–24 位。'));
       return;
     }
+    if (trimmed !== confirmNewPin.trim()) {
+      setErrorMsg(t('PIN confirmation does not match.', '两次输入的新密码不一致。'));
+      return;
+    }
     setErrorMsg(null);
     try {
       await changeMasterPin(trimmed);
       setNewPin('');
-      setPinSavedMsg(t('Master PIN updated.', '房主管理密码已更新。'));
+      setConfirmNewPin('');
+      setPinSavedMsg(
+        t(
+          'Master PIN updated across all devices.',
+          '房主管理密码已更新，所有设备将立即生效。'
+        )
+      );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : t('Failed to update PIN.', '修改失败。'));
     }
@@ -1540,51 +1474,73 @@ export function GuestPassManagerModal({ open, onClose }: GuestPassManagerModalPr
               </div>
             )}
 
-            {/* Persistent Owner Footer: Rotate Master PIN / Sign Out */}
-            <div className="border-t border-[#222B3B] pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              {usingEnvPin ? (
+            {/* Persistent Owner Footer: Change Fixed Master PIN / Sign Out */}
+            <div className="border-t border-[#222B3B] pt-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] text-[#9CA3AF] flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />
                   <span>
                     {t(
-                      'Master PIN is managed via HOST_MASTER_PIN env secret.',
-                      '主密码当前由服务端 HOST_MASTER_PIN 环境变量托管。'
+                      'Owner Master PIN (shared across all devices — only editable here)',
+                      '房主主密码（全设备通用，仅可在此修改）'
                     )}
                   </span>
                 </div>
-              ) : (
-                <form onSubmit={handleRotatePin} className="flex items-center gap-2 flex-1">
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <form
+                  onSubmit={handleRotatePin}
+                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1"
+                >
                   <input
                     type="password"
                     maxLength={24}
+                    autoComplete="new-password"
                     value={newPin}
                     onChange={(e) => {
                       setNewPin(e.target.value);
                       setPinSavedMsg(null);
+                      setErrorMsg(null);
                     }}
-                    placeholder={t('Rotate Master PIN...', '更换新的房主密码...')}
+                    placeholder={t('New Master PIN (4–24)...', '输入新主密码 (4–24位)...')}
+                    aria-label={t('New Master PIN', '新主密码')}
+                    className="flex-1 min-w-0 h-9 px-3 rounded-xl bg-[#10141D] border border-[#2A354A] focus:border-[#00C2FF] focus:outline-none text-xs text-white"
+                  />
+                  <input
+                    type="password"
+                    maxLength={24}
+                    autoComplete="new-password"
+                    value={confirmNewPin}
+                    onChange={(e) => {
+                      setConfirmNewPin(e.target.value);
+                      setPinSavedMsg(null);
+                      setErrorMsg(null);
+                    }}
+                    placeholder={t('Confirm PIN...', '确认新密码...')}
+                    aria-label={t('Confirm New Master PIN', '确认新主密码')}
                     className="flex-1 min-w-0 h-9 px-3 rounded-xl bg-[#10141D] border border-[#2A354A] focus:border-[#00C2FF] focus:outline-none text-xs text-white"
                   />
                   <button
                     type="submit"
-                    className="h-9 px-3 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-xs font-bold text-white whitespace-nowrap cursor-pointer"
+                    className="h-9 px-3.5 rounded-xl bg-[#1E2636] hover:bg-[#273145] text-xs font-bold text-white whitespace-nowrap cursor-pointer"
                   >
                     {t('Update PIN', '更新密码')}
                   </button>
                 </form>
-              )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  clearHostAuthSession();
-                  onClose();
-                }}
-                className="h-9 px-3.5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-[#FF9B8A] inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>{t('Sign Out Owner', '退出房主登录')}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearHostAuthSession();
+                    onClose();
+                  }}
+                  className="h-9 px-3.5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-xs font-bold text-[#FF9B8A] inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{t('Sign Out Owner', '退出房主登录')}</span>
+                </button>
+              </div>
             </div>
 
             {pinSavedMsg && (

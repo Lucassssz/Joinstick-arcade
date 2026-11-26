@@ -1,4 +1,7 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 export type HostAuthRole = 'master' | 'guest';
 export type GuestPassMode = 'single-use' | 'timed';
@@ -18,6 +21,12 @@ export interface GuestPassSummary {
 
 interface StoredGuestPass extends GuestPassSummary {
   codeHash: string;
+}
+
+interface MasterPinHashRecord {
+  salt: string;
+  hashHex: string;
+  updatedAt?: number;
 }
 
 interface HostSessionPayload {
@@ -41,9 +50,33 @@ const RATE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_FAILURES_PER_WINDOW = 12;
 const PASS_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
+const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const OWNER_AUTH_DATA_DIR = path.resolve(CURRENT_DIR, '..', 'data');
+const OWNER_AUTH_FILE = path.join(OWNER_AUTH_DATA_DIR, 'owner-auth.json');
+
+// Pre-computed one-way salted scrypt digest for the fixed Owner Master PIN.
+// Never store plaintext PINs in source code or on disk; updates from Owner Settings
+// overwrite the persisted hash record in OWNER_AUTH_FILE so all devices stay in sync.
+const DEFAULT_MASTER_PIN_HASH: MasterPinHashRecord = {
+  salt: '202afdde6be8880d934d3a9d9b660e33',
+  hashHex:
+    '93f248186452d4b8ccac1cc8a1f6d376414be60152206624083f179ae285cba5d7e88b243f4eaaaa225e89259a82b2450a26da81cd1633f80d0c59ad7906ae68',
+};
+
+function isValidHashRecord(value: unknown): value is MasterPinHashRecord {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<MasterPinHashRecord>;
+  return (
+    typeof candidate.salt === 'string' &&
+    /^[a-f0-9]{32,64}$/i.test(candidate.salt) &&
+    typeof candidate.hashHex === 'string' &&
+    /^[a-f0-9]{128}$/i.test(candidate.hashHex)
+  );
+}
+
 class HostAuthService {
   private readonly signingSecret: string;
-  private claimedMasterHash: { salt: string; hashHex: string } | null = null;
+  private activeMasterHash: MasterPinHashRecord;
   private readonly guestPasses = new Map<string, StoredGuestPass>();
   private readonly consumedSingleUseTokens = new Set<string>();
   private readonly revokedTokens = new Set<string>();
@@ -54,18 +87,47 @@ class HostAuthService {
   constructor() {
     this.signingSecret =
       (process.env.HOST_AUTH_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
+    this.activeMasterHash = this.loadPersistedMasterHash() ?? DEFAULT_MASTER_PIN_HASH;
   }
 
-  private getEnvPin(): string {
-    return (process.env.HOST_MASTER_PIN || '').trim();
+  private loadPersistedMasterHash(): MasterPinHashRecord | null {
+    try {
+      if (!fs.existsSync(OWNER_AUTH_FILE)) return null;
+      const raw = fs.readFileSync(OWNER_AUTH_FILE, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      if (isValidHashRecord(parsed)) {
+        return {
+          salt: parsed.salt,
+          hashHex: parsed.hashHex,
+          updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private persistMasterHash(record: MasterPinHashRecord): void {
+    try {
+      fs.mkdirSync(OWNER_AUTH_DATA_DIR, { recursive: true, mode: 0o700 });
+      const tmpFile = path.join(
+        OWNER_AUTH_DATA_DIR,
+        `.owner-auth-${crypto.randomBytes(6).toString('hex')}.tmp`
+      );
+      fs.writeFileSync(tmpFile, JSON.stringify(record, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.renameSync(tmpFile, OWNER_AUTH_FILE);
+    } catch (err) {
+      console.warn('[HostAuth] Could not persist updated Master PIN hash to disk:', err);
+    }
   }
 
   public isMasterConfigured(): boolean {
-    return Boolean(this.getEnvPin()) || Boolean(this.claimedMasterHash);
+    return true;
   }
 
   public isUsingEnvPin(): boolean {
-    return Boolean(this.getEnvPin());
+    return false;
   }
 
   public isPublicAccessOpen(): boolean {
@@ -104,7 +166,7 @@ class HostAuthService {
     return crypto.timingSafeEqual(da, db);
   }
 
-  private verifyScryptHash(pin: string, record: { salt: string; hashHex: string }): boolean {
+  private verifyScryptHash(pin: string, record: MasterPinHashRecord): boolean {
     try {
       const derived = crypto.scryptSync(pin, record.salt, 64);
       const expected = Buffer.from(record.hashHex, 'hex');
@@ -118,14 +180,7 @@ class HostAuthService {
   private verifyMasterPin(rawPin: string): boolean {
     const trimmed = rawPin.trim();
     if (!trimmed) return false;
-    const envPin = this.getEnvPin();
-    if (envPin) {
-      return this.timingSafeEqualStr(trimmed, envPin);
-    }
-    if (this.claimedMasterHash) {
-      return this.verifyScryptHash(trimmed, this.claimedMasterHash);
-    }
-    return false;
+    return this.verifyScryptHash(trimmed, this.activeMasterHash);
   }
 
   private checkRateLimit(clientKey: string): { allowed: boolean; retryAfterSec: number } {
@@ -203,50 +258,14 @@ class HostAuthService {
   }
 
   public claimInitialMasterPin(
-    rawPin: string,
-    clientKey: string
-  ): { ok: true; token: string; role: 'master'; expiresAt: number } | { ok: false; status: number; error: string } {
-    const rate = this.checkRateLimit(clientKey);
-    if (!rate.allowed) {
-      return {
-        ok: false,
-        status: 429,
-        error: `Too many attempts. Try again in ${rate.retryAfterSec}s.`,
-      };
-    }
-
-    if (this.isMasterConfigured()) {
-      return {
-        ok: false,
-        status: 409,
-        error: 'Master PIN is already configured.',
-      };
-    }
-
-    const pin = typeof rawPin === 'string' ? rawPin.trim() : '';
-    if (pin.length < 4 || pin.length > 24) {
-      this.recordFailure(clientKey);
-      return {
-        ok: false,
-        status: 400,
-        error: 'PIN must be between 4 and 24 characters.',
-      };
-    }
-
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hashHex = crypto.scryptSync(pin, salt, 64).toString('hex');
-    this.claimedMasterHash = { salt, hashHex };
-    this.clearFailures(clientKey);
-
-    const now = Date.now();
-    const exp = now + SESSION_TTL_MS;
-    const token = this.signToken({
-      jti: crypto.randomUUID(),
-      role: 'master',
-      iat: now,
-      exp,
-    });
-    return { ok: true, token, role: 'master', expiresAt: exp };
+    _rawPin: string,
+    _clientKey: string
+  ): { ok: false; status: number; error: string } {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Master PIN is fixed across all devices and can only be changed in Owner Settings.',
+    };
   }
 
   public changeMasterPin(
@@ -257,20 +276,15 @@ class HostAuthService {
     if (!session || session.role !== 'master') {
       return { ok: false, status: 403, error: 'Master authorization required.' };
     }
-    if (this.isUsingEnvPin()) {
-      return {
-        ok: false,
-        status: 409,
-        error: 'Master PIN is managed by server environment configuration (HOST_MASTER_PIN).',
-      };
-    }
     const pin = typeof newRawPin === 'string' ? newRawPin.trim() : '';
     if (pin.length < 4 || pin.length > 24) {
       return { ok: false, status: 400, error: 'New PIN must be 4 to 24 characters.' };
     }
     const salt = crypto.randomBytes(16).toString('hex');
     const hashHex = crypto.scryptSync(pin, salt, 64).toString('hex');
-    this.claimedMasterHash = { salt, hashHex };
+    const nextRecord: MasterPinHashRecord = { salt, hashHex, updatedAt: Date.now() };
+    this.activeMasterHash = nextRecord;
+    this.persistMasterHash(nextRecord);
     return { ok: true };
   }
 

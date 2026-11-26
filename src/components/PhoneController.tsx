@@ -110,7 +110,6 @@ import { ManagedWebSocket, SocketStatus } from '../lib/ws';
 import { createRoomSyncStore, useRoomSyncSnapshot } from '../lib/roomSyncStore';
 import { shareRoomInvite } from '../lib/shareInvite';
 import {
-  claimInitialMasterPin,
   clearHostAuthSession,
   consumeGuestSingleUseTokenLocally,
   fetchHostAuthStatus,
@@ -120,7 +119,6 @@ import {
   useHostAuthSession,
   usePublicAccessOpen,
   verifyHostCode,
-  type HostAuthStatus,
 } from '../lib/hostAuth';
 import {
   getLocalizedDifficulty,
@@ -549,31 +547,13 @@ export function PhoneController({
   const hostSession = useHostAuthSession();
   const publicAccessOpen = usePublicAccessOpen();
   const pocketPinUnlocked = Boolean(hostSession?.token) || publicAccessOpen;
-  const [pocketAuthStatus, setPocketAuthStatus] = useState<HostAuthStatus | null>(null);
   const [pocketPinInput, setPocketPinInput] = useState('');
-  const [pocketConfirmPinInput, setPocketConfirmPinInput] = useState('');
   const [pocketPinSubmitting, setPocketPinSubmitting] = useState(false);
   const [pocketPinError, setPocketPinError] = useState<string | null>(null);
 
   useEffect(() => {
     if (entryMode !== 'pocket') return;
-    let cancelled = false;
-    fetchHostAuthStatus()
-      .then((res) => {
-        if (!cancelled) setPocketAuthStatus(res);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPocketAuthStatus({
-            masterConfigured: true,
-            usingEnvPin: false,
-            publicAccessOpen: false,
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+    void fetchHostAuthStatus().catch(() => {});
   }, [entryMode]);
 
   const [roomCode, setRoomCode] = useState(initialRoomCode.toUpperCase());
@@ -1454,9 +1434,6 @@ export function PhoneController({
               exitFullscreenAndUnlock();
               clearHostAuthSession();
               setPublicAccessOpenLocally(false);
-              setPocketAuthStatus((prev) =>
-                prev ? { ...prev, publicAccessOpen: false } : null
-              );
               setPocketPinError(msg.message);
             } else if (msg.code === 'ROOM_NOT_FOUND' && joinedPlayerIdRef.current) {
               exitFullscreenAndUnlock();
@@ -1713,7 +1690,6 @@ export function PhoneController({
         setErrorMsg(null);
         try {
           const status = await fetchHostAuthStatus();
-          setPocketAuthStatus(status);
           isPublicOpen = status.publicAccessOpen;
           if (!isPublicOpen) {
             const cleanedPin = pocketPinInput.trim();
@@ -1723,27 +1699,9 @@ export function PhoneController({
               );
               return;
             }
-            if (!status.masterConfigured) {
-              if (cleanedPin.length < 4 || cleanedPin.length > 24) {
-                setPocketPinError(
-                  t('Master PIN must be 4–24 characters.', '房主管理密码长度需为 4–24 位。')
-                );
-                return;
-              }
-              if (cleanedPin !== pocketConfirmPinInput.trim()) {
-                setPocketPinError(
-                  t('PIN confirmation does not match.', '两次输入的密码不一致。')
-                );
-                return;
-              }
-              const sess = await claimInitialMasterPin(cleanedPin);
-              authToken = sess.token;
-            } else {
-              const sess = await verifyHostCode(cleanedPin);
-              authToken = sess.token;
-            }
+            const sess = await verifyHostCode(cleanedPin);
+            authToken = sess.token;
             setPocketPinInput('');
-            setPocketConfirmPinInput('');
           }
         } catch (err) {
           setPocketPinError(
@@ -2573,50 +2531,12 @@ export function PhoneController({
                     onClick={() => {
                       clearHostAuthSession();
                       setPocketPinInput('');
-                      setPocketConfirmPinInput('');
                       setPocketPinError(null);
                     }}
                     className="px-2.5 py-1 rounded-lg bg-[#1A1E26] hover:bg-[#242A36] border border-[#2F3747] text-[11px] font-bold text-[#9CA3AF] hover:text-white shrink-0 cursor-pointer"
                   >
                     {t('Lock', '锁定')}
                   </button>
-                )}
-              </div>
-            ) : pocketAuthStatus !== null && !pocketAuthStatus.masterConfigured ? (
-              <div className="space-y-2.5 p-3.5 rounded-xl bg-[#10D98B]/10 border border-[#10D98B]/35">
-                <div className="flex items-center gap-2 text-xs font-bold text-[#10D98B]">
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                  <span>{t('First-Run Setup: Create Your Owner Master PIN', '首次使用：请设置房主专属管理密码')}</span>
-                </div>
-                <input
-                  id={`pocket-pin-${sessionKey}`}
-                  type="password"
-                  maxLength={24}
-                  autoComplete="off"
-                  value={pocketPinInput}
-                  onChange={(e) => {
-                    setPocketPinInput(e.target.value);
-                    setPocketPinError(null);
-                  }}
-                  placeholder={t('New PIN (4–24 chars)', '设置密码（4–24位）')}
-                  aria-label={t('New Master PIN', '设置新管理密码')}
-                  className="w-full h-12 px-4 rounded-xl bg-[#121419] border border-[#2F3747] focus:border-[#10D98B] focus:outline-none font-mono text-lg font-bold tracking-[0.25em] text-center text-white placeholder:text-xs placeholder:tracking-normal placeholder:font-sans"
-                />
-                <input
-                  type="password"
-                  maxLength={24}
-                  autoComplete="off"
-                  value={pocketConfirmPinInput}
-                  onChange={(e) => {
-                    setPocketConfirmPinInput(e.target.value);
-                    setPocketPinError(null);
-                  }}
-                  placeholder={t('Confirm Master PIN', '再次确认管理密码')}
-                  aria-label={t('Confirm Master PIN', '再次确认管理密码')}
-                  className="w-full h-11 px-4 rounded-xl bg-[#121419] border border-[#2F3747] focus:border-[#10D98B] focus:outline-none font-mono text-base font-bold tracking-[0.25em] text-center text-white placeholder:text-xs placeholder:tracking-normal placeholder:font-sans"
-                />
-                {pocketPinError && (
-                  <p className="text-xs font-semibold text-[#FF4D2E] text-center">{pocketPinError}</p>
                 )}
               </div>
             ) : (
