@@ -17,6 +17,7 @@ import {
   Power,
   QrCode,
   Search,
+  Share2,
   Shuffle,
   SlidersHorizontal,
   Sparkles,
@@ -49,6 +50,7 @@ import {
   useLanguage,
 } from '../lib/i18n';
 import { getJoinUrl } from '../lib/ws';
+import { copyRoomInvite, shareRoomInvite } from '../lib/shareInvite';
 import { GameThumbnail } from './GameThumbnail';
 import { PlayerAvatar } from './PlayerAvatar';
 
@@ -124,6 +126,8 @@ export function PocketLobbyView({
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<null | 'shared' | 'copied'>(null);
+  const shareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
   const filterRef = useRef<HTMLDivElement | null>(null);
 
@@ -181,13 +185,30 @@ export function PocketLobbyView({
       .catch(() => setQrDataUrl(''));
   }, [qrOpen, room.code, lang]);
 
+  useEffect(() => {
+    return () => {
+      if (shareTimerRef.current) clearTimeout(shareTimerRef.current);
+    };
+  }, []);
+
+  const handleOneTapShare = async () => {
+    const result = await shareRoomInvite({
+      roomCode: room.code,
+      lang,
+      gameName: selectedMeta.name,
+    });
+    if (result === 'shared' || result === 'copied') {
+      setShareFeedback(result);
+      if (shareTimerRef.current) clearTimeout(shareTimerRef.current);
+      shareTimerRef.current = setTimeout(() => setShareFeedback(null), 1800);
+    }
+  };
+
   const handleCopyInvite = async () => {
-    try {
-      await navigator.clipboard.writeText(getJoinUrl(room.code, lang));
+    const ok = await copyRoomInvite(room.code, lang);
+    if (ok) {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 1600);
-    } catch {
-      // Ignore clipboard failure on restricted browsers
     }
   };
 
@@ -282,18 +303,30 @@ export function PocketLobbyView({
                   '好友用手机扫码或在首页输入 4 位房间码即可直接加入同屏联机。'
                 )}
               </p>
-              <button
-                type="button"
-                onClick={handleCopyInvite}
-                className="tactile-btn h-9 w-full rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-extrabold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>
-                  {copiedLink
-                    ? t('Invite Link Copied!', '已复制邀请链接！')
-                    : t('Copy Invite Link', '复制邀请链接')}
-                </span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOneTapShare}
+                  className="tactile-btn h-9 flex-1 rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-extrabold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  {shareFeedback ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                  <span>
+                    {shareFeedback === 'shared'
+                      ? t('Invite Shared!', '已分享邀请！')
+                      : shareFeedback === 'copied'
+                      ? t('Link Copied!', '已复制链接！')
+                      : t('Share Invite', '一键分享邀请')}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyInvite}
+                  className="h-9 px-3 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white font-bold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-[#10D98B]" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedLink ? t('Copied', '已复制') : t('Copy', '复制')}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -530,11 +563,32 @@ export function PocketLobbyView({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
+            onClick={handleOneTapShare}
+            title={t('1-tap share room invite link', '一键分享房间邀请链接')}
+            className={`tactile-btn h-7 px-2.5 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap transition-colors ${
+              shareFeedback
+                ? 'bg-[#10D98B] text-[#0A1913]'
+                : 'bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219]'
+            }`}
+          >
+            {shareFeedback ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+            <span>
+              {shareFeedback === 'shared'
+                ? t('Shared!', '已分享!')
+                : shareFeedback === 'copied'
+                ? t('Copied!', '已复制!')
+                : t('Share', '邀请')}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setQrOpen(true)}
-            className="tactile-btn h-7 px-2 rounded-lg bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+            aria-label={t('Show room QR code', '显示房间二维码')}
+            title={t('Show QR Code', '扫码加入二维码')}
+            className="h-7 w-7 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-[#00C2FF] flex items-center justify-center cursor-pointer"
           >
             <QrCode className="w-3.5 h-3.5" />
-            <span>{t('Invite', '邀请')}</span>
           </button>
 
           <button

@@ -85,6 +85,7 @@ interface MelonPlayerSim {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  maxCooldownB: number;
   prevA: boolean;
   prevB: boolean;
 }
@@ -122,6 +123,7 @@ export const melonMergeModule: ServerGameModule<MelonMergeState, MelonMergeSnaps
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
+        maxCooldownB: 4.5,
         prevA: false,
         prevB: false,
       };
@@ -190,7 +192,9 @@ export const melonMergeModule: ServerGameModule<MelonMergeState, MelonMergeSnaps
       // Shake tank
       if (bPressed && sp.cooldownB <= 0) {
         sp.shakeTimer = 0.45;
-        sp.cooldownB = frenzyActive ? 2.5 : 4.5;
+        const maxCdB = frenzyActive ? 2.5 : 4.5;
+        sp.cooldownB = maxCdB;
+        sp.maxCooldownB = maxCdB;
         for (const f of sp.fruits) {
           f.vx += (Math.random() - 0.5) * 0.7;
           f.vy -= 0.35 + Math.random() * 0.2;
@@ -334,8 +338,8 @@ export const melonMergeModule: ServerGameModule<MelonMergeState, MelonMergeSnaps
         overflowed: p.overflowed,
         shakeTimer: p.shakeTimer,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.42, 0, 1),
+        cooldownB: clamp(p.cooldownB / Math.max(0.1, p.maxCooldownB || 4.5), 0, 1),
       })),
     };
   },
@@ -367,6 +371,7 @@ interface TileTriplePlayerSim {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  maxCooldownB: number;
   navCooldown: number;
   prevA: boolean;
   prevB: boolean;
@@ -452,6 +457,7 @@ export const tileTripleModule: ServerGameModule<TileTripleState, TileTripleSnaps
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
+        maxCooldownB: 6.0,
         navCooldown: 0,
         prevA: false,
         prevB: false,
@@ -562,7 +568,9 @@ export const tileTripleModule: ServerGameModule<TileTripleState, TileTripleSnaps
         rem.forEach((t, i) => {
           t.symbol = syms[i];
         });
-        sp.cooldownB = frenzyActive ? 3.0 : 6.0;
+        const maxCdB = frenzyActive ? 3.0 : 6.0;
+        sp.cooldownB = maxCdB;
+        sp.maxCooldownB = maxCdB;
         sounds.push({ type: 'dash', playerId: sp.id });
       }
     }
@@ -590,8 +598,8 @@ export const tileTripleModule: ServerGameModule<TileTripleState, TileTripleSnaps
         failed: p.failed,
         tiles: p.tiles.map((t) => ({ ...t })),
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.2, 0, 1),
+        cooldownB: clamp(p.cooldownB / Math.max(0.1, p.maxCooldownB || 6.0), 0, 1),
       })),
     };
   },
@@ -772,7 +780,11 @@ export const blockHopModule: ServerGameModule<BlockHopState, BlockHopSnapshot> =
           sounds.push({ type: 'dash', playerId: sp.id });
         }
       } else {
-        // Air brake trims target slightly backward
+        // Subtle mid-air nudge + Air brake
+        const nudgeX = clamp(inp?.input.moveX ?? 0, -1, 1);
+        const nudgeY = clamp(inp?.input.moveY ?? 0, -1, 1);
+        sp.targetX += nudgeX * dt * 65;
+        sp.targetY += nudgeY * dt * 45;
         if (bPressed && sp.cooldownB <= 0) {
           sp.targetX = sp.x + (sp.targetX - sp.x) * 0.65;
           sp.targetY = sp.y + (sp.targetY - sp.y) * 0.65;
@@ -858,8 +870,8 @@ export const blockHopModule: ServerGameModule<BlockHopState, BlockHopSnapshot> =
         bullseyeStreak: p.bullseyeStreak,
         alive: p.alive,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: 0,
+        cooldownB: clamp(p.cooldownB / 1.5, 0, 1),
       })),
     };
   },
@@ -904,6 +916,7 @@ interface PlatformLeapState {
   timeLeft: number;
   cameraY: number;
   lavaY: number;
+  lavaGrace: number;
   highestGenY: number;
   platforms: SkyPlatSim[];
   banner: string | null;
@@ -940,7 +953,8 @@ export const platformLeapModule: ServerGameModule<PlatformLeapState, PlatformLea
     const st: PlatformLeapState = {
       timeLeft: totalTime,
       cameraY: 0,
-      lavaY: 640,
+      lavaY: 760,
+      lavaGrace: 2.5,
       highestGenY: 540,
       platforms: [
         { id: 'floor', x: 60, y: 540, w: ARENA_WIDTH - 120, kind: 'solid', cracked: false, vx: 0 },
@@ -1074,8 +1088,12 @@ export const platformLeapModule: ServerGameModule<PlatformLeapState, PlatformLea
     state.cameraY += (targetCam - state.cameraY) * Math.min(1, dt * 5);
     generateSkyPlatforms(state, state.cameraY - 900);
 
-    const lavaSpeed = frenzyActive ? 98 : 66;
-    state.lavaY = Math.min(state.lavaY - lavaSpeed * dt, state.cameraY + ARENA_HEIGHT + 40);
+    if (state.lavaGrace > 0) {
+      state.lavaGrace = Math.max(0, state.lavaGrace - dt);
+    } else {
+      const lavaSpeed = frenzyActive ? 74 : 50;
+      state.lavaY = Math.min(state.lavaY - lavaSpeed * dt, state.cameraY + ARENA_HEIGHT + 40);
+    }
 
     // Check lava elimination
     for (const sp of state.players) {
@@ -1119,8 +1137,8 @@ export const platformLeapModule: ServerGameModule<PlatformLeapState, PlatformLea
         maxAltitude: p.maxAltitude,
         stompTimer: p.stompTimer,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.55, 0, 1),
+        cooldownB: clamp(p.cooldownB / 1.6, 0, 1),
       })),
     };
   },
@@ -1157,6 +1175,7 @@ interface EggPlayerSim {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  maxCooldownB: number;
   prevA: boolean;
   prevB: boolean;
 }
@@ -1219,6 +1238,7 @@ export const eggRushModule: ServerGameModule<EggRushState, EggRushSnapshot> = {
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
+        maxCooldownB: 4.2,
         prevA: false,
         prevB: false,
       })),
@@ -1268,7 +1288,9 @@ export const eggRushModule: ServerGameModule<EggRushState, EggRushSnapshot> = {
       if (bPressed && sp.cooldownB <= 0) {
         sp.rollTimer = 2.0;
         sp.rolling = true;
-        sp.cooldownB = frenzyActive ? 1.8 : 4.2;
+        const maxCdB = frenzyActive ? 1.8 : 4.2;
+        sp.cooldownB = maxCdB;
+        sp.maxCooldownB = maxCdB;
         sounds.push({ type: 'score', playerId: sp.id });
       }
 
@@ -1386,8 +1408,8 @@ export const eggRushModule: ServerGameModule<EggRushState, EggRushSnapshot> = {
         finishRank: p.finishRank,
         progressPct: Math.min(100, Math.round((p.x / state.trackLength) * 100)),
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.45, 0, 1),
+        cooldownB: clamp(p.cooldownB / Math.max(0.1, p.maxCooldownB || 4.2), 0, 1),
       })),
     };
   },
@@ -1422,6 +1444,7 @@ interface GoosePlayerSim {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  maxCooldownB: number;
   prevB: boolean;
 }
 
@@ -1478,6 +1501,7 @@ export const gooseAlertModule: ServerGameModule<GooseAlertState, GooseAlertSnaps
           score: 0,
           cooldownA: 0,
           cooldownB: duckIds.has(p.id) ? 1.5 : 1.0,
+          maxCooldownB: duckIds.has(p.id) ? 1.5 : 1.0,
           prevB: false,
         };
       }),
@@ -1547,7 +1571,9 @@ export const gooseAlertModule: ServerGameModule<GooseAlertState, GooseAlertSnaps
       if (bPressed && sp.cooldownB <= 0) {
         if (sp.role === 'goose') {
           sp.honkWaveTimer = 0.65;
-          sp.cooldownB = frenzyActive ? 3.5 : 5.5;
+          const maxCdB = frenzyActive ? 3.5 : 5.5;
+          sp.cooldownB = maxCdB;
+          sp.maxCooldownB = maxCdB;
           const scanR = frenzyActive ? 290 : 210;
           sounds.push({ type: 'tick', playerId: sp.id });
           for (const other of state.players) {
@@ -1568,10 +1594,12 @@ export const gooseAlertModule: ServerGameModule<GooseAlertState, GooseAlertSnaps
             sp.revealedTimer = 1.6;
             sp.score += frenzyActive ? 380 : 240;
             sp.cooldownB = 3.4;
+            sp.maxCooldownB = 3.4;
             sounds.push({ type: 'elim', playerId: victim.id });
             state.popups.push({ x: victim.x, y: victim.y - 24, text: 'QUACKED!', colorHex: '#EF4444', alpha: 1 });
           } else {
             sp.cooldownB = 1.0;
+            sp.maxCooldownB = 1.0;
           }
         }
       }
@@ -1618,8 +1646,8 @@ export const gooseAlertModule: ServerGameModule<GooseAlertState, GooseAlertSnaps
         tasksDone: p.tasksDone,
         tags: p.tags,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 1.6, 0, 1),
+        cooldownB: clamp(p.cooldownB / Math.max(0.1, p.maxCooldownB || 3.4), 0, 1),
       })),
     };
   },
@@ -1910,8 +1938,8 @@ export const hotpotRushModule: ServerGameModule<HotpotRushState, HotpotRushSnaps
         spicyBurnTimer: p.spicyBurnTimer,
         bites: p.bites,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.34, 0, 1),
+        cooldownB: clamp(p.cooldownB / 2.0, 0, 1),
       })),
     };
   },
@@ -1948,6 +1976,7 @@ interface ClawPlayerSim {
   score: number;
   cooldownA: number;
   cooldownB: number;
+  maxCooldownB: number;
   prevA: boolean;
   prevB: boolean;
 }
@@ -2039,6 +2068,7 @@ export const clawManiaModule: ServerGameModule<ClawManiaState, ClawManiaSnapshot
         score: 0,
         cooldownA: 0,
         cooldownB: 0,
+        maxCooldownB: 8.0,
         prevA: false,
         prevB: false,
       })),
@@ -2083,7 +2113,9 @@ export const clawManiaModule: ServerGameModule<ClawManiaState, ClawManiaSnapshot
 
       if (bPressed && sp.cooldownB <= 0) {
         sp.magnetTimer = 4.2;
-        sp.cooldownB = frenzyActive ? 5.0 : 8.0;
+        const maxCdB = frenzyActive ? 5.0 : 8.0;
+        sp.cooldownB = maxCdB;
+        sp.maxCooldownB = maxCdB;
         sounds.push({ type: 'dash', playerId: sp.id });
       }
 
@@ -2178,8 +2210,8 @@ export const clawManiaModule: ServerGameModule<ClawManiaState, ClawManiaSnapshot
         magnetTimer: p.magnetTimer,
         prizesWon: p.prizesWon,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.25, 0, 1),
+        cooldownB: clamp(p.cooldownB / Math.max(0.1, p.maxCooldownB || 8.0), 0, 1),
       })),
     };
   },
@@ -2401,8 +2433,8 @@ export const truthBombModule: ServerGameModule<TruthBombState, TruthBombSnapshot
         hasBomb: p.id === holder.id,
         daresCompleted: p.daresCompleted,
         score: p.score,
-        cooldownA: p.cooldownA,
-        cooldownB: p.cooldownB,
+        cooldownA: clamp(p.cooldownA / 0.45, 0, 1),
+        cooldownB: 0,
       })),
     };
   },

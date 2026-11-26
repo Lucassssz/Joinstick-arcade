@@ -20,9 +20,11 @@ interface RealtimeBotMemory {
   orbitDir: number;
   opponentHasMoved: boolean;
   pendingA: boolean;
+  holdingA: boolean;
   readyAtA: number;
   cooldownUntilA: number;
   pendingB: boolean;
+  holdingB: boolean;
   readyAtB: number;
   cooldownUntilB: number;
 }
@@ -61,9 +63,11 @@ function getOrCreateMemory(
       orbitDir: seedAngle % 2 > 1 ? 1 : -1,
       opponentHasMoved: false,
       pendingA: false,
+      holdingA: false,
       readyAtA: 0,
       cooldownUntilA: 0,
       pendingB: false,
+      holdingB: false,
       readyAtB: 0,
       cooldownUntilB: 0,
     };
@@ -117,6 +121,10 @@ export interface RealtimeBotAdapterInput {
   wantsActionB?: boolean;
   /** Whether Action B is an aggressive attack */
   isAggressiveActionB?: boolean;
+  /** True when Action A is a continuous hold-to-charge input (keep held until wantsActionA turns false) */
+  holdActionA?: boolean;
+  /** True when Action B is a continuous hold input */
+  holdActionB?: boolean;
   /** True for lane/grid/cursor real-time games where dx/dy should not be rotated by 2D angular aimError */
   discreteSteering?: boolean;
 }
@@ -370,6 +378,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
     profile,
     mem,
     'A',
+    Boolean(input.holdActionA),
   );
   const fireB = evaluateButtonReaction(
     Boolean(input.wantsActionB),
@@ -379,6 +388,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
     profile,
     mem,
     'B',
+    Boolean(input.holdActionB),
   );
 
   return {
@@ -397,13 +407,41 @@ function evaluateButtonReaction(
   profile: UniversalBotProfile,
   mem: RealtimeBotMemory,
   btn: 'A' | 'B',
+  isHoldMode = false,
 ): boolean {
   const pendingKey = btn === 'A' ? 'pendingA' : 'pendingB';
+  const holdingKey = btn === 'A' ? 'holdingA' : 'holdingB';
   const readyKey = btn === 'A' ? 'readyAtA' : 'readyAtB';
   const cooldownKey = btn === 'A' ? 'cooldownUntilA' : 'cooldownUntilB';
 
   if (inStartDelay && isAggressive) {
     mem[pendingKey] = false;
+    mem[holdingKey] = false;
+    return false;
+  }
+
+  if (isHoldMode) {
+    if (!wantsAction) {
+      if (mem[holdingKey]) {
+        mem[holdingKey] = false;
+        mem[cooldownKey] = clockSec + profile.reactionTime * 0.45;
+      }
+      mem[pendingKey] = false;
+      return false;
+    }
+    if (mem[holdingKey]) {
+      return true;
+    }
+    if (!mem[pendingKey] && clockSec >= mem[cooldownKey]) {
+      mem[pendingKey] = true;
+      const jitter = 0.75 + Math.random() * 0.3;
+      mem[readyKey] = clockSec + profile.reactionTime * jitter;
+    }
+    if (mem[pendingKey] && clockSec >= mem[readyKey]) {
+      mem[pendingKey] = false;
+      mem[holdingKey] = true;
+      return true;
+    }
     return false;
   }
 

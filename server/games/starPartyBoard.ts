@@ -38,7 +38,7 @@ interface StarPartyState {
 
 const TOTAL_TILES = 20;
 const STAR_COST = 20;
-const TURN_TIMEOUT = 14;
+const TURN_TIMEOUT = 11;
 
 function buildIslandTiles(): StarPartyTileState[] {
   const cx = ARENA_WIDTH / 2;
@@ -176,7 +176,7 @@ export const starPartyBoardModule: ServerGameModule<StarPartyState> = {
 
         if (justA || state.turnTimeLeft <= 0) {
           state.phase = 'rolling';
-          state.phaseTimer = 0.85;
+          state.phaseTimer = 0.55;
           state.diceRolling = true;
           state.diceValue = 1 + Math.floor(Math.random() * 6);
           sounds.push({ type: 'confirm', playerId: active.id });
@@ -200,7 +200,7 @@ export const starPartyBoardModule: ServerGameModule<StarPartyState> = {
           sounds.push({ type: 'bump', playerId: active.id });
         }
       } else if (state.phase === 'moving') {
-        state.hopProgress += dt * 4.4;
+        state.hopProgress += dt * 6.6;
         if (state.hopProgress >= 1) {
           state.hopProgress = 0;
           active.tileIndex = (active.tileIndex + 1) % TOTAL_TILES;
@@ -271,7 +271,7 @@ export const starPartyBoardModule: ServerGameModule<StarPartyState> = {
             }
             syncScore(active);
             state.phase = 'event';
-            state.phaseTimer = 1.35;
+            state.phaseTimer = 0.72;
           }
         } else {
           active.visualTile = (active.tileIndex + state.hopProgress) % TOTAL_TILES;

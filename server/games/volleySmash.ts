@@ -23,6 +23,8 @@ interface VolleySmashState {
   goalBanner: string | null;
   goalBannerColor: string | null;
   rallyCount: number;
+  matchTimeLeft: number;
+  suddenDeath: boolean;
   soloHoloTimer: number;
   ball: {
     x: number;
@@ -132,6 +134,8 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
       goalBanner: null,
       goalBannerColor: null,
       rallyCount: 0,
+      matchTimeLeft: 95,
+      suddenDeath: false,
       soloHoloTimer: 0,
       ball: {
         x: NET_X - 180,
@@ -173,12 +177,30 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
       if (state.popups[i].alpha <= 0) state.popups.splice(i, 1);
     }
 
+    if (!state.finished && state.resetTimer <= 0) {
+      state.matchTimeLeft = Math.max(0, state.matchTimeLeft - dt);
+      if (state.matchTimeLeft <= 0 && !state.suddenDeath) {
+        if (state.scoreRed !== state.scoreBlue) {
+          state.finished = true;
+          sounds.push({ type: 'win' });
+        } else {
+          state.suddenDeath = true;
+          state.goalBanner = 'SUDDEN DEATH · NEXT POINT WINS!';
+          state.goalBannerColor = '#FFB800';
+        }
+      }
+    }
+
     if (state.resetTimer > 0) {
       state.resetTimer -= dt;
       if (state.resetTimer <= 0) {
         state.goalBanner = null;
         state.goalBannerColor = null;
-        if (state.scoreRed >= state.targetPoints || state.scoreBlue >= state.targetPoints) {
+        if (
+          state.scoreRed >= state.targetPoints ||
+          state.scoreBlue >= state.targetPoints ||
+          (state.suddenDeath && state.scoreRed !== state.scoreBlue)
+        ) {
           state.finished = true;
         } else {
           resetServe(state, state.servingTeam);
@@ -236,10 +258,11 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
             COURT_TOP + 52,
             Math.min(COURT_BOTTOM - 52, p.y + dy * 185)
           );
-          const flightTime = 1.25;
+          const rallyMult = 1 + Math.min(0.85, state.rallyCount * 0.065) + (state.suddenDeath ? 0.3 : 0);
+          const flightTime = 1.25 / rallyMult;
           state.ball.vx = (aimX - state.ball.x) / flightTime;
           state.ball.vy = (aimY - state.ball.y) / flightTime;
-          state.ball.vz = 230;
+          state.ball.vz = 230 / Math.sqrt(rallyMult);
           state.ball.z = Math.max(46, state.ball.z);
           state.ball.hot = false;
           state.ball.lastTouchColor = p.colorHex;
@@ -280,10 +303,11 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
             COURT_TOP + 48,
             Math.min(COURT_BOTTOM - 48, p.y + dy * 210)
           );
-          const flightTime = 0.84;
+          const rallyMult = 1 + Math.min(0.85, state.rallyCount * 0.065) + (state.suddenDeath ? 0.3 : 0);
+          const flightTime = 0.84 / rallyMult;
           state.ball.vx = (aimX - state.ball.x) / flightTime;
           state.ball.vy = (aimY - state.ball.y) / flightTime;
-          state.ball.vz = 152;
+          state.ball.vz = 152 / Math.sqrt(rallyMult);
           state.ball.z = Math.max(62, state.ball.z);
           state.ball.hot = true;
           state.ball.lastTouchColor = p.colorHex;
@@ -314,12 +338,13 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
         }
       }
 
-      // Forgiving Auto-Bump when directly under a descending ball
+      // Forgiving Auto-Bump when directly under a descending ball (tightens during hot rallies)
+      const autoRadius = state.rallyCount >= 5 ? 30 : 44;
       if (
         state.resetTimer <= 0 &&
         onMySide &&
-        distBall < 48 &&
-        state.ball.z < 44 &&
+        distBall < autoRadius &&
+        state.ball.z < 42 &&
         state.ball.vz < 0
       ) {
         const targetDir = p.team === 'red' ? 1 : -1;
@@ -328,10 +353,11 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
           COURT_TOP + 58,
           Math.min(COURT_BOTTOM - 58, p.y + (Math.random() - 0.5) * 140)
         );
-        const flightTime = 1.28;
+        const rallyMult = 1 + Math.min(0.85, state.rallyCount * 0.065) + (state.suddenDeath ? 0.3 : 0);
+        const flightTime = 1.28 / rallyMult;
         state.ball.vx = (aimX - state.ball.x) / flightTime;
         state.ball.vy = (aimY - state.ball.y) / flightTime;
-        state.ball.vz = 225;
+        state.ball.vz = 225 / Math.sqrt(rallyMult);
         state.ball.z = 46;
         state.ball.hot = false;
         state.ball.lastTouchColor = p.colorHex;
@@ -431,7 +457,7 @@ export const volleySmashModule: ServerGameModule<VolleySmashState> = {
           state.goalBannerColor = '#00C2FF';
         }
         state.servingTeam = scoringTeam;
-        state.resetTimer = 1.55;
+        state.resetTimer = state.suddenDeath ? 0.6 : 1.35;
 
         for (const p of state.players) {
           if (p.team === scoringTeam) {

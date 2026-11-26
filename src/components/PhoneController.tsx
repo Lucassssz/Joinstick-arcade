@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowUp,
   Bomb,
+  BookOpen,
   Bot,
   Check,
   ChevronDown,
@@ -19,10 +20,13 @@ import {
   Footprints,
   Gamepad2,
   Gauge,
+  HelpCircle,
+  Home,
   Loader2,
   LogOut,
   Maximize2,
   Minimize2,
+  MoreHorizontal,
   Move,
   Paintbrush,
   Pause,
@@ -31,6 +35,7 @@ import {
   RefreshCw,
   Repeat,
   RotateCcw,
+  Share2,
   Shield,
   SlidersHorizontal,
   Smile,
@@ -99,6 +104,7 @@ import {
   ServerMessage,
 } from '../shared/types';
 import { ManagedWebSocket, SocketStatus } from '../lib/ws';
+import { shareRoomInvite } from '../lib/shareInvite';
 import {
   getLocalizedDifficulty,
   getLocalizedFilterLabel,
@@ -196,6 +202,21 @@ const TABLETOP_ZOOM_CARD_GAMES = new Set<GameId>([
   'liars-dice-tavern',
   'hearts-breaker',
   'spades-bidding',
+  'rummy-royale',
+  'poker-showdown',
+  'tarot-arcana',
+  'baccarat-club',
+  'sequence-jack',
+  'camel-stack-derby',
+  'route-express',
+  'gem-engine-guild',
+  'secret-rank-flags',
+  'row-six-bust',
+  'silent-sync',
+  'one-card-court',
+  'firework-hints',
+  'tunnel-saboteur',
+  'word-tile-crossroads',
 ]);
 
 function buildPocketCardSituation(
@@ -211,34 +232,122 @@ function buildPocketCardSituation(
   const snapPlayers = Array.isArray(s?.players)
     ? (s.players as Array<Record<string, unknown>>)
     : [];
+  const gameId = String(s?.gameId ?? room.selectedGameId);
 
   const players = room.players.map((rp) => {
     const sp = snapPlayers.find((p) => p.id === rp.id);
     let stat = rp.statText || `${rp.score}`;
+    let statusTag: string | null = null;
+    let statusTone: 'danger' | 'warn' | 'good' | 'neutral' = 'neutral';
+    const lastAction = typeof sp?.lastAction === 'string' && sp.lastAction ? sp.lastAction : null;
+
     if (sp) {
-      if (typeof sp.cardCount === 'number') {
+      if (typeof sp.bankCash === 'number' && typeof sp.setsCompleted === 'number') {
+        stat = `${sp.setsCompleted}★ $${sp.bankCash}M`;
+        if (typeof sp.cardCount === 'number') {
+          statusTag = `${sp.cardCount}🃏`;
+        }
+      } else if (typeof sp.influenceLeft === 'number') {
+        stat = `${sp.influenceLeft}♛ $${typeof sp.coins === 'number' ? sp.coins : 0}`;
+      } else if (typeof sp.roundPoints === 'number') {
+        const cardsArr = Array.isArray(sp.numberCards) ? sp.numberCards.length : undefined;
+        stat = cardsArr !== undefined ? `${sp.roundPoints}pt (${cardsArr})` : `${sp.roundPoints}pt`;
+      } else if (typeof sp.total === 'number') {
+        stat = `${sp.total}pt`;
+      } else if (typeof sp.handCount === 'number' && typeof sp.meldsCount === 'number') {
+        stat = `${sp.handCount}🃏 · ${sp.meldsCount}M`;
+      } else if (typeof sp.tricksWon === 'number') {
+        stat = `${sp.tricksWon}W`;
+        if (typeof sp.heartsTaken === 'number' && sp.heartsTaken > 0) {
+          statusTag = `♥${sp.heartsTaken}`;
+          statusTone = 'danger';
+        } else if (typeof sp.spadesPlayed === 'number' && sp.spadesPlayed > 0) {
+          statusTag = `♠${sp.spadesPlayed}`;
+          statusTone = 'neutral';
+        }
+      } else if (typeof sp.routesClaimed === 'number') {
+        stat = `${sp.routesClaimed}🚂 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.gems === 'number') {
+        stat = `${sp.gems}💎 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.flagsCaptured === 'number') {
+        stat = `${sp.flagsCaptured}🚩 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.bullsTaken === 'number') {
+        stat = `${sp.bullsTaken}🐮 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.synced === 'number') {
+        stat = `${sp.synced}✓ · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.favors === 'number') {
+        stat = `${sp.favors}👑 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.launched === 'number') {
+        stat = `${sp.launched}🎆 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.goldFound === 'number') {
+        stat = `${sp.goldFound}⛏️ · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.wordsBuilt === 'number') {
+        stat = `${sp.wordsBuilt}🔤 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.coins === 'number' && typeof sp.betColor !== 'undefined') {
+        stat = `${sp.coins}🪙 · ${typeof sp.score === 'number' ? sp.score : 0}pt`;
+      } else if (typeof sp.cardCount === 'number') {
         stat = `${sp.cardCount}🃏`;
       } else if (typeof sp.handCount === 'number') {
         stat = `${sp.handCount}🃏`;
       } else if (typeof sp.chips === 'number') {
         stat = `$${sp.chips}`;
-      } else if (typeof sp.bankCash === 'number' && typeof sp.setsCompleted === 'number') {
-        stat = `${sp.setsCompleted}★ $${sp.bankCash}`;
-      } else if (typeof sp.roundPoints === 'number') {
-        stat = `${sp.roundPoints}pt`;
-      } else if (typeof sp.influenceLeft === 'number') {
-        stat = `${sp.influenceLeft}♛ $${typeof sp.coins === 'number' ? sp.coins : 0}`;
       } else if (typeof sp.totalScore === 'number') {
         stat = `${sp.totalScore}pt`;
+      } else if (typeof sp.score === 'number') {
+        stat = `${sp.score}pt`;
+      }
+
+      if (typeof sp.bustedCount === 'number' && sp.bustedCount > 0) {
+        statusTag = `${sp.bustedCount}/6 🔫`;
+        statusTone = sp.bustedCount >= 4 ? 'danger' : 'warn';
+      } else if (sp.cardCount === 1 || sp.handCount === 1) {
+        statusTag = lang === 'zh' ? '仅剩1张!' : '1 LEFT!';
+        statusTone = 'danger';
+      }
+
+      if (sp.status === 'busted' || sp.busted === true) {
+        statusTag = lang === 'zh' ? '爆牌' : 'BUST';
+        statusTone = 'danger';
+      } else if (sp.status === 'stayed' || sp.standing === true) {
+        statusTag = lang === 'zh' ? '停牌' : 'STAY';
+        statusTone = 'good';
+      } else if (sp.status === 'flip7') {
+        statusTag = 'FLIP 7!';
+        statusTone = 'good';
+      } else if (typeof sp.handRankLabel === 'string' && sp.handRankLabel) {
+        statusTag = sp.handRankLabel;
+        statusTone = 'good';
+      } else if (sp.locked === true) {
+        statusTag = lang === 'zh' ? '已锁牌' : 'LOCKED';
+        statusTone = 'good';
+      } else if (sp.pickedThisStep === true) {
+        statusTag = lang === 'zh' ? '已选' : 'PICKED';
+        statusTone = 'good';
+      }
+
+      if (typeof s?.bankerId === 'string' && s.bankerId === rp.id && !statusTag) {
+        statusTag = lang === 'zh' ? '庄家' : 'BANKER';
+        statusTone = 'warn';
+      } else if ((sp.isLandlord === true || sp.role === 'landlord') && !statusTag) {
+        statusTag = lang === 'zh' ? '地主' : 'BOSS';
+        statusTone = 'warn';
       }
     }
-    const alive =
-      typeof sp?.alive === 'boolean' ? sp.alive : rp.alive;
+
+    const alive = typeof sp?.alive === 'boolean' ? sp.alive : rp.alive;
+    if (!alive) {
+      statusTag = lang === 'zh' ? '出局' : 'OUT';
+      statusTone = 'danger';
+    }
+
     return {
       id: rp.id,
       name: rp.name,
       colorHex: rp.color.hex,
       stat,
+      lastAction,
+      statusTag,
+      statusTone,
       isActive: activePlayerId ? rp.id === activePlayerId : false,
       isMe: rp.id === meId,
       alive,
@@ -251,11 +360,9 @@ function buildPocketCardSituation(
 
   let tableBadge: PocketCardSituation['tableBadge'] = null;
   const summaryParts: string[] = [];
+  let lastMoveText: string | null = null;
 
   if (s) {
-    const gameId = String(s.gameId ?? room.selectedGameId);
-
-    // Color Clash & Dark Flip Clash
     if ((gameId === 'color-clash' || gameId === 'dark-flip-clash') && s.topCard && typeof s.topCard === 'object') {
       const topCard = s.topCard as { color?: string; value?: string };
       const activeColKey = typeof s.activeColor === 'string' ? s.activeColor : topCard.color ?? 'red';
@@ -286,7 +393,7 @@ function buildPocketCardSituation(
         summaryParts.push(lang === 'zh' ? `桌面 ${s.pileCount} 张` : `Pile ${s.pileCount}`);
       }
       if (typeof s.lastClaimPlayerName === 'string' && typeof s.lastClaimCount === 'number') {
-        summaryParts.push(`${s.lastClaimPlayerName}: ${s.lastClaimCount}×${target}`);
+        lastMoveText = `${s.lastClaimPlayerName}: ${s.lastClaimCount}×${target}`;
       }
     } else if (gameId === 'boom-kittens') {
       const bombs = typeof s.bombsInDeck === 'number' ? s.bombsInDeck : 1;
@@ -298,7 +405,46 @@ function buildPocketCardSituation(
       };
       if (s.topDiscard && typeof s.topDiscard === 'object') {
         const td = s.topDiscard as { label?: string };
-        if (td.label) summaryParts.push(td.label);
+        if (td.label) lastMoveText = td.label;
+      }
+    } else if (gameId === 'royal-bluff' && s.pendingClaim && typeof s.pendingClaim === 'object') {
+      const pc = s.pendingClaim as { actorName?: string; actionName?: string; claimedRole?: string };
+      tableBadge = {
+        text: pc.claimedRole ?? 'CLAIM',
+        bg: '#FFB800',
+        fg: '#14120B',
+      };
+      if (pc.actorName && pc.actionName) {
+        lastMoveText = `${pc.actorName}: ${pc.actionName}`;
+      }
+    } else if (gameId === 'property-deal' && s.lastPlayedCard && typeof s.lastPlayedCard === 'object') {
+      const lpc = s.lastPlayedCard as { title?: string; badge?: string };
+      if (lpc.title) lastMoveText = `${lpc.badge ? `${lpc.badge} · ` : ''}${lpc.title}`;
+      if (typeof s.deckCount === 'number') {
+        tableBadge = {
+          text: lang === 'zh' ? `牌堆 ${s.deckCount}` : `DECK ${s.deckCount}`,
+          bg: '#10D98B',
+          fg: '#0A1913',
+        };
+      }
+    } else if (gameId === 'flip-seven' && s.lastFlipped && typeof s.lastFlipped === 'object') {
+      const lf = s.lastFlipped as { label?: string };
+      if (lf.label) lastMoveText = lf.label;
+      if (typeof s.targetScore === 'number') {
+        tableBadge = {
+          text: `${lang === 'zh' ? '目标' : 'GOAL'} ${s.targetScore}`,
+          bg: '#00C2FF',
+          fg: '#0B1219',
+        };
+      }
+    } else if (typeof s.tableComboName === 'string' && s.tableComboName) {
+      tableBadge = {
+        text: s.tableComboName,
+        bg: '#FFB800',
+        fg: '#14120B',
+      };
+      if (typeof s.trickOwnerName === 'string' && s.trickOwnerName) {
+        lastMoveText = `${s.trickOwnerName}: ${s.tableComboName}`;
       }
     } else if (typeof s.tableLabel === 'string' && s.tableLabel) {
       tableBadge = {
@@ -328,6 +474,9 @@ function buildPocketCardSituation(
 
     if (typeof s.dealerTotal === 'number' && s.dealerTotal > 0) {
       summaryParts.push(lang === 'zh' ? `庄家 ${s.dealerTotal}` : `Dealer ${s.dealerTotal}`);
+    }
+    if (!lastMoveText && typeof s.banner === 'string' && s.banner) {
+      lastMoveText = s.banner;
     }
     if (typeof s.banner === 'string' && s.banner && summaryParts.length < 2) {
       summaryParts.push(s.banner);
@@ -360,6 +509,7 @@ function buildPocketCardSituation(
     activePlayerColor: activePlayer?.colorHex,
     tableBadge,
     tableSummary: summaryParts.join(' · '),
+    lastMoveText,
     banner: typeof s?.banner === 'string' ? s.banner : null,
     players,
   };
@@ -426,6 +576,8 @@ export function PhoneController({
   const [joiningRoom, setJoiningRoom] = useState(false);
   const [autoTapPinned, setAutoTapPinned] = useState(false);
   const [emoteDrawerOpen, setEmoteDrawerOpen] = useState(false);
+  const [pocketMenuOpen, setPocketMenuOpen] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<null | 'shared' | 'copied'>(null);
   const [connectedGamepadName, setConnectedGamepadName] = useState<string | null>(null);
   const [floatingOriginOffset, setFloatingOriginOffset] = useState<{ x: number; y: number }>({
     x: 0,
@@ -436,7 +588,15 @@ export function PhoneController({
   const [pocketCardViewOverride, setPocketCardViewOverride] = useState<
     'auto' | 'show-hand' | 'show-table'
   >('auto');
+  const [pocketRulesOpen, setPocketRulesOpen] = useState(false);
+  const [pocketCoachDismissed, setPocketCoachDismissed] = useState(false);
+  const [pocketCoachExpired, setPocketCoachExpired] = useState(false);
+  const [pocketCardActed, setPocketCardActed] = useState(false);
   const prevCardTurnRef = useRef<boolean | null>(null);
+  const prevPocketMatchPhaseRef = useRef<{ status: RoomSnapshot['status'] | null; gameId: GameId | null }>({
+    status: null,
+    gameId: null,
+  });
 
   const latestSnapshotRef = useRef<GameSnapshot | null>(null);
   const latestCompetitiveRef = useRef<CompetitiveSnapshot | null>(null);
@@ -851,6 +1011,8 @@ export function PhoneController({
     setCloseRoomConfirmOpen(false);
     setRepositionMode(false);
     setEmoteDrawerOpen(false);
+    setPocketMenuOpen(false);
+    setPocketRulesOpen(false);
     setPocketCardViewOverride('auto');
     prevCardTurnRef.current = null;
     if (room?.status !== 'PLAYING' && room?.status !== 'COUNTDOWN' && room?.status !== 'PAUSED') {
@@ -861,6 +1023,41 @@ export function PhoneController({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.status, room?.selectedGameId, room?.hostPlayerId]);
+
+  // Reset in-game coach once per match start (preserving state across Pause -> Resume)
+  useEffect(() => {
+    const nextStatus = room?.status ?? null;
+    const nextGameId = room?.selectedGameId ?? null;
+    const prev = prevPocketMatchPhaseRef.current;
+    const gameChanged = nextGameId !== prev.gameId;
+    const enteredFreshMatch =
+      nextStatus === 'COUNTDOWN' ||
+      (nextStatus === 'PLAYING' && prev.status !== 'PAUSED' && prev.status !== 'COUNTDOWN' && prev.status !== 'PLAYING');
+
+    if (gameChanged || enteredFreshMatch) {
+      setPocketCoachDismissed(false);
+      setPocketCoachExpired(false);
+      setPocketCardActed(false);
+    }
+    prevPocketMatchPhaseRef.current = { status: nextStatus, gameId: nextGameId };
+  }, [room?.status, room?.selectedGameId]);
+
+  // Auto-fade the live Pocket Mode arcade coach strip after 6.5s of active play
+  useEffect(() => {
+    if (
+      room?.roomMode !== 'pocket' ||
+      room.status !== 'PLAYING' ||
+      CARD_GAME_IDS.has(room.selectedGameId) ||
+      pocketCoachDismissed ||
+      pocketCoachExpired
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setPocketCoachExpired(true);
+    }, 6500);
+    return () => window.clearTimeout(timer);
+  }, [room?.roomMode, room?.status, room?.selectedGameId, pocketCoachDismissed, pocketCoachExpired]);
 
   // Pocket Mode audio & BGM lifecycle
   useEffect(() => {
@@ -1562,7 +1759,8 @@ export function PhoneController({
   }, [isCardGame, cardState, isMyCardTurnNow]);
 
   const isPocketCardHandShown = Boolean(
-    cardState &&
+    room?.status !== 'COUNTDOWN' &&
+      cardState &&
       (pocketCardViewOverride === 'show-hand'
         ? true
         : pocketCardViewOverride === 'show-table'
@@ -1653,6 +1851,9 @@ export function PhoneController({
   );
 
   const sendCardAction = (action: CardClientAction) => {
+    if (action.type !== 'select-index' && action.type !== 'toggle-card') {
+      setPocketCardActed(true);
+    }
     wsRef.current?.send({ type: 'card:action', action });
   };
 
@@ -2063,14 +2264,33 @@ export function PhoneController({
         <p className="mt-2 text-sm text-[#9CA3AF] max-w-sm">
           {translateServerMessage(closedReason, lang)}
         </p>
-        <button
-          type="button"
-          onClick={() => setClosedReason(null)}
-          className="tactile-btn mt-6 px-6 py-3 rounded-xl bg-[#FF4D2E] text-white font-semibold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
-        >
-          <RotateCcw className="w-4 h-4" />
-          {t('Join Another Room', '加入其他房间')}
-        </button>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          {!embedded && (
+            <button
+              type="button"
+              onClick={() => {
+                setClosedReason(null);
+                if (onExit) {
+                  onExit();
+                } else if (typeof window !== 'undefined') {
+                  window.location.assign('/');
+                }
+              }}
+              className="tactile-btn px-6 py-3 rounded-xl bg-[#242A36] hover:bg-[#2E3646] border border-[#343C4D] text-white font-semibold text-sm inline-flex items-center gap-2 cursor-pointer"
+            >
+              <Home className="w-4 h-4" />
+              {t('Home', '返回首页')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setClosedReason(null)}
+            className="tactile-btn px-6 py-3 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-semibold text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 cursor-pointer"
+          >
+            <RotateCcw className="w-4 h-4" />
+            {t('Join Another Room', '加入其他房间')}
+          </button>
+        </div>
       </div>
     );
   }
@@ -3218,6 +3438,37 @@ export function PhoneController({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {!embedded && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await shareRoomInvite({
+                    roomCode: room.code,
+                    lang,
+                    gameName: gameMeta.name,
+                  });
+                  if (res === 'shared' || res === 'copied') {
+                    setInviteFeedback(res);
+                    setTimeout(() => setInviteFeedback(null), 1800);
+                  }
+                }}
+                title={t('1-tap share room invite link', '一键分享房间邀请链接')}
+                className={`h-9 px-2.5 rounded-lg text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors ${
+                  inviteFeedback
+                    ? 'bg-[#10D98B] text-[#0A1913]'
+                    : 'bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219]'
+                }`}
+              >
+                {inviteFeedback ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                <span>
+                  {inviteFeedback === 'shared'
+                    ? t('Shared!', '已分享!')
+                    : inviteFeedback === 'copied'
+                    ? t('Copied!', '已复制!')
+                    : t('Share', '邀请')}
+                </span>
+              </button>
+            )}
             {!embedded && <LanguageToggle compact className="h-9" />}
             {!embedded && (
               <button
@@ -3810,6 +4061,98 @@ export function PhoneController({
         )}
         {passHostOverlay}
         {closeRoomOverlay}
+        {isPocketRoom && pocketRulesOpen && (
+          <div className="absolute inset-0 z-50 bg-[#0B0E14]/92 backdrop-blur-md p-3 sm:p-5 flex items-center justify-center">
+            <div className="w-full max-w-3xl max-h-full rounded-2xl bg-[#151923] border border-white/15 p-3.5 sm:p-4 shadow-2xl flex flex-col gap-2.5 text-left overflow-hidden">
+              <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <BookOpen className="w-4 h-4 text-[#00C2FF] shrink-0" />
+                  <span className="font-display font-extrabold text-sm sm:text-base text-white truncate">
+                    {gameMeta.name}
+                  </span>
+                  <span className="text-[11px] font-semibold text-[#9CA3AF] truncate">
+                    · {gameMeta.category}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPocketRulesOpen(false)}
+                  aria-label={t('Close rules', '关闭规则')}
+                  className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-12 gap-3 overflow-y-auto arcade-scrollbar">
+                <div className="sm:col-span-7 space-y-2">
+                  <p className="text-xs sm:text-sm font-extrabold text-white leading-snug">
+                    {gameMeta.tagline}
+                  </p>
+                  {gameMeta.rules.length > 0 && (
+                    <ol className="space-y-1.5 pt-1.5 border-t border-white/10">
+                      {gameMeta.rules.map((rule, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-xs text-[#E5E7EB] leading-snug">
+                          <span
+                            className="font-mono text-[10px] font-black tabular-nums mt-0.5 shrink-0"
+                            style={{ color: gameMeta.accentHex }}
+                          >
+                            {String(idx + 1).padStart(2, '0')}.
+                          </span>
+                          <span className="flex-1">{rule}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  {room.activeMutator !== 'normal' && (
+                    <div className="pt-1.5 border-t border-white/10 text-xs leading-snug">
+                      <span className="font-extrabold" style={{ color: activeMutatorSpec.accentHex }}>
+                        {t('Chaos Rule', '混沌规则')}:{' '}
+                        {lang === 'zh' ? activeMutatorSpec.nameZh : activeMutatorSpec.name}
+                      </span>
+                      <span className="text-[#CBD5E1]">
+                        {' '}— {lang === 'zh' ? activeMutatorSpec.descriptionZh : activeMutatorSpec.description}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="sm:col-span-5 rounded-xl bg-[#0F131B] border border-white/10 p-3 space-y-2 h-fit">
+                  <div className="text-[11px] font-bold text-[#10D98B]">{t('Controls', '操作说明')}</div>
+                  {isCardGame ? (
+                    <p className="text-xs text-[#D1D5DB] leading-relaxed">
+                      {gameMeta.controllerSchema.controlTip}
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#9CA3AF]">{t('Move', '移动')}</span>
+                        <span className="font-bold text-white">{gameMeta.controllerSchema.joystickLabel}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#9CA3AF]">{t('Button A', 'A 键')}</span>
+                        <span className="font-bold" style={{ color: gameMeta.controllerSchema.actionA.colorHex }}>
+                          {gameMeta.controllerSchema.actionA.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#9CA3AF]">{t('Button B', 'B 键')}</span>
+                        <span className="font-bold" style={{ color: gameMeta.controllerSchema.actionB.colorHex }}>
+                          {gameMeta.controllerSchema.actionB.label}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPocketRulesOpen(false)}
+                className="h-9 w-full rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-display font-black text-xs cursor-pointer shrink-0"
+              >
+                {t('Back to Pause Menu', '返回暂停菜单')}
+              </button>
+            </div>
+          </div>
+        )}
         <div className="relative z-10 flex flex-col items-center gap-3 w-full">
           <div className="absolute -top-8 right-0 flex items-center gap-1.5">
             {!embedded && <LanguageToggle compact />}
@@ -3855,6 +4198,14 @@ export function PhoneController({
                     className="tactile-btn h-12 px-5 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-white font-display font-bold text-sm cursor-pointer"
                   >
                     {t('Switch Game', '切换游戏')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPocketRulesOpen(true)}
+                    className="tactile-btn h-12 px-4 rounded-xl bg-[#1A202C] hover:bg-[#252D3D] border border-[#00C2FF]/40 text-[#00C2FF] font-display font-bold text-sm inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>{t('Rules', '规则')}</span>
                   </button>
                 </div>
                 {otherPlayers.length > 0 && (
@@ -3916,13 +4267,25 @@ export function PhoneController({
               </div>
             )
           ) : (
-            <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
-              <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
-              <span>
-                {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
-                <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
-              </span>
-            </p>
+            <div className="flex flex-col items-center gap-2.5">
+              <p className="text-xs text-[#9CA3AF] inline-flex items-center justify-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 text-[#FFB800] animate-spin shrink-0" aria-hidden="true" />
+                <span>
+                  {t('Paused · Waiting for', '已暂停 · 等待')}{' '}
+                  <strong className="text-white">{hostPlayer?.name ?? t('the Host', '房主')}</strong>
+                </span>
+              </p>
+              {isPocketRoom && (
+                <button
+                  type="button"
+                  onClick={() => setPocketRulesOpen(true)}
+                  className="h-9 px-4 rounded-xl bg-[#1A202C] hover:bg-[#252D3D] border border-[#00C2FF]/40 text-[#00C2FF] font-display font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>{t('View Game Rules', '查看本局规则')}</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -3934,10 +4297,21 @@ export function PhoneController({
   // =====================================================================
   if (room.status === 'BRIEFING') {
     const schema = gameMeta.controllerSchema;
+    const activeSettingOpt = gameMeta.settingOptions.find(
+      (opt) => opt.value === room.gameSettingValue
+    );
+    const hasDistinctDescription =
+      Boolean(gameMeta.description) &&
+      gameMeta.description.trim().toLowerCase() !== gameMeta.tagline.trim().toLowerCase();
+
     return renderConnectedShell(
-      <div className="relative flex flex-col justify-between h-full w-full max-w-3xl mx-auto">
+      <div
+        className={`relative flex flex-col justify-between h-full w-full mx-auto min-h-0 ${
+          isPocketRoom ? 'max-w-5xl' : 'max-w-3xl'
+        }`}
+      >
         {passHostOverlay}
-        <div className="flex items-center justify-between gap-3 h-10 shrink-0">
+        <div className="flex items-center justify-between gap-3 h-9 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
             {room.teamMode !== 'ffa' && (() => {
@@ -3956,14 +4330,14 @@ export function PhoneController({
                 🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
               </span>
             )}
-            <span className="font-display font-bold text-base text-white truncate">
+            <span className="font-display font-bold text-sm sm:text-base text-white truncate">
               {gameMeta.name}
             </span>
             <span className="text-xs text-[#9CA3AF] truncate hidden sm:inline">
-              · {t('How to Play', '玩法说明')}
+              · {t('Rules & Controls', '玩法规则与操作')}
             </span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {!embedded && <LanguageToggle compact />}
             {isRoomHost && otherPlayers.length > 0 && (
               <button
@@ -3995,69 +4369,133 @@ export function PhoneController({
           </div>
         </div>
 
-        <div
-          className={`flex-1 grid ${
-            embedded ? 'grid-cols-1 gap-2.5 my-2' : 'grid-cols-2 gap-4 my-2 items-center'
-          }`}
-        >
-          <div className="p-3.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
-                {t('How to Win', '获胜方式')}
-              </span>
-              {room.activeMutator !== 'normal' && (
-                <span
-                  className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-[#101217]"
-                  style={{ color: activeMutatorSpec.accentHex }}
-                >
-                  {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
-                </span>
-              )}
-            </div>
-            <p className="text-sm font-bold text-white leading-snug">{gameMeta.tagline}</p>
-            {activeMutatorSpec.invertControls && (
-              <p className="text-[11px] font-extrabold text-[#FF3B9A] leading-tight">
-                ⚠ {t('Mirror Curse active: Joystick directions are flipped!', '镜像反转生效中：本局摇杆方向上下左右反转！')}
-              </p>
-            )}
-            <div className="pt-1.5 border-t border-[#262C38] space-y-1 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">{t('Joystick', '摇杆')}</span>
-                <span className="font-bold text-white">{schema.joystickLabel}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">{t('Button A', 'A 键')}</span>
-                <span className="font-bold" style={{ color: schema.actionA.colorHex }}>
-                  {schema.actionA.label} · {schema.actionA.sublabel}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#9CA3AF]">{t('Button B', 'B 键')}</span>
-                <span className="font-bold" style={{ color: schema.actionB.colorHex }}>
-                  {schema.actionB.label} · {schema.actionB.sublabel}
-                </span>
-              </div>
-              {currentPadProfile && (
-                <div className="pt-1.5 mt-1 border-t border-[#262C38] space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="text-[#10D98B] font-bold inline-flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" />
-                      {t('Auto-Matched Pad', '已自动匹配最佳手柄')}
+        {isPocketRoom ? (
+          /* POCKET MODE BRIEFING: Full Game Rules (Left 7 cols) + Controls & Ready (Right 5 cols) */
+          <div className="flex-1 min-h-0 grid grid-cols-12 gap-2.5 my-1.5">
+            {/* Left Column: Complete Game Rules & Objective */}
+            <div className="col-span-7 min-h-0 flex flex-col rounded-xl bg-[#161B24] border border-[#283142] p-3 overflow-hidden">
+              <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[#242C3D] shrink-0">
+                <div className="flex items-center gap-1.5 min-w-0 text-[11px] font-bold text-[#00C2FF]">
+                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                  <span className="whitespace-nowrap">{t('Game Rules', '游戏规则')}</span>
+                  <span className="text-[#6B7280]" aria-hidden="true">·</span>
+                  <span className="text-[#9CA3AF] font-semibold truncate">{gameMeta.category}</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono tabular-nums">
+                  {activeSettingOpt && (
+                    <span className="text-[#E5E7EB] font-bold">
+                      {gameMeta.settingLabel}: {activeSettingOpt.label}
                     </span>
-                    <span className="font-mono text-white font-bold">
-                      {activePadMode === 'card'
-                        ? t('Pad 4 · Card Table', '4号 · 扑克手牌台')
-                        : activePadMode === 'arrows'
-                        ? t('Pad 2 · Easy Arrows', '2号 · 简易大箭头')
-                        : activePadMode === 'trackpad'
-                        ? t('Pad 3 · Swipe Pad', '3号 · 触控滑板')
-                        : t('Pad 1 · Pro Stick', '1号 · 360° 摇杆')}
+                  )}
+                  {room.activeMutator !== 'normal' && (
+                    <span
+                      className="font-black"
+                      style={{ color: activeMutatorSpec.accentHex }}
+                    >
+                      · {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
                     </span>
-                  </div>
-                  <p className="text-[10px] text-[#9CA3AF] leading-snug">
-                    {lang === 'zh' ? currentPadProfile.reasonZh : currentPadProfile.reasonEn}
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar pt-2 pr-1 space-y-2">
+                <div>
+                  <p className="text-xs sm:text-sm font-extrabold text-white leading-snug">
+                    {gameMeta.tagline}
                   </p>
-                  {!isCardGame && (
+                  {hasDistinctDescription && (
+                    <p className="text-[11px] sm:text-xs text-[#A5AEBD] leading-relaxed mt-0.5">
+                      {gameMeta.description}
+                    </p>
+                  )}
+                </div>
+
+                {gameMeta.rules.length > 0 && (
+                  <ol className="space-y-1.5 pt-1.5 border-t border-[#222938]">
+                    {gameMeta.rules.map((rule, idx) => (
+                      <li
+                        key={idx}
+                        className="flex items-start gap-2 text-[11px] sm:text-xs text-[#E5E7EB] leading-snug"
+                      >
+                        <span
+                          className="font-mono text-[10px] font-black tabular-nums mt-0.5 shrink-0"
+                          style={{ color: gameMeta.accentHex }}
+                        >
+                          {String(idx + 1).padStart(2, '0')}.
+                        </span>
+                        <span className="flex-1">{rule}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                {room.activeMutator !== 'normal' && (
+                  <div className="pt-1.5 border-t border-[#222938] text-[11px] leading-snug">
+                    <span
+                      className="font-extrabold"
+                      style={{ color: activeMutatorSpec.accentHex }}
+                    >
+                      {t('Chaos Rule', '混沌规则')}:{' '}
+                      {lang === 'zh' ? activeMutatorSpec.nameZh : activeMutatorSpec.name}
+                    </span>
+                    <span className="text-[#CBD5E1]">
+                      {' '}— {lang === 'zh' ? activeMutatorSpec.descriptionZh : activeMutatorSpec.description}
+                    </span>
+                    {activeMutatorSpec.invertControls && (
+                      <p className="text-[11px] font-extrabold text-[#FF3B9A] mt-0.5">
+                        ⚠ {t('Mirror Curse active: Joystick directions are flipped!', '镜像反转生效中：本局摇杆方向上下左右反转！')}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Controls Guide + Ready CTA */}
+            <div className="col-span-5 min-h-0 flex flex-col justify-between gap-2">
+              <div className="flex-1 min-h-0 rounded-xl bg-[#161B24] border border-[#283142] p-2.5 flex flex-col gap-1.5 overflow-y-auto arcade-scrollbar">
+                <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-[#10D98B] shrink-0">
+                  <span>{t('Controls', '操作方式')}</span>
+                  {currentPadProfile && (
+                    <span className="font-mono text-[10px] text-[#E5E7EB] truncate">
+                      {activePadMode === 'card'
+                        ? t('Pad 4 · Card Table', '4号 · 手牌台')
+                        : activePadMode === 'arrows'
+                        ? t('Pad 2 · Arrows', '2号 · 大箭头')
+                        : activePadMode === 'trackpad'
+                        ? t('Pad 3 · Swipe', '3号 · 触控滑板')
+                        : t('Pad 1 · Stick', '1号 · 摇杆')}
+                    </span>
+                  )}
+                </div>
+
+                {isCardGame ? (
+                  <p className="text-[11px] text-[#D1D5DB] leading-snug">
+                    {schema.controlTip}
+                  </p>
+                ) : (
+                  <div className="space-y-1 text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#9CA3AF] shrink-0">{t('Move', '移动')}</span>
+                      <span className="font-bold text-white truncate">{schema.joystickLabel}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#9CA3AF] shrink-0">{t('Button A', 'A 键')}</span>
+                      <span className="font-bold truncate" style={{ color: schema.actionA.colorHex }}>
+                        {schema.actionA.label} · {schema.actionA.sublabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#9CA3AF] shrink-0">{t('Button B', 'B 键')}</span>
+                      <span className="font-bold truncate" style={{ color: schema.actionB.colorHex }}>
+                        {schema.actionB.label} · {schema.actionB.sublabel}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {!isCardGame && (
+                  <div className="pt-1 mt-auto">
                     <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-[#101217] border border-[#242934]">
                       {(
                         [
@@ -4070,7 +4508,7 @@ export function PhoneController({
                           key={opt.id}
                           type="button"
                           onClick={() => handleSelectArcadePad(opt.id)}
-                          className={`py-1 rounded text-[10px] font-bold cursor-pointer whitespace-nowrap ${
+                          className={`py-1 rounded text-[10px] font-bold cursor-pointer whitespace-nowrap transition-colors ${
                             activeArcadePad === opt.id
                               ? 'bg-[#FF4D2E] text-white'
                               : 'text-[#9CA3AF] hover:text-white'
@@ -4080,68 +4518,223 @@ export function PhoneController({
                         </button>
                       ))}
                     </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="shrink-0 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerRoomFullscreen();
+                    wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+                  }}
+                  className="relative tactile-btn w-full h-14 sm:h-16 rounded-2xl font-display font-extrabold text-base sm:text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
+                  style={
+                    me.ready
+                      ? {
+                          backgroundColor: '#10D98B',
+                          color: '#0A1913',
+                          boxShadow: '0 4px 0 #0A915D',
+                        }
+                      : {
+                          backgroundColor: '#FF4D2E',
+                          color: '#FFFFFF',
+                          boxShadow: '0 4px 0 #B82E17',
+                        }
+                  }
+                >
+                  {me.ready && <Check className="w-5 h-5" />}
+                  <span>
+                    {me.ready
+                      ? t('Ready! Waiting...', '已准备！等待其他人')
+                      : t("I'm Ready!", '我准备好了！')}
+                  </span>
+                </button>
+
+                <p className="text-[10px] sm:text-[11px] text-center text-[#A5AEBD] leading-tight inline-flex w-full items-center justify-center gap-1.5">
+                  {me.ready && (
+                    <Loader2 className="w-3 h-3 text-[#10D98B] animate-spin shrink-0" aria-hidden="true" />
                   )}
-                </div>
-              )}
+                  <span className="truncate">
+                    {me.ready
+                      ? t(
+                          `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
+                          `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
+                        )
+                      : t(
+                          'Read the rules — match starts when everyone is Ready!',
+                          '看完规则点准备 — 全员准备后即刻开始！'
+                        )}
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
-
-          <div className="flex flex-col gap-2.5 justify-center">
-            {!embedded && (
-              <div className="hidden sm:flex justify-center">
-                <PhoneControllerDemo
-                  gameId={gameMeta.id}
-                  accentHex={gameMeta.accentHex}
-                  activeRuleText={gameMeta.rules[0] ?? ''}
-                  compact
-                />
+        ) : (
+          <div
+            className={`flex-1 min-h-0 grid ${
+              embedded ? 'grid-cols-1 gap-2.5 my-2' : 'grid-cols-2 gap-4 my-2 items-stretch'
+            }`}
+          >
+            <div className="p-3.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] space-y-2 overflow-y-auto arcade-scrollbar">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
+                  {t('Rules & Controls', '玩法与操作')}
+                </span>
+                {room.activeMutator !== 'normal' && (
+                  <span
+                    className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-[#101217]"
+                    style={{ color: activeMutatorSpec.accentHex }}
+                  >
+                    {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
+                  </span>
+                )}
               </div>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                triggerRoomFullscreen();
-                wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
-              }}
-              className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
-              style={
-                me.ready
-                  ? {
-                      backgroundColor: '#10D98B',
-                      color: '#0A1913',
-                      boxShadow: '0 4px 0 #0A915D',
-                    }
-                  : {
-                      backgroundColor: '#FF4D2E',
-                      color: '#FFFFFF',
-                      boxShadow: '0 4px 0 #B82E17',
-                    }
-              }
-            >
-              {me.ready && <Check className="w-6 h-6" />}
-              <span>
-                {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
-              </span>
-            </button>
-
-            <p className="text-[11px] text-center text-[#A5AEBD] leading-snug inline-flex items-center justify-center gap-1.5">
-              {me.ready && (
-                <Loader2 className="w-3.5 h-3.5 text-[#10D98B] animate-spin shrink-0" aria-hidden="true" />
+              <p className="text-sm font-bold text-white leading-snug">{gameMeta.tagline}</p>
+              {gameMeta.rules.length > 0 && (
+                <ol className="space-y-1 text-[11px] text-[#D1D5DB] leading-snug">
+                  {gameMeta.rules.map((rule, idx) => (
+                    <li key={idx} className="flex items-start gap-1.5">
+                      <span
+                        className="font-mono text-[10px] font-black tabular-nums mt-0.5 shrink-0"
+                        style={{ color: gameMeta.accentHex }}
+                      >
+                        {String(idx + 1).padStart(2, '0')}.
+                      </span>
+                      <span>{rule}</span>
+                    </li>
+                  ))}
+                </ol>
               )}
-              <span>
-                {me.ready
-                  ? t(
-                      `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
-                      `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
-                    )
-                  : t(
-                      'Read the rules at your own pace — game starts once everyone taps Ready!',
-                      '慢慢看规则 — 所有人点击「我准备好了」后即刻开始！'
+              {activeMutatorSpec.invertControls && (
+                <p className="text-[11px] font-extrabold text-[#FF3B9A] leading-tight">
+                  ⚠ {t('Mirror Curse active: Joystick directions are flipped!', '镜像反转生效中：本局摇杆方向上下左右反转！')}
+                </p>
+              )}
+              <div className="pt-1.5 border-t border-[#262C38] space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#9CA3AF]">{t('Joystick', '摇杆')}</span>
+                  <span className="font-bold text-white">{schema.joystickLabel}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[#9CA3AF]">{t('Button A', 'A 键')}</span>
+                  <span className="font-bold" style={{ color: schema.actionA.colorHex }}>
+                    {schema.actionA.label} · {schema.actionA.sublabel}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[#9CA3AF]">{t('Button B', 'B 键')}</span>
+                  <span className="font-bold" style={{ color: schema.actionB.colorHex }}>
+                    {schema.actionB.label} · {schema.actionB.sublabel}
+                  </span>
+                </div>
+                {currentPadProfile && (
+                  <div className="pt-1.5 mt-1 border-t border-[#262C38] space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-[#10D98B] font-bold inline-flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        {t('Auto-Matched Pad', '已自动匹配最佳手柄')}
+                      </span>
+                      <span className="font-mono text-white font-bold">
+                        {activePadMode === 'card'
+                          ? t('Pad 4 · Card Table', '4号 · 扑克手牌台')
+                          : activePadMode === 'arrows'
+                          ? t('Pad 2 · Easy Arrows', '2号 · 简易大箭头')
+                          : activePadMode === 'trackpad'
+                          ? t('Pad 3 · Swipe Pad', '3号 · 触控滑板')
+                          : t('Pad 1 · Pro Stick', '1号 · 360° 摇杆')}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-[#9CA3AF] leading-snug">
+                      {lang === 'zh' ? currentPadProfile.reasonZh : currentPadProfile.reasonEn}
+                    </p>
+                    {!isCardGame && (
+                      <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-[#101217] border border-[#242934]">
+                        {(
+                          [
+                            { id: 'analog', en: '1 Stick', zh: '1 摇杆' },
+                            { id: 'arrows', en: '2 Arrows', zh: '2 箭头' },
+                            { id: 'trackpad', en: '3 Swipe', zh: '3 滑控' },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => handleSelectArcadePad(opt.id)}
+                            className={`py-1 rounded text-[10px] font-bold cursor-pointer whitespace-nowrap ${
+                              activeArcadePad === opt.id
+                                ? 'bg-[#FF4D2E] text-white'
+                                : 'text-[#9CA3AF] hover:text-white'
+                            }`}
+                          >
+                            {t(opt.en, opt.zh)}
+                          </button>
+                        ))}
+                      </div>
                     )}
-              </span>
-            </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5 justify-center">
+              {!embedded && (
+                <div className="hidden sm:flex justify-center">
+                  <PhoneControllerDemo
+                    gameId={gameMeta.id}
+                    accentHex={gameMeta.accentHex}
+                    activeRuleText={gameMeta.rules[0] ?? ''}
+                    compact
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  triggerRoomFullscreen();
+                  wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+                }}
+                className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
+                style={
+                  me.ready
+                    ? {
+                        backgroundColor: '#10D98B',
+                        color: '#0A1913',
+                        boxShadow: '0 4px 0 #0A915D',
+                      }
+                    : {
+                        backgroundColor: '#FF4D2E',
+                        color: '#FFFFFF',
+                        boxShadow: '0 4px 0 #B82E17',
+                      }
+                }
+              >
+                {me.ready && <Check className="w-6 h-6" />}
+                <span>
+                  {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
+                </span>
+              </button>
+
+              <p className="text-[11px] text-center text-[#A5AEBD] leading-snug inline-flex items-center justify-center gap-1.5">
+                {me.ready && (
+                  <Loader2 className="w-3.5 h-3.5 text-[#10D98B] animate-spin shrink-0" aria-hidden="true" />
+                )}
+                <span>
+                  {me.ready
+                    ? t(
+                        `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
+                        `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
+                      )
+                    : t(
+                        'Read the rules at your own pace — game starts once everyone taps Ready!',
+                        '慢慢看规则 — 所有人点击「我准备好了」后即刻开始！'
+                      )}
+                </span>
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {isRoomHost ? (
           <div className="flex items-center justify-between gap-2 shrink-0">
@@ -4263,6 +4856,26 @@ export function PhoneController({
   };
 
   const useIntegratedHud = isPocketRoom;
+  const pocketArcadeCoachVisible = Boolean(
+    useIntegratedHud &&
+      !isCardGame &&
+      room.status === 'PLAYING' &&
+      !pocketCoachDismissed &&
+      !pocketCoachExpired &&
+      !pocketRulesOpen
+  );
+  const pocketShowYouMarker = Boolean(
+    useIntegratedHud &&
+      !isCardGame &&
+      (room.status === 'COUNTDOWN' || pocketArcadeCoachVisible)
+  );
+  const pocketCardCoachTip =
+    useIntegratedHud && isCardGame && room.status === 'PLAYING' && !pocketCoachDismissed && !pocketCardActed
+      ? gameMeta.rules[0] || gameMeta.tagline || null
+      : null;
+  const activeSettingOptLive = gameMeta.settingOptions.find(
+    (opt) => opt.value === room.gameSettingValue
+  );
 
   const topControlBar =
     repositionMode && !embedded && !isCardGame ? (
@@ -4306,16 +4919,175 @@ export function PhoneController({
           </button>
         </div>
       </div>
-    ) : (
+    ) : useIntegratedHud ? (
       <div
-        className={`relative z-20 flex items-center justify-between gap-2 shrink-0 px-2 ${
-          useIntegratedHud && isCardGame ? 'h-8 mb-1' : 'h-10'
-        } ${
-          useIntegratedHud
-            ? 'rounded-xl bg-[#0D1017]/82 border border-white/10 backdrop-blur-sm'
-            : ''
+        className={`relative z-20 flex items-center justify-between gap-2 shrink-0 pointer-events-none ${
+          isCardGame ? 'h-9 mb-0.5' : 'h-9'
         }`}
       >
+        {/* Top-Left Corner Pill: Player Identity + Live Stat + Compact Badges */}
+        <div className="pointer-events-auto flex items-center gap-1.5 min-w-0 max-w-[44%]">
+          <div className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm">
+            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+            <div className="min-w-0 leading-tight">
+              <div className="text-[11px] font-bold text-white truncate flex items-center gap-1">
+                <span className="truncate max-w-[78px]">{me.name}</span>
+                {room.teamMode !== 'ffa' && (() => {
+                  const spec = getTeamSpec(me.teamId);
+                  return spec ? (
+                    <span
+                      className="px-1 py-0.2 rounded text-[9px] font-mono font-black shrink-0"
+                      style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
+                    >
+                      {spec.emoji}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
+              <div className="text-[10px] font-mono text-[#9CA3AF] truncate tabular-nums">
+                {translateGameText(me.statText, lang)}
+              </div>
+            </div>
+          </div>
+
+          {room.frenzy.active && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-lg bg-[#FF4D2E]/85 border border-[#FFB800]/70 text-white font-mono text-[9px] font-black animate-pulse shrink-0">
+              <Flame className="w-2.5 h-2.5 text-[#FFB800]" />
+              <span>2×</span>
+            </span>
+          )}
+          {activeMutatorSpec.invertControls && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-lg bg-[#FF3B9A]/80 border border-[#FF8DC7]/60 text-white font-mono text-[9px] font-black shrink-0">
+              {t('FLIP', '反转')}
+            </span>
+          )}
+        </div>
+
+        {/* Center intentionally open so top-center game HUDs, timers & seats are unobstructed */}
+
+        {/* Top-Right Corner Pill: Pad Switcher + Emote + Pause + Quick Menu + Leave */}
+        <div className="pointer-events-auto flex items-center gap-1 shrink-0 px-1 py-0.5 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm">
+          {!wsConnected && (
+            <span
+              title={t('Reconnecting...', '正在重连...')}
+              className="h-7 px-1.5 rounded-lg bg-[#FFB800]/20 text-[#FFB800] text-[10px] font-bold inline-flex items-center gap-1 shrink-0"
+            >
+              <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+              <span className="hidden sm:inline">{t('Sync', '重连')}</span>
+            </span>
+          )}
+          {!isCardGame && (
+            <div
+              role="group"
+              aria-label={t('Switch controller pad', '切换手柄模式')}
+              className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#141822]/90 border border-white/10"
+            >
+              {(
+                [
+                  { id: 'analog', en: 'Stick', zh: '摇杆' },
+                  { id: 'arrows', en: 'Arrows', zh: '箭头' },
+                  { id: 'trackpad', en: 'Swipe', zh: '滑控' },
+                ] as const
+              ).map((opt, idx) => {
+                const active = activeArcadePad === opt.id;
+                const isSuggested = recommendedPadMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleSelectArcadePad(opt.id)}
+                    className={`h-6 px-1.5 rounded-md text-[10px] font-bold inline-flex items-center gap-0.5 whitespace-nowrap cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-[#FF4D2E] text-white'
+                        : 'text-[#9CA3AF] hover:text-white'
+                    }`}
+                  >
+                    <span>{idx + 1}·{t(opt.en, opt.zh)}</span>
+                    {isSuggested && !active && (
+                      <span
+                        aria-hidden="true"
+                        className="w-1.5 h-1.5 rounded-full bg-[#10D98B]"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setPocketMenuOpen(false);
+              setEmoteDrawerOpen((v) => !v);
+            }}
+            aria-label={t('Send quick emote', '发送表情互动')}
+            title={t('Send Emote', '发送互动表情')}
+            className={`h-7 w-7 rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+              emoteDrawerOpen
+                ? 'bg-[#FFB800] text-[#14120B]'
+                : 'bg-[#1A202C] hover:bg-[#252D3D] text-[#FFB800]'
+            }`}
+          >
+            <Smile className="w-3.5 h-3.5" />
+          </button>
+          {isRoomHost && room.status === 'PLAYING' && (
+            <button
+              type="button"
+              onClick={() => wsRef.current?.send({ type: 'game:pause', paused: true })}
+              aria-label={t('Pause game', '暂停游戏')}
+              title={t('Pause Game (Host)', '暂停游戏（房主）')}
+              className="h-7 w-7 rounded-lg bg-[#1A202C] hover:bg-[#252D3D] text-[#FFB800] flex items-center justify-center cursor-pointer transition-colors"
+            >
+              <Pause className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setEmoteDrawerOpen(false);
+              setPocketMenuOpen(false);
+              setPocketRulesOpen((v) => !v);
+            }}
+            aria-label={t('Quick rules & controls', '快速查看规则与按键')}
+            title={t('Quick Rules & Controls', '快速查看规则与按键')}
+            className={`h-7 w-7 rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+              pocketRulesOpen
+                ? 'bg-[#00C2FF] text-[#0B1219]'
+                : 'bg-[#1A202C] hover:bg-[#252D3D] text-[#00C2FF]'
+            }`}
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEmoteDrawerOpen(false);
+              setPocketRulesOpen(false);
+              setPocketMenuOpen((v) => !v);
+            }}
+            aria-label={t('Pocket quick menu', '更多快捷菜单')}
+            title={t('More Controls & Settings', '透明度、音效与设置')}
+            className={`h-7 w-7 rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+              pocketMenuOpen
+                ? 'bg-[#00C2FF] text-[#0B1219]'
+                : 'bg-[#1A202C] hover:bg-[#252D3D] text-[#D1D5DB]'
+            }`}
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleLeave}
+            aria-label={t('Leave room', '退出房间')}
+            title={t('Leave room', '退出房间')}
+            className="h-7 w-7 rounded-lg bg-[#1A202C] hover:bg-[#FF4D2E]/25 text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div className="relative z-20 flex items-center justify-between gap-2 shrink-0 px-2 h-10">
         <div className="flex items-center gap-2 min-w-0">
           <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
           <div className="min-w-0 leading-tight">
@@ -4356,11 +5128,9 @@ export function PhoneController({
               🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
             </span>
           )}
-          {!useIntegratedHud && (
-            <span className="text-[11px] font-semibold text-[#9CA3AF] hidden lg:inline">
-              {gameMeta.name}
-            </span>
-          )}
+          <span className="text-[11px] font-semibold text-[#9CA3AF] hidden lg:inline">
+            {gameMeta.name}
+          </span>
           {!isCardGame && (
             <div
               role="group"
@@ -4398,33 +5168,6 @@ export function PhoneController({
                 );
               })}
             </div>
-          )}
-          {isPocketRoom && (
-            <button
-              type="button"
-              onClick={cyclePocketHudOpacity}
-              title={t('Cycle Pocket HUD Transparency', '切换按键透明度')}
-              className="h-8 px-2 rounded-lg bg-[#1E232D] hover:bg-[#242A36] text-[10px] font-mono font-bold text-[#00C2FF] cursor-pointer whitespace-nowrap"
-            >
-              {Math.round(hudOpacity * 100)}%
-            </button>
-          )}
-          {isPocketRoom && (
-            <button
-              type="button"
-              onClick={() => {
-                arcadeAudio.unlock();
-                setPocketMuted((m) => !m);
-              }}
-              aria-label={pocketMuted ? t('Unmute sound', '开启音效') : t('Mute sound', '静音音效')}
-              className={`min-h-[34px] min-w-[34px] rounded-lg flex items-center justify-center cursor-pointer ${
-                pocketMuted
-                  ? 'bg-[#1E232D] text-[#9CA3AF]'
-                  : 'bg-[#10D98B]/20 border border-[#10D98B]/45 text-[#10D98B]'
-              }`}
-            >
-              {pocketMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
           )}
           {connectedGamepadName && !embedded && (
             <span
@@ -4703,8 +5446,8 @@ export function PhoneController({
         />
       )}
 
-      {/* Pocket Mode Integrated Full-Arena Background Canvas */}
-      {useIntegratedHud && (
+      {/* Pocket Mode Integrated Full-Arena Background Canvas (Arcade Games) */}
+      {useIntegratedHud && !isCardGame && (
         <div className="absolute inset-0 z-0 pointer-events-none">
           <PocketArenaCanvas
             gameId={room.selectedGameId}
@@ -4713,29 +5456,47 @@ export function PhoneController({
             competitiveRef={latestCompetitiveRef}
             fxRef={fxRef}
             tickVersion={pocketTickVersion}
-            cameraFocus={
-              isCardGame &&
-              isPocketCardHandShown &&
-              TABLETOP_ZOOM_CARD_GAMES.has(room.selectedGameId)
-                ? 'turn-focus'
-                : 'overview'
-            }
-            frameClassName={
-              isCardGame
-                ? isPocketCardHandShown
-                  ? 'pt-[68px] pb-[134px] sm:pt-[74px] sm:pb-[150px]'
-                  : 'pt-[38px] pb-[48px]'
-                : ''
-            }
+            highlightPlayerId={me.id}
+            highlightColorHex={me.color.hex}
+            showYouMarker={pocketShowYouMarker}
           />
           {room.status === 'COUNTDOWN' && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="px-6 py-3 rounded-3xl bg-[#0B0E14]/85 border-2 border-[#FFB800] text-center shadow-2xl">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[#FFB800]">
-                  {gameMeta.name}
+            <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+              <div className="w-full max-w-md px-5 py-3.5 rounded-3xl bg-[#0B0E14]/88 border-2 border-[#FFB800] text-center shadow-2xl backdrop-blur-sm">
+                <div className="flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[#FFB800]">
+                  <span>{gameMeta.name}</span>
+                  {room.activeMutator !== 'normal' && (
+                    <span
+                      className="px-1.5 py-0.5 rounded bg-black/50 font-mono text-[10px]"
+                      style={{ color: activeMutatorSpec.accentHex }}
+                    >
+                      {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
+                    </span>
+                  )}
                 </div>
-                <div className="font-display text-5xl font-black text-white tabular-nums mt-0.5">
+                <p className="text-xs sm:text-sm font-extrabold text-white mt-1 leading-snug">
+                  {gameMeta.tagline}
+                </p>
+                <div className="font-display text-4xl sm:text-5xl font-black text-white tabular-nums my-1">
                   {room.countdownValue}
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] pt-1.5 border-t border-white/10">
+                  <span className="inline-flex items-center gap-1 font-bold text-white">
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: me.color.hex }}
+                    />
+                    {t('Spot ▼ YOU', '先看 ▼ 你在哪里')}
+                  </span>
+                  <span className="text-[#D1D5DB] font-semibold">
+                    {schema.joystickLabel}
+                  </span>
+                  <span className="font-extrabold" style={{ color: schema.actionA.colorHex }}>
+                    A·{schema.actionA.label}
+                  </span>
+                  <span className="font-extrabold" style={{ color: schema.actionB.colorHex }}>
+                    B·{schema.actionB.label}
+                  </span>
                 </div>
               </div>
             </div>
@@ -4745,9 +5506,139 @@ export function PhoneController({
 
       {topControlBar}
 
+      {/* Non-Blocking Live In-Game Coach Strip (First 6.5s of Pocket Arcade Match) */}
+      {pocketArcadeCoachVisible && (
+        <div className="pointer-events-none absolute top-10 left-1/2 -translate-x-1/2 z-20 w-[min(92vw,480px)] flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0B0E14]/90 border border-white/18 shadow-xl backdrop-blur-sm text-[11px] sm:text-xs">
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse"
+              style={{ backgroundColor: me.color.hex }}
+            />
+            <span className="font-bold text-white truncate">
+              {gameMeta.rules[0] || gameMeta.tagline}
+            </span>
+            <span className="hidden sm:inline font-mono text-[10px] font-black shrink-0" style={{ color: schema.actionA.colorHex }}>
+              A·{schema.actionA.label}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPocketCoachDismissed(true)}
+              aria-label={t('Dismiss guide', '关闭提示')}
+              className="w-5 h-5 rounded-md flex items-center justify-center text-[#9CA3AF] hover:text-white shrink-0 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pocket In-Game Quick Rules Modal (Triggered anytime via ? button) */}
+      {useIntegratedHud && pocketRulesOpen && (
+        <div className="absolute inset-0 z-[45] bg-[#0B0E14]/88 backdrop-blur-md p-3 sm:p-5 flex items-center justify-center">
+          <div className="w-full max-w-3xl max-h-full rounded-2xl bg-[#151923] border border-white/15 p-3.5 sm:p-4 shadow-2xl flex flex-col gap-2.5 overflow-hidden">
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <BookOpen className="w-4 h-4 text-[#00C2FF] shrink-0" />
+                <span className="font-display font-extrabold text-sm sm:text-base text-white truncate">
+                  {gameMeta.name}
+                </span>
+                <span className="text-[11px] font-semibold text-[#9CA3AF] truncate">
+                  · {gameMeta.category}
+                </span>
+                {activeSettingOptLive && (
+                  <span className="hidden sm:inline text-[11px] font-mono text-[#E5E7EB] shrink-0">
+                    · {gameMeta.settingLabel}: {activeSettingOptLive.label}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPocketRulesOpen(false)}
+                aria-label={t('Close rules', '关闭规则')}
+                className="h-8 w-8 rounded-lg bg-[#242A36] hover:bg-[#2E3646] text-white flex items-center justify-center cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-12 gap-3 overflow-y-auto arcade-scrollbar">
+              <div className="sm:col-span-7 space-y-2">
+                <p className="text-xs sm:text-sm font-extrabold text-white leading-snug">
+                  {gameMeta.tagline}
+                </p>
+                {gameMeta.rules.length > 0 && (
+                  <ol className="space-y-1.5 pt-1.5 border-t border-white/10">
+                    {gameMeta.rules.map((rule, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-xs text-[#E5E7EB] leading-snug">
+                        <span
+                          className="font-mono text-[10px] font-black tabular-nums mt-0.5 shrink-0"
+                          style={{ color: gameMeta.accentHex }}
+                        >
+                          {String(idx + 1).padStart(2, '0')}.
+                        </span>
+                        <span className="flex-1">{rule}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {room.activeMutator !== 'normal' && (
+                  <div className="pt-1.5 border-t border-white/10 text-xs leading-snug">
+                    <span className="font-extrabold" style={{ color: activeMutatorSpec.accentHex }}>
+                      {t('Chaos Rule', '混沌规则')}:{' '}
+                      {lang === 'zh' ? activeMutatorSpec.nameZh : activeMutatorSpec.name}
+                    </span>
+                    <span className="text-[#CBD5E1]">
+                      {' '}— {lang === 'zh' ? activeMutatorSpec.descriptionZh : activeMutatorSpec.description}
+                    </span>
+                    {activeMutatorSpec.invertControls && (
+                      <p className="text-[11px] font-extrabold text-[#FF3B9A] mt-0.5">
+                        ⚠ {t('Mirror Curse active: Joystick directions are flipped!', '镜像反转生效中：本局摇杆方向上下左右反转！')}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="sm:col-span-5 rounded-xl bg-[#0F131B] border border-white/10 p-3 space-y-2 h-fit">
+                <div className="text-[11px] font-bold text-[#10D98B]">{t('Controls', '操作说明')}</div>
+                {isCardGame ? (
+                  <p className="text-xs text-[#D1D5DB] leading-relaxed">
+                    {schema.controlTip}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#9CA3AF]">{t('Move', '移动')}</span>
+                      <span className="font-bold text-white">{schema.joystickLabel}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#9CA3AF]">{t('Button A', 'A 键')}</span>
+                      <span className="font-bold" style={{ color: schema.actionA.colorHex }}>
+                        {schema.actionA.label} · {schema.actionA.sublabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[#9CA3AF]">{t('Button B', 'B 键')}</span>
+                      <span className="font-bold" style={{ color: schema.actionB.colorHex }}>
+                        {schema.actionB.label} · {schema.actionB.sublabel}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPocketRulesOpen(false)}
+              className="h-9 w-full rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-display font-black text-xs cursor-pointer shrink-0"
+            >
+              {t('Back to Game', '回到游戏')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Floating Quick Live Emote Bar (Available across ALL 4 Pads!) */}
       {emoteDrawerOpen && (
-        <div className="absolute top-11 right-2 z-40 p-1.5 rounded-xl bg-[#181C24]/95 border border-[#2F3747] shadow-2xl flex items-center gap-1">
+        <div className="absolute top-10 right-2 z-40 p-1.5 rounded-xl bg-[#181C24]/95 border border-[#2F3747] shadow-2xl flex items-center gap-1">
           {QUICK_EMOTES.map((emoji) => (
             <button
               key={emoji}
@@ -4761,69 +5652,179 @@ export function PhoneController({
         </div>
       )}
 
+      {/* Pocket Quick Menu Popover (Opacity, Sound, Language, Calibration, Fullscreen) */}
+      {useIntegratedHud && pocketMenuOpen && (
+        <div className="absolute top-10 right-2 z-40 p-2 rounded-xl bg-[#121620]/96 border border-white/15 shadow-2xl flex flex-wrap items-center gap-1.5 max-w-[260px] backdrop-blur-md">
+          <button
+            type="button"
+            onClick={cyclePocketHudOpacity}
+            className="h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#272E3B] text-[11px] font-mono font-bold text-[#00C2FF] cursor-pointer whitespace-nowrap"
+          >
+            {t('HUD', '透明度')} {Math.round(hudOpacity * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              arcadeAudio.unlock();
+              setPocketMuted((m) => !m);
+            }}
+            className={`h-8 px-2.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer ${
+              pocketMuted
+                ? 'bg-[#1E232D] text-[#9CA3AF]'
+                : 'bg-[#10D98B]/20 border border-[#10D98B]/45 text-[#10D98B]'
+            }`}
+          >
+            {pocketMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            <span>{pocketMuted ? t('Muted', '静音') : t('Sound', '音效')}</span>
+          </button>
+          {!embedded && <LanguageToggle compact />}
+          {!embedded && (
+            <button
+              type="button"
+              onClick={() => {
+                setPocketMenuOpen(false);
+                resetControlsState();
+                setSettingsOpen(true);
+              }}
+              className="h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#272E3B] text-[11px] font-bold text-[#00C2FF] inline-flex items-center gap-1 cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>{t('Pad Setup', '按键设置')}</span>
+            </button>
+          )}
+          {!embedded && (
+            <button
+              type="button"
+              onClick={() => {
+                setPocketMenuOpen(false);
+                toggleFullscreen();
+              }}
+              className="h-8 px-2.5 rounded-lg bg-[#1E232D] hover:bg-[#272E3B] text-[11px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer"
+            >
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              <span>{isFullscreen ? t('Window', '退出全屏') : t('Full', '全屏')}</span>
+            </button>
+          )}
+          {activeTournament && (
+            <span className="h-8 px-2 rounded-lg bg-[#FFB800]/18 text-[#FFB800] font-mono text-[10px] font-black inline-flex items-center gap-1">
+              🏆 {activeTournament.currentGameIndex + 1}/{activeTournament.totalGames}
+            </span>
+          )}
+        </div>
+      )}
+
       {isCardGame ? (
-        /* PAD 4: Private Card Hand + Actions (Turn-Driven Camera & Auto-Hide in Pocket Mode) */
-        <CardControllerDeck
-          cardState={cardState}
-          playerColorHex={me.color.hex}
-          embedded={embedded}
-          pocketOverlay={isPocketRoom}
-          hudOpacity={hudOpacity}
-          isCountdown={room.status === 'COUNTDOWN'}
-          countdownValue={room.countdownValue}
-          viewMode={controllerPrefs.cardViewMode}
-          recommendedView={effectiveCardDefaultView}
-          sortMode={controllerPrefs.cardSortMode}
-          privacyShield={controllerPrefs.cardPrivacyShield}
-          actionsSide={controllerPrefs.cardActionsSide}
-          situation={
-            isPocketRoom
-              ? buildPocketCardSituation(
-                  latestSnapshotRef.current,
-                  room,
-                  cardState,
-                  me.id,
-                  lang
-                )
-              : null
-          }
-          handCollapsed={isPocketRoom ? !isPocketCardHandShown : false}
-          onToggleHandCollapsed={
-            isPocketRoom
-              ? () =>
-                  setPocketCardViewOverride(
-                    isPocketCardHandShown
-                      ? isMyCardTurnNow
-                        ? 'show-table'
-                        : 'auto'
-                      : isMyCardTurnNow
-                      ? 'auto'
-                      : 'show-hand'
+        /* PAD 4: Private Card Hand + Actions (Option A Turn-Driven Split & Full-Table Overview) */
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          {useIntegratedHud && (
+            <div
+              className={`pointer-events-none z-0 overflow-hidden transition-all duration-200 ${
+                isPocketCardHandShown
+                  ? 'absolute top-0 left-0 w-[calc(41.666%-4px)] h-[54%] rounded-2xl border border-white/15 bg-[#080A0F]'
+                  : 'absolute inset-0 pb-[48px]'
+              }`}
+            >
+              <PocketArenaCanvas
+                gameId={room.selectedGameId}
+                status={room.status}
+                snapshotRef={latestSnapshotRef}
+                competitiveRef={latestCompetitiveRef}
+                fxRef={fxRef}
+                tickVersion={pocketTickVersion}
+                cameraFocus={
+                  TABLETOP_ZOOM_CARD_GAMES.has(room.selectedGameId)
+                    ? isPocketCardHandShown
+                      ? 'turn-focus'
+                      : 'table-overview-zoom'
+                    : 'overview'
+                }
+              />
+              {room.status === 'COUNTDOWN' && (
+                <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+                  <div className="w-full max-w-md px-5 py-3.5 rounded-3xl bg-[#0B0E14]/88 border-2 border-[#FFB800] text-center shadow-2xl backdrop-blur-sm">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-[#FFB800]">
+                      {gameMeta.name}
+                    </div>
+                    <p className="text-xs sm:text-sm font-extrabold text-white mt-1 leading-snug">
+                      {gameMeta.tagline}
+                    </p>
+                    <div className="font-display text-4xl sm:text-5xl font-black text-white tabular-nums my-1">
+                      {room.countdownValue}
+                    </div>
+                    {gameMeta.rules[0] && (
+                      <p className="text-[11px] font-semibold text-[#CBD5E1] pt-1.5 border-t border-white/10 leading-snug">
+                        {gameMeta.rules[0]}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <CardControllerDeck
+            cardState={cardState}
+            playerColorHex={me.color.hex}
+            embedded={embedded}
+            pocketOverlay={isPocketRoom}
+            hudOpacity={hudOpacity}
+            isCountdown={room.status === 'COUNTDOWN'}
+            countdownValue={room.countdownValue}
+            viewMode={controllerPrefs.cardViewMode}
+            recommendedView={effectiveCardDefaultView}
+            sortMode={controllerPrefs.cardSortMode}
+            privacyShield={controllerPrefs.cardPrivacyShield}
+            actionsSide={controllerPrefs.cardActionsSide}
+            coachTip={pocketCardCoachTip}
+            onDismissCoach={() => setPocketCoachDismissed(true)}
+            situation={
+              isPocketRoom
+                ? buildPocketCardSituation(
+                    latestSnapshotRef.current,
+                    room,
+                    cardState,
+                    me.id,
+                    lang
                   )
-              : undefined
-          }
-          onChangeViewMode={(next) =>
-            updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
-          }
-          onCycleSortMode={() => {
-            const order = ['server', 'playable', 'rank'] as const;
-            const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
-            updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
-          }}
-          onTogglePrivacy={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
-            })
-          }
-          onFlipActionsSide={() =>
-            updateControllerPrefs({
-              ...controllerPrefs,
-              cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
-            })
-          }
-          onAction={sendCardAction}
-        />
+                : null
+            }
+            handCollapsed={isPocketRoom ? !isPocketCardHandShown : false}
+            onToggleHandCollapsed={
+              isPocketRoom
+                ? () =>
+                    setPocketCardViewOverride(
+                      isPocketCardHandShown
+                        ? isMyCardTurnNow
+                          ? 'show-table'
+                          : 'auto'
+                        : isMyCardTurnNow
+                        ? 'auto'
+                        : 'show-hand'
+                    )
+                : undefined
+            }
+            onChangeViewMode={(next) =>
+              updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
+            }
+            onCycleSortMode={() => {
+              const order = ['server', 'playable', 'rank'] as const;
+              const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
+              updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
+            }}
+            onTogglePrivacy={() =>
+              updateControllerPrefs({
+                ...controllerPrefs,
+                cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
+              })
+            }
+            onFlipActionsSide={() =>
+              updateControllerPrefs({
+                ...controllerPrefs,
+                cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
+              })
+            }
+            onAction={sendCardAction}
+          />
+        </div>
       ) : (
         <div
           className={`flex-1 min-h-0 flex flex-col justify-end ${

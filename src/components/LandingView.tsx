@@ -16,6 +16,8 @@ import {
   Zap,
 } from 'lucide-react';
 import {
+  BOARD_GAME_IDS,
+  CARD_GAME_IDS,
   filterGamesByPlayerMode,
   GAME_CATALOG,
   getGameGenre,
@@ -147,6 +149,33 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     return () => observer.disconnect();
   }, []);
 
+  const totalGamesCount = GAME_CATALOG.length;
+
+  const gameTypeCounts = useMemo(() => {
+    const sportsKw =
+      /volley|soccer|hockey|golf|archery|boxing|ping-pong|tennis|baseball|batting|billiards|physics|hoop|penalty|sumo|canoe|disc|badminton|snooker|joust|curling|skate|darts|slingshot|bridge|torque|rope|timber|artillery|bowling|skeet|dodgeball|home-run/i;
+    const partyKw =
+      /party|social|chaos|roulette|thrones|tag|truth|draw|wavelength|fib|microgame|crew|shared-ship|herd|moving|havoc|hotpot|claw|bluff|auction|red-light|kitchen|trap-builder|confetti|crane|zombie|kites?|chapteh|stones|goose/i;
+    let board = 0;
+    let card = 0;
+    let sports = 0;
+    let party = 0;
+    let arcade = 0;
+    for (const g of GAME_CATALOG) {
+      if (BOARD_GAME_IDS.has(g.id)) {
+        board++;
+      } else if (CARD_GAME_IDS.has(g.id)) {
+        card++;
+      } else {
+        const s = `${g.id} ${g.category}`;
+        if (sportsKw.test(s)) sports++;
+        else if (partyKw.test(s)) party++;
+        else arcade++;
+      }
+    }
+    return { arcade, board, card, sports, party };
+  }, []);
+
   useEffect(() => {
     if (!statsAnimated) return;
     let startTime: number | null = null;
@@ -158,7 +187,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
       const progress = Math.min(1, elapsed / duration);
       const easeProgress = 1 - Math.pow(1 - progress, 3);
 
-      setDisplayGames(Math.round(easeProgress * 150));
+      setDisplayGames(Math.round(easeProgress * totalGamesCount));
       setDisplayPhones(Math.round(easeProgress * 8));
       setDisplayHz(Math.round(easeProgress * 30));
 
@@ -168,7 +197,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     };
 
     requestAnimationFrame(animate);
-  }, [statsAnimated]);
+  }, [statsAnimated, totalGamesCount]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -189,7 +218,13 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
 
   useEffect(() => {
     if (!gameTypesAnimated) return;
-    const targets = [55, 28, 30, 15, 22];
+    const targets = [
+      gameTypeCounts.arcade,
+      gameTypeCounts.board,
+      gameTypeCounts.card,
+      gameTypeCounts.sports,
+      gameTypeCounts.party,
+    ];
     const reducedMotion =
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -217,7 +252,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
 
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
-  }, [gameTypesAnimated]);
+  }, [gameTypesAnimated, gameTypeCounts]);
 
   const requestHost = (gameId?: GameId, target: 'host' | 'pocket' = 'host') => {
     const unlocked = sessionStorage.getItem('joystick_host_pin_unlocked') === 'true';
@@ -478,46 +513,46 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
     onJoinController(cleaned || undefined);
   };
 
-  // Computed Game Types data for Part 4 with requested counts (Arcade: 55, Board: 28, Card: 30, etc.)
+  // Computed Game Types data for Part 4 strictly matching live GAME_CATALOG counts
   const gameTypesData = useMemo(
     () => [
       {
         id: 'arcade',
         nameEn: 'Arcade & Action',
         nameZh: '街机与动作',
-        count: 55,
+        count: gameTypeCounts.arcade,
         filterMode: 'arcade' as PlayerFilterMode,
       },
       {
         id: 'board',
         nameEn: 'Board Games',
         nameZh: '桌游棋牌',
-        count: 28,
+        count: gameTypeCounts.board,
         filterMode: 'board' as PlayerFilterMode,
       },
       {
         id: 'card',
         nameEn: 'Card Games',
         nameZh: '纸牌派对',
-        count: 30,
+        count: gameTypeCounts.card,
         filterMode: 'card' as PlayerFilterMode,
       },
       {
         id: 'sports',
         nameEn: 'Sports & Physics',
         nameZh: '体育物理',
-        count: 15,
-        filterMode: 'all' as PlayerFilterMode,
+        count: gameTypeCounts.sports,
+        filterMode: 'arcade' as PlayerFilterMode,
       },
       {
         id: 'party',
         nameEn: 'Party & Social',
         nameZh: '聚会社交',
-        count: 22,
+        count: gameTypeCounts.party,
         filterMode: 'all' as PlayerFilterMode,
       },
     ],
-    []
+    [gameTypeCounts]
   );
 
   const cardsData = useMemo(
@@ -551,18 +586,18 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
         stepZh: '特性 03',
         titleEn: 'Game Library',
         titleZh: '丰富游戏库',
-        descEn: 'Browse 150 arcade, board, and card party games with instant search, category filters, and detailed rules.',
-        descZh: '浏览包含 150 款街机、桌游与纸牌的庞大游戏库，支持即时搜索、分类筛选与玩法详情。',
-        badgeEn: '150 TITLES • INSTANT PLAY',
-        badgeZh: '150 款正版游戏 · 即开即玩',
+        descEn: `Browse ${totalGamesCount} arcade, board, and card party games with instant search, category filters, and detailed rules.`,
+        descZh: `浏览包含 ${totalGamesCount} 款街机、桌游与纸牌的庞大游戏库，支持即时搜索、分类筛选与玩法详情。`,
+        badgeEn: `${totalGamesCount} TITLES • INSTANT PLAY`,
+        badgeZh: `${totalGamesCount} 款正版游戏 · 即开即玩`,
         accentHex: '#10D98B',
         icon: Gamepad2,
       },
     ],
-    []
+    [totalGamesCount]
   );
 
-  // 150 Game catalog rows for Step 3 background sliding marquees
+  // Full Game catalog rows for Step 3 background sliding marquees
   const catalogRows = useMemo(() => {
     const third = Math.ceil(GAME_CATALOG.length / 3);
     return [
@@ -657,8 +692,8 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
 
           <p className="mt-6 text-base sm:text-xl text-[#9CA3AF] leading-relaxed max-w-2xl text-balance">
             {t(
-              'Launch a secure room on any laptop or TV browser. Friends scan the QR code with their phones and jump straight into 150 multiplayer games with adaptive virtual joysticks.',
-              '在电脑或电视浏览器一键开房，好友手机扫码即刻加入！低延迟实时同步，虚拟摇杆和技能按键会随不同游戏自动切换。'
+              `Launch a secure room on any laptop or TV browser. Friends scan the QR code with their phones and jump straight into ${totalGamesCount} multiplayer games with adaptive virtual joysticks.`,
+              `在电脑或电视浏览器一键开房，好友手机扫码即刻加入！低延迟实时同步，虚拟摇杆和技能按键会随 ${totalGamesCount} 款不同游戏自动切换。`
             )}
           </p>
 
@@ -719,7 +754,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
           </div>
         </section>
 
-        {/* Part 2: Stats Strip (150 Games / 8 Max Phones / 30Hz Live Sync) */}
+        {/* Part 2: Stats Strip (200 Games / 8 Max Phones / 30Hz Live Sync) */}
         <section ref={statsRef} className="border-y border-[#1A2230] bg-[#10141D]/60 py-12">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
             <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
@@ -727,7 +762,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
                 {displayGames}
               </div>
               <div className="mt-2 text-sm font-semibold text-[#FF4D2E] uppercase tracking-wider">
-                {t('150 Games', '150 款游戏')}
+                {t(`${totalGamesCount} Games`, `${totalGamesCount} 款游戏`)}
               </div>
               <p className="mt-1 text-xs text-[#9CA3AF]">
                 {t('Arcade, board, and card party games', '街机、桌游与纸牌派对合集')}
@@ -772,8 +807,8 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
             </h2>
             <p className="mt-4 text-base sm:text-lg text-[#9CA3AF] leading-relaxed">
               {t(
-                'No console hardware required. Host on any browser, connect phones instantly, and enjoy 150 arcade, board, and card games with zero lag.',
-                '无需任何额外主机硬件。任意浏览器一键开房，手机扫码秒连，150 款街机、桌游与纸牌派对游戏随心畅玩。'
+                `No console hardware required. Host on any browser, connect phones instantly, and enjoy ${totalGamesCount} arcade, board, and card games with zero lag.`,
+                `无需任何额外主机硬件。任意浏览器一键开房，手机扫码秒连，${totalGamesCount} 款街机、桌游与纸牌派对游戏随心畅玩。`
               )}
             </p>
           </div>
@@ -858,7 +893,7 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
               {t('Every kind of game night. One room.', '百变派对之夜，一个房间畅玩。')}
             </h3>
             <p className="mt-1 text-xs sm:text-sm text-[#9CA3AF]">
-              {t('Computed from 150 official catalogue titles', '基于 150 款官方精选游戏精确统计')}
+              {t(`Computed from ${totalGamesCount} official catalogue titles`, `基于 ${totalGamesCount} 款官方精选游戏精确统计`)}
             </p>
           </div>
 
@@ -1191,8 +1226,8 @@ export function LandingView({ onHostRoom, onStartPocket, onJoinController }: Lan
               </div>
               <p className="mt-3 text-sm text-[#9CA3AF] leading-relaxed">
                 {t(
-                  'Switch between all 150 games instantly. Need solo practice? Add AI bots or open the built-in Test Controller Dock.',
-                  '150 款游戏任意秒切。一个人想练手？随时添加 AI 机器人或打开内置测试手柄。'
+                  `Switch between all ${totalGamesCount} games instantly. Need solo practice? Add AI bots or open the built-in Test Controller Dock.`,
+                  `${totalGamesCount} 款游戏任意秒切。一个人想练手？随时添加 AI 机器人或打开内置测试手柄。`
                 )}
               </p>
             </div>

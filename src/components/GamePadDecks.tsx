@@ -476,26 +476,79 @@ export function SwipeTrackpadDeck({
   const pointerIdRef = useRef<number | null>(null);
   const anchorScreenRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const downScreenRef = useRef<{ x: number; y: number; at: number }>({ x: 0, y: 0, at: 0 });
+  const lastMoveRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const smoothVelRef = useRef<{ vx: number; vy: number }>({ vx: 0, vy: 0 });
+  const lastDirRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const maxTravelRef = useRef<number>(0);
   const flickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopDecayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trailClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tapRippleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [anchorLocal, setAnchorLocal] = useState<{ x: number; y: number } | null>(null);
   const [puckLocal, setPuckLocal] = useState<{ x: number; y: number } | null>(null);
   const [flickBadge, setFlickBadge] = useState<string | null>(null);
+  const [flickHint, setFlickHint] = useState<{ label: string; x: number; y: number } | null>(null);
+  const [swipeTrail, setSwipeTrail] = useState<Array<{ x: number; y: number }>>([]);
+  const [tapRipple, setTapRipple] = useState<{ x: number; y: number; id: number } | null>(null);
+
+  const clearTimers = () => {
+    if (flickTimerRef.current) {
+      clearTimeout(flickTimerRef.current);
+      flickTimerRef.current = null;
+    }
+    if (stopDecayTimerRef.current) {
+      clearTimeout(stopDecayTimerRef.current);
+      stopDecayTimerRef.current = null;
+    }
+    if (trailClearTimerRef.current) {
+      clearTimeout(trailClearTimerRef.current);
+      trailClearTimerRef.current = null;
+    }
+    if (tapRippleTimerRef.current) {
+      clearTimeout(tapRippleTimerRef.current);
+      tapRippleTimerRef.current = null;
+    }
+  };
 
   useEffect(() => {
     return () => {
-      if (flickTimerRef.current) clearTimeout(flickTimerRef.current);
+      clearTimers();
       pointerIdRef.current = null;
+      lastMoveRef.current = null;
+      smoothVelRef.current = { vx: 0, vy: 0 };
       onVectorChange(0, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!disabled) return;
+    clearTimers();
+    pointerIdRef.current = null;
+    lastMoveRef.current = null;
+    smoothVelRef.current = { vx: 0, vy: 0 };
+    setAnchorLocal(null);
+    setPuckLocal(null);
+    setSwipeTrail([]);
+    setFlickBadge(null);
+    setFlickHint(null);
+    onVectorChange(0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabled]);
+
   const toLocalDelta = (dxScreen: number, dyScreen: number) => ({
     x: isCssRotated ? dyScreen : dxScreen,
     y: isCssRotated ? -dxScreen : dyScreen,
   });
+
+  const getLocalBoxSize = () => {
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    if (!rect) return { w: 360, h: 640 };
+    return isCssRotated
+      ? { w: rect.height, h: rect.width }
+      : { w: rect.width, h: rect.height };
+  };
 
   const toLocalBoxPoint = (clientX: number, clientY: number) => {
     const rect = surfaceRef.current?.getBoundingClientRect();
@@ -510,20 +563,45 @@ export function SwipeTrackpadDeck({
     };
   };
 
+  const pushSwipeTrailPoint = (pt: { x: number; y: number }) => {
+    setSwipeTrail((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && Math.hypot(pt.x - last.x, pt.y - last.y) < 3) return prev;
+      return [...prev.slice(-7), pt];
+    });
+    if (trailClearTimerRef.current) clearTimeout(trailClearTimerRef.current);
+    trailClearTimerRef.current = setTimeout(() => {
+      setSwipeTrail([]);
+    }, 145);
+  };
+
   const handlePadDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled) return;
     if (pointerIdRef.current !== null && pointerIdRef.current !== e.pointerId) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
+    const now = performance.now();
     pointerIdRef.current = e.pointerId;
     anchorScreenRef.current = { x: e.clientX, y: e.clientY };
     downScreenRef.current = { x: e.clientX, y: e.clientY, at: Date.now() };
+    lastMoveRef.current = { x: e.clientX, y: e.clientY, at: now };
+    smoothVelRef.current = { vx: 0, vy: 0 };
+    lastDirRef.current = { x: 0, y: 0 };
     maxTravelRef.current = 0;
 
+    if (stopDecayTimerRef.current) {
+      clearTimeout(stopDecayTimerRef.current);
+      stopDecayTimerRef.current = null;
+    }
+
     const pt = toLocalBoxPoint(e.clientX, e.clientY);
-    setAnchorLocal(pt);
-    setPuckLocal(pt);
+    if (pocketOverlay) {
+      setSwipeTrail([pt]);
+    } else {
+      setAnchorLocal(pt);
+      setPuckLocal(pt);
+    }
   };
 
   const handlePadMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -534,11 +612,105 @@ export function SwipeTrackpadDeck({
     );
     if (rawTotal > maxTravelRef.current) maxTravelRef.current = rawTotal;
 
+    const pt = toLocalBoxPoint(e.clientX, e.clientY);
+
+    if (pocketOverlay) {
+      pushSwipeTrailPoint(pt);
+
+      if (trackpadMode === 'glide') {
+        // Direct finger-following swipe on the live game: zero sticky anchor lag, instant reversals
+        const now = performance.now();
+        const prev = lastMoveRef.current ?? { x: e.clientX, y: e.clientY, at: now - 16 };
+        const step = toLocalDelta(e.clientX - prev.x, e.clientY - prev.y);
+        const dtSec = Math.max(0.008, Math.min(0.055, (now - prev.at) / 1000));
+        lastMoveRef.current = { x: e.clientX, y: e.clientY, at: now };
+
+        const stepDist = Math.hypot(step.x, step.y);
+        if (stepDist >= 0.7) {
+          const instVx = step.x / dtSec;
+          const instVy = step.y / dtSec;
+
+          // Instant direction reversal with light smoothing along the same direction
+          const nextVx =
+            instVx * smoothVelRef.current.vx < 0
+              ? instVx
+              : smoothVelRef.current.vx * 0.4 + instVx * 0.6;
+          const nextVy =
+            instVy * smoothVelRef.current.vy < 0
+              ? instVy
+              : smoothVelRef.current.vy * 0.4 + instVy * 0.6;
+
+          smoothVelRef.current = { vx: nextVx, vy: nextVy };
+
+          const fullSpeed = 240 / Math.max(0.7, sensitivity);
+          const speed = Math.hypot(nextVx, nextVy);
+          const norm = Math.min(1, Math.max(0.22, speed / fullSpeed));
+          const ang = Math.atan2(nextVy, nextVx);
+          const dirX = Math.cos(ang);
+          const dirY = Math.sin(ang);
+          lastDirRef.current = { x: dirX, y: dirY };
+          onVectorChange(dirX * norm, dirY * norm);
+        }
+
+        // Stop cleanly when finger pauses, except gentle edge-glide when pinned against a screen border
+        if (stopDecayTimerRef.current) clearTimeout(stopDecayTimerRef.current);
+        stopDecayTimerRef.current = setTimeout(() => {
+          stopDecayTimerRef.current = null;
+          if (pointerIdRef.current === null) return;
+          const { w, h } = getLocalBoxSize();
+          const edgeMargin = 34;
+          let edgeX = 0;
+          let edgeY = 0;
+          if (pt.x < edgeMargin && lastDirRef.current.x < -0.25) edgeX = -0.82;
+          else if (pt.x > w - edgeMargin && lastDirRef.current.x > 0.25) edgeX = 0.82;
+          if (pt.y < edgeMargin && lastDirRef.current.y < -0.25) edgeY = -0.82;
+          else if (pt.y > h - edgeMargin && lastDirRef.current.y > 0.25) edgeY = 0.82;
+
+          if (edgeX !== 0 || edgeY !== 0) {
+            onVectorChange(edgeX, edgeY);
+          } else {
+            smoothVelRef.current = { vx: 0, vy: 0 };
+            onVectorChange(0, 0);
+          }
+        }, 85);
+        return;
+      }
+
+      // Direct 4-way flick right on the game screen (rolling anchor for rapid chain swipes)
+      const delta = toLocalDelta(
+        e.clientX - anchorScreenRef.current.x,
+        e.clientY - anchorScreenRef.current.y
+      );
+      const flickThreshold = Math.max(16, 26 / Math.max(0.7, sensitivity));
+      const dist = Math.hypot(delta.x, delta.y);
+      if (dist >= flickThreshold) {
+        let fdx = 0;
+        let fdy = 0;
+        let label = '→';
+        if (Math.abs(delta.x) >= Math.abs(delta.y)) {
+          fdx = delta.x > 0 ? 1 : -1;
+          label = fdx > 0 ? '►' : '◄';
+        } else {
+          fdy = delta.y > 0 ? 1 : -1;
+          label = fdy > 0 ? '▼' : '▲';
+        }
+        onVectorChange(fdx, fdy);
+        setFlickHint({ label, x: pt.x, y: pt.y });
+        anchorScreenRef.current = { x: e.clientX, y: e.clientY };
+        if (flickTimerRef.current) clearTimeout(flickTimerRef.current);
+        flickTimerRef.current = setTimeout(() => {
+          setFlickHint(null);
+          onVectorChange(0, 0);
+        }, 145);
+      }
+      return;
+    }
+
+    // Party Mode (TV/PC is the monitor): dedicated phone trackpad surface
     const delta = toLocalDelta(
       e.clientX - anchorScreenRef.current.x,
       e.clientY - anchorScreenRef.current.y
     );
-    const pt = toLocalBoxPoint(e.clientX, e.clientY);
     setPuckLocal(pt);
 
     if (trackpadMode === 'glide') {
@@ -582,12 +754,34 @@ export function SwipeTrackpadDeck({
   const handlePadUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
     pointerIdRef.current = null;
+    lastMoveRef.current = null;
+    smoothVelRef.current = { vx: 0, vy: 0 };
+    if (stopDecayTimerRef.current) {
+      clearTimeout(stopDecayTimerRef.current);
+      stopDecayTimerRef.current = null;
+    }
+
     setAnchorLocal(null);
     setPuckLocal(null);
+
+    if (pocketOverlay) {
+      if (trailClearTimerRef.current) clearTimeout(trailClearTimerRef.current);
+      trailClearTimerRef.current = setTimeout(() => {
+        setSwipeTrail([]);
+      }, 95);
+    }
 
     const elapsed = Date.now() - downScreenRef.current.at;
     if (tapForA && !disabled && elapsed <= 240 && maxTravelRef.current <= 14) {
       onPulseActionA();
+      if (pocketOverlay) {
+        const pt = toLocalBoxPoint(e.clientX, e.clientY);
+        setTapRipple({ x: pt.x, y: pt.y, id: Date.now() });
+        if (tapRippleTimerRef.current) clearTimeout(tapRippleTimerRef.current);
+        tapRippleTimerRef.current = setTimeout(() => {
+          setTapRipple(null);
+        }, 210);
+      }
     }
 
     if (trackpadMode === 'glide') {
@@ -597,6 +791,67 @@ export function SwipeTrackpadDeck({
 
   const firstWhich: 'a' | 'b' = swapAB ? 'b' : 'a';
   const secondWhich: 'a' | 'b' = swapAB ? 'a' : 'b';
+
+  const renderPocketActionBubble = (which: 'a' | 'b', isPrimary: boolean) => {
+    const isA = which === 'a';
+    const spec = isA ? schema.actionA : schema.actionB;
+    const pressed = isA ? pressedA : pressedB;
+    const cd = Math.max(0, Math.min(1, isA ? cooldownA : cooldownB));
+    const showPct = isA ? isTurboDrift || cd > 0.05 : cd > 0.05;
+    const fillAlpha = Math.max(0.36, Math.min(0.84, hudOpacity + (isPrimary ? 0.08 : -0.02)));
+
+    return (
+      <button
+        key={which}
+        type="button"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onActionDown(which, e);
+        }}
+        onPointerUp={(e) => {
+          e.stopPropagation();
+          onActionUp(which, e);
+        }}
+        onPointerCancel={(e) => {
+          e.stopPropagation();
+          onActionUp(which, e);
+        }}
+        onLostPointerCapture={(e) => {
+          e.stopPropagation();
+          onActionUp(which, e);
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+        className={`relative flex flex-col items-center justify-center rounded-full border-2 backdrop-blur-sm touch-none select-none cursor-pointer transition-transform duration-75 px-1.5 ${
+          isPrimary
+            ? 'w-[58px] h-[58px] sm:w-[64px] sm:h-[64px]'
+            : 'w-[46px] h-[46px] sm:w-[52px] sm:h-[52px]'
+        }`}
+        style={{
+          backgroundColor: hexToRgba(spec.colorHex, fillAlpha),
+          borderColor: pressed ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.34)',
+          color: spec.textColor,
+          transform: pressed ? 'scale(0.91)' : 'scale(1)',
+          boxShadow: pressed
+            ? `0 2px 10px rgba(0,0,0,0.45)`
+            : `0 4px 0 ${hexToRgba(spec.darkHex, 0.72)}, 0 8px 18px rgba(0,0,0,0.38)`,
+          opacity: cd > 0.05 && !(isA && isTurboDrift) ? 0.68 : 1,
+        }}
+      >
+        <span
+          className={`font-display font-black leading-none text-center pointer-events-none line-clamp-2 ${
+            isPrimary ? 'text-[11px] sm:text-xs' : 'text-[10px]'
+          }`}
+        >
+          {showPct ? `${Math.round((1 - cd) * 100)}%` : spec.label}
+        </span>
+        {isPrimary && !showPct && (
+          <span className="mt-0.5 text-[8px] font-mono font-bold uppercase opacity-75 leading-none pointer-events-none">
+            {isA ? 'A' : 'B'}
+          </span>
+        )}
+      </button>
+    );
+  };
 
   const renderTriggerPaddle = (which: 'a' | 'b') => {
     const isA = which === 'a';
@@ -615,16 +870,10 @@ export function SwipeTrackpadDeck({
         onLostPointerCapture={(e) => onActionUp(which, e)}
         onContextMenu={(e) => e.preventDefault()}
         className={`relative w-full flex-1 flex flex-col items-center justify-center rounded-2xl border-2 px-2 touch-none select-none cursor-pointer transition-transform duration-75 ${
-          pocketOverlay
-            ? 'min-h-[54px] backdrop-blur-[2px]'
-            : embedded
-            ? 'min-h-[60px]'
-            : 'min-h-[76px]'
+          embedded ? 'min-h-[60px]' : 'min-h-[76px]'
         }`}
         style={{
-          backgroundColor: pocketOverlay
-            ? hexToRgba(spec.colorHex, Math.max(0.45, Math.min(0.92, hudOpacity + 0.16)))
-            : spec.colorHex,
+          backgroundColor: spec.colorHex,
           borderColor: 'rgba(255,255,255,0.28)',
           color: spec.textColor,
           transform: pressed ? 'translateY(4px) scale(0.97)' : 'translateY(0)',
@@ -639,7 +888,7 @@ export function SwipeTrackpadDeck({
         </span>
         <span
           className={`mt-1 font-display font-black leading-none text-center pointer-events-none ${
-            pocketOverlay || embedded ? 'text-xs' : 'text-sm sm:text-base'
+            embedded ? 'text-xs' : 'text-sm sm:text-base'
           }`}
         >
           {spec.label}
@@ -654,15 +903,9 @@ export function SwipeTrackpadDeck({
   const cornerControls = (
     <div
       onPointerDown={(e) => e.stopPropagation()}
-      className={
-        pocketOverlay
-          ? `pointer-events-auto absolute bottom-1.5 z-20 flex flex-col gap-1.5 touch-none select-none ${
-              handedness === 'left' ? 'left-2 items-start' : 'right-2 items-end'
-            }`
-          : 'flex flex-col gap-2 shrink-0 h-full justify-between'
-      }
+      className="flex flex-col gap-2 shrink-0 h-full justify-between"
     >
-      {/* Compact Pad 3 Mode / Tap / Handedness Chips */}
+      {/* Compact Pad 3 Mode / Tap / Handedness Chips (Party Mode remote controller) */}
       <div className="flex items-center gap-1 flex-wrap">
         <button
           type="button"
@@ -670,17 +913,8 @@ export function SwipeTrackpadDeck({
           className={`h-7 px-2 rounded-lg border text-[10px] font-mono font-extrabold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
             trackpadMode === 'flick'
               ? 'bg-[#FFB800]/25 border-[#FFB800] text-[#FFB800]'
-              : 'border-white/25 text-[#00C2FF]'
+              : 'bg-[#181C24] border-white/25 text-[#00C2FF]'
           }`}
-          style={
-            trackpadMode === 'flick'
-              ? undefined
-              : {
-                  backgroundColor: pocketOverlay
-                    ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
-                    : '#181C24',
-                }
-          }
         >
           <Zap className="w-3 h-3 shrink-0" />
           <span>
@@ -694,17 +928,8 @@ export function SwipeTrackpadDeck({
           className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
             tapForA
               ? 'bg-[#10D98B]/25 border-[#10D98B] text-[#10D98B]'
-              : 'border-white/25 text-[#D1D5DB] hover:text-white'
+              : 'bg-[#181C24] border-white/25 text-[#D1D5DB] hover:text-white'
           }`}
-          style={
-            tapForA
-              ? undefined
-              : {
-                  backgroundColor: pocketOverlay
-                    ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
-                    : '#181C24',
-                }
-          }
         >
           <MousePointerClick className="w-3 h-3 shrink-0" />
           <span>{tapForA ? t('Tap=A', '轻点=A') : t('Tap', '轻点')}</span>
@@ -714,28 +939,17 @@ export function SwipeTrackpadDeck({
           type="button"
           onClick={onToggleHandedness}
           title={t('Flip Triggers Left / Right', '切换左/右手持握边')}
-          className="h-7 px-2 rounded-lg border border-white/25 hover:border-[#4B5670] text-[10px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
-          style={{
-            backgroundColor: pocketOverlay
-              ? `rgba(16, 18, 23, ${Math.min(0.92, hudOpacity + 0.14)})`
-              : '#181C24',
-          }}
+          className="h-7 px-2 rounded-lg border border-white/25 hover:border-[#4B5670] bg-[#181C24] text-[10px] font-bold text-[#D1D5DB] inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
         >
           <Hand className="w-3 h-3 text-[#00C2FF]" />
-          {!pocketOverlay && (
-            <span>{handedness === 'right' ? t('Right', '右手') : t('Left', '左手')}</span>
-          )}
+          <span>{handedness === 'right' ? t('Right', '右手') : t('Left', '左手')}</span>
         </button>
       </div>
 
       {/* Side Action Triggers */}
       <div
         className={`flex flex-col gap-2 shrink-0 ${
-          pocketOverlay
-            ? 'w-[92px] sm:w-[112px] h-[142px] sm:h-[164px]'
-            : embedded
-            ? 'w-24 flex-1'
-            : 'w-[104px] sm:w-[132px] flex-1'
+          embedded ? 'w-24 flex-1' : 'w-[104px] sm:w-[132px] flex-1'
         }`}
       >
         {renderTriggerPaddle(firstWhich)}
@@ -745,6 +959,9 @@ export function SwipeTrackpadDeck({
   );
 
   if (pocketOverlay) {
+    const trailPoints =
+      swipeTrail.length >= 2 ? swipeTrail.map((p) => `${p.x},${p.y}`).join(' ') : '';
+
     return (
       <div
         ref={surfaceRef}
@@ -756,47 +973,73 @@ export function SwipeTrackpadDeck({
         onContextMenu={(e) => e.preventDefault()}
         className="relative flex-1 w-full h-full min-h-0 pointer-events-auto touch-none select-none overflow-hidden"
       >
-        {/* Subtle transient touch feedback only while finger is actively dragging */}
-        {flickBadge && (
-          <div
-            className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-2 rounded-2xl font-display text-3xl font-black shadow-xl opacity-85"
-            style={{ backgroundColor: accentHex, color: '#0B1016' }}
+        {/* Padless direct-touch silk swipe trail (fades immediately when finger stops) */}
+        {trailPoints && (
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 w-full h-full"
           >
-            {flickBadge}
+            <polyline
+              points={trailPoints}
+              fill="none"
+              stroke={accentHex}
+              strokeWidth={5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.32}
+            />
+            <polyline
+              points={trailPoints}
+              fill="none"
+              stroke="#FFFFFF"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.55}
+            />
+          </svg>
+        )}
+
+        {/* Subtle directional glint near finger in 4-way flick mode */}
+        {flickHint && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center font-display text-lg font-black shadow-lg backdrop-blur-xs"
+            style={{
+              left: flickHint.x,
+              top: flickHint.y,
+              backgroundColor: hexToRgba(accentHex, 0.72),
+              color: '#0B1016',
+            }}
+          >
+            {flickHint.label}
           </div>
         )}
 
-        {anchorLocal && puckLocal && (
-          <>
-            <svg
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 w-full h-full"
-            >
-              <line
-                x1={anchorLocal.x}
-                y1={anchorLocal.y}
-                x2={puckLocal.x}
-                y2={puckLocal.y}
-                stroke={accentHex}
-                strokeWidth={2.5}
-                strokeDasharray="4 4"
-                opacity={0.55}
-              />
-            </svg>
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed opacity-45"
-              style={{ left: anchorLocal.x, top: anchorLocal.y, borderColor: accentHex }}
-            />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-lg border-2 border-white/75 opacity-75"
-              style={{ left: puckLocal.x, top: puckLocal.y, backgroundColor: accentHex }}
-            />
-          </>
+        {/* Brief touch ripple when Tap=A fires directly on the game canvas */}
+        {tapRipple && (
+          <div
+            key={tapRipple.id}
+            aria-hidden="true"
+            className="pointer-events-none absolute w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 animate-ping"
+            style={{
+              left: tapRipple.x,
+              top: tapRipple.y,
+              borderColor: hexToRgba(accentHex, 0.7),
+            }}
+          />
         )}
 
-        {cornerControls}
+        {/* Minimal floating corner action triggers (tucked cleanly along bottom corner) */}
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className={`pointer-events-auto absolute bottom-2.5 z-20 flex items-end gap-2 touch-none select-none ${
+            handedness === 'left' ? 'left-2.5 flex-row-reverse' : 'right-2.5 flex-row'
+          }`}
+        >
+          {renderPocketActionBubble(secondWhich, false)}
+          {renderPocketActionBubble(firstWhich, true)}
+        </div>
       </div>
     );
   }

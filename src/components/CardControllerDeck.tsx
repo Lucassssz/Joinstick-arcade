@@ -11,6 +11,7 @@ import {
   Maximize2,
   ShieldAlert,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { CardClientAction, CardColor, CardPrivateHandItem, CardPrivateState } from '../shared/types';
 import type { CardSortMode, CardViewMode } from '../shared/padProfiles';
@@ -21,6 +22,9 @@ export interface PocketCardSituationPlayer {
   name: string;
   colorHex: string;
   stat: string;
+  lastAction?: string | null;
+  statusTag?: string | null;
+  statusTone?: 'danger' | 'warn' | 'good' | 'neutral';
   isActive: boolean;
   isMe: boolean;
   alive?: boolean;
@@ -32,6 +36,7 @@ export interface PocketCardSituation {
   activePlayerColor?: string;
   tableBadge?: { text: string; bg: string; fg: string } | null;
   tableSummary?: string;
+  lastMoveText?: string | null;
   banner?: string | null;
   players: PocketCardSituationPlayer[];
 }
@@ -51,6 +56,8 @@ interface CardControllerDeckProps {
   actionsSide?: 'right' | 'left';
   situation?: PocketCardSituation | null;
   handCollapsed?: boolean;
+  coachTip?: string | null;
+  onDismissCoach?: () => void;
   onToggleHandCollapsed?: () => void;
   onChangeViewMode?: (next: 'fan' | 'grid') => void;
   onCycleSortMode?: () => void;
@@ -131,6 +138,8 @@ export function CardControllerDeck({
   actionsSide = 'right',
   situation = null,
   handCollapsed = false,
+  coachTip = null,
+  onDismissCoach,
   onToggleHandCollapsed,
   onChangeViewMode,
   onCycleSortMode,
@@ -210,70 +219,112 @@ export function CardControllerDeck({
     return [...base].sort((a, b) => cardSortWeight(a.card) - cardSortWeight(b.card));
   }, [handList, sortMode]);
 
-  const renderSituationBar = () => {
-    if (!pocketOverlay || !situation) return null;
-    const summaryText = situation.tableSummary
+  const renderPocketOpponentsPanel = () => {
+    const opponents = situation?.players.filter((p) => !p.isMe) ?? [];
+    const summaryText = situation?.tableSummary
       ? translateGameText(situation.tableSummary, lang)
-      : situation.banner
+      : situation?.banner
       ? translateGameText(situation.banner, lang)
+      : '';
+    const lastMove = situation?.lastMoveText
+      ? translateGameText(situation.lastMoveText, lang)
       : '';
 
     return (
-      <div className="pointer-events-auto flex items-center justify-between gap-2 px-2.5 py-1 rounded-xl bg-[#0D1018]/88 border border-white/12 backdrop-blur-sm shrink-0">
-        {/* Table State Summary */}
-        <div className="flex items-center gap-1.5 min-w-0 shrink">
-          {situation.tableBadge && (
-            <span
-              className="px-2 py-0.5 rounded-md font-mono text-[10px] font-black tracking-tight shrink-0 shadow-sm"
-              style={{
-                backgroundColor: situation.tableBadge.bg,
-                color: situation.tableBadge.fg,
-              }}
-            >
-              {translateGameText(situation.tableBadge.text, lang)}
+      <div className="pointer-events-auto flex-1 min-h-0 rounded-2xl bg-[#0D1017]/94 border border-white/15 px-2.5 py-2 flex flex-col gap-1.5 overflow-hidden backdrop-blur-sm">
+        {/* Crisp Table Situation Line */}
+        <div className="flex items-center justify-between gap-1.5 shrink-0 pb-1 border-b border-white/10">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {situation?.tableBadge && (
+              <span
+                className="px-2 py-0.5 rounded-md font-mono text-[11px] font-black tracking-tight shrink-0 shadow-sm"
+                style={{
+                  backgroundColor: situation.tableBadge.bg,
+                  color: situation.tableBadge.fg,
+                }}
+              >
+                {translateGameText(situation.tableBadge.text, lang)}
+              </span>
+            )}
+            <span className="text-[11px] sm:text-xs font-bold text-[#F3F4F6] truncate">
+              {lastMove || summaryText || t('Table Live', '牌局实时同步')}
             </span>
-          )}
-          {summaryText ? (
-            <span className="text-[11px] font-bold text-[#E5E7EB] truncate">
+          </div>
+          {lastMove && summaryText && lastMove !== summaryText && (
+            <span className="text-[10px] font-mono text-[#9CA3AF] truncate shrink-0 max-w-[42%]">
               {summaryText}
             </span>
-          ) : situation.activePlayerName ? (
-            <span className="text-[11px] font-bold text-[#E5E7EB] truncate">
-              {t('Turn:', '回合:')}{' '}
-              <span style={{ color: situation.activePlayerColor ?? '#FFB800' }}>
-                {situation.activePlayerName}
-              </span>
-            </span>
-          ) : null}
+          )}
         </div>
 
-        {/* Live Players Hand/Score Status Strip */}
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar shrink-0 max-w-[58%]">
-          {situation.players.map((p) => (
-            <div
-              key={p.id}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] leading-none whitespace-nowrap transition-colors ${
-                p.isActive
-                  ? 'bg-[#1F2937] border-[#FFB800] text-white shadow-[0_0_8px_rgba(255,184,0,0.35)]'
-                  : p.isMe
-                  ? 'bg-white/10 border-white/25 text-white'
-                  : 'bg-[#121620]/90 border-white/10 text-[#9CA3AF]'
-              } ${p.alive === false ? 'opacity-45 line-through' : ''}`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                  p.isActive ? 'animate-pulse' : ''
-                }`}
-                style={{ backgroundColor: p.colorHex }}
-              />
-              <span className="font-bold max-w-[52px] truncate">
-                {p.isMe ? t('You', '你') : p.name}
-              </span>
-              <span className="font-mono font-black text-[#F8FAFC] tabular-nums">
-                {translateGameText(p.stat, lang)}
-              </span>
+        {/* Opponents Key Info List */}
+        <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar space-y-1 pr-0.5">
+          {opponents.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-[11px] text-[#9CA3AF]">
+              {t('Solo table — waiting on round', '当前暂无其他对手')}
             </div>
-          ))}
+          ) : (
+            opponents.map((p) => {
+              const toneClass =
+                p.statusTone === 'danger'
+                  ? 'bg-[#FF3B30]/20 border-[#FF3B30]/60 text-[#FF8A80]'
+                  : p.statusTone === 'warn'
+                  ? 'bg-[#FFB800]/18 border-[#FFB800]/55 text-[#FFD166]'
+                  : p.statusTone === 'good'
+                  ? 'bg-[#10D98B]/18 border-[#10D98B]/55 text-[#34D399]'
+                  : 'bg-white/8 border-white/15 text-[#D1D5DB]';
+
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg border text-[11px] leading-tight transition-colors ${
+                    p.isActive
+                      ? 'bg-[#1B2434] border-[#FFB800] text-white'
+                      : 'bg-[#121621]/90 border-white/10 text-[#E5E7EB]'
+                  } ${p.alive === false ? 'opacity-45' : ''}`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        p.isActive ? 'animate-pulse' : ''
+                      }`}
+                      style={{ backgroundColor: p.colorHex }}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className={`font-bold truncate ${p.alive === false ? 'line-through' : ''}`}>
+                          {p.name}
+                        </span>
+                        {p.isActive && (
+                          <span className="text-[9px] font-mono font-black text-[#FFB800] shrink-0">
+                            {t('TURN', '回合')}
+                          </span>
+                        )}
+                      </div>
+                      {p.lastAction && (
+                        <div className="text-[10px] text-[#9CA3AF] truncate">
+                          {translateGameText(p.lastAction, lang)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {p.statusTag && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded border font-mono text-[9px] font-black whitespace-nowrap ${toneClass}`}
+                      >
+                        {translateGameText(p.statusTag, lang)}
+                      </span>
+                    )}
+                    <span className="font-mono text-[11px] sm:text-xs font-black text-white tabular-nums whitespace-nowrap">
+                      {translateGameText(p.stat, lang)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     );
@@ -410,7 +461,7 @@ export function CardControllerDeck({
                 embedded
                   ? 'w-14 h-20'
                   : pocketOverlay
-                  ? 'w-[60px] h-[84px] sm:w-[68px] sm:h-[96px]'
+                  ? 'w-[66px] h-[94px] sm:w-[74px] sm:h-[106px]'
                   : 'w-[68px] h-[98px] sm:w-[76px] sm:h-[110px]'
               } ${
                 canTapPlay
@@ -498,7 +549,7 @@ export function CardControllerDeck({
                 embedded
                   ? 'w-16 h-22'
                   : pocketOverlay
-                  ? 'w-[70px] h-[86px] sm:w-[80px] sm:h-[98px]'
+                  ? 'w-[74px] h-[94px] sm:w-[84px] sm:h-[106px]'
                   : 'w-[76px] h-[104px] sm:w-[86px] sm:h-[116px]'
               } ${
                 canTapPlay
@@ -567,7 +618,7 @@ export function CardControllerDeck({
               embedded
                 ? 'w-14 h-20'
                 : pocketOverlay
-                ? 'w-[60px] h-[84px] sm:w-[68px] sm:h-[96px]'
+                ? 'w-[66px] h-[94px] sm:w-[74px] sm:h-[106px]'
                 : 'w-[66px] h-[96px] sm:w-[74px] sm:h-[108px]'
             } ${
               isSelected
@@ -612,15 +663,22 @@ export function CardControllerDeck({
 
   const renderActionButtons = () => {
     if (cardState.extraActions && cardState.extraActions.length > 0) {
+      const gridCols = pocketOverlay
+        ? cardState.extraActions.length >= 3
+          ? 'grid-cols-2 sm:grid-cols-4'
+          : cardState.extraActions.length === 2
+          ? 'grid-cols-2'
+          : 'grid-cols-1'
+        : 'grid-cols-1';
       return (
-        <div className="flex-1 grid grid-cols-1 gap-1.5 min-h-0">
+        <div className={`flex-1 grid ${gridCols} gap-1.5 min-h-0`}>
           {cardState.extraActions.map((btn, i) => (
             <button
               key={`${btn.label}_${i}`}
               type="button"
               disabled={btn.disabled}
               onClick={() => onAction(btn.action)}
-              className="tactile-btn min-h-[34px] rounded-xl px-2 py-1 font-display font-black text-[11px] sm:text-xs text-white flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+              className="tactile-btn min-h-[40px] rounded-xl px-2.5 py-1 font-display font-black text-xs sm:text-sm text-white flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
               style={{
                 backgroundColor: btn.colorHex,
                 color: btn.textColor ?? '#FFFFFF',
@@ -771,7 +829,9 @@ export function CardControllerDeck({
           type="button"
           disabled={!cardState.isMyTurn}
           onClick={() => onAction({ type: 'draw-or-pass' })}
-          className="tactile-btn h-9 rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] font-bold text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          className={`tactile-btn ${
+            pocketOverlay ? 'min-h-[42px] px-4' : 'h-9'
+          } rounded-xl bg-[#242A36] hover:bg-[#2E3646] text-[#D1D5DB] font-bold text-xs sm:text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`}
         >
           {t('Pass Turn', '过牌')}
         </button>
@@ -780,11 +840,12 @@ export function CardControllerDeck({
   };
 
   // =========================================================================
-  // POCKET MODE TURN-DRIVEN CAMERA & HAND VIEW:
-  //   - Opponent Turn (default): Full unobstructed table overview + auto-hidden
-  //     hand strip with quick "Show Hand" toggle
-  //   - My Turn (or manual Show Hand): Focused center table + top situation bar
-  //     + spacious Bottom Card Hand & Side Actions
+  // POCKET MODE OPTION A — TURN-DRIVEN SPLIT & FULL-TABLE OVERVIEW:
+  //   - Opponent Turn (handCollapsed): Full unobstructed table overview +
+  //     readable bottom status bar with "Show Hand" toggle
+  //   - My Turn / Show Hand (!handCollapsed): 2-Column Landscape Split:
+  //       LEFT  (col-span-5): Zoomed Table Window (54%) + Opponents Key Info (46%)
+  //       RIGHT (col-span-7): Turn Header + Spacious Hand Cards + Bottom Actions
   // =========================================================================
   if (pocketOverlay) {
     const hintText =
@@ -793,20 +854,17 @@ export function CardControllerDeck({
         : cardState.statusHint;
     const isTurnActiveNow = Boolean(cardState.isActionRequired || cardState.isMyTurn);
 
-    return (
-      <div className="flex-1 flex flex-col justify-between gap-1 min-h-0 relative z-10 pointer-events-none">
-        {/* 1. Top Situation Bar (only shown in Turn Focus / Hand Open so Full Table stays clean!) */}
-        {!handCollapsed && renderSituationBar()}
+    if (handCollapsed) {
+      const overviewLine = situation?.lastMoveText
+        ? translateGameText(situation.lastMoveText, lang)
+        : hintText;
 
-        {/* 2. Open Table Camera Viewport */}
-        <div className="flex-1 min-h-0" />
-
-        {/* 3. Auto-Hidden Overview Dock (Opponent Turn) OR Active Turn Card Hand + Actions */}
-        {handCollapsed ? (
-          <div className="pointer-events-auto flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[#0D1017]/92 border border-white/15 backdrop-blur-sm shrink-0 shadow-lg">
+      return (
+        <div className="flex-1 flex flex-col justify-end min-h-0 relative z-10 pointer-events-none">
+          <div className="pointer-events-auto flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[#0D1017]/94 border border-white/15 backdrop-blur-sm shrink-0 shadow-lg">
             <div className="flex items-center gap-2 min-w-0">
               <span
-                className={`px-2 py-0.5 rounded font-mono text-[10px] font-black tabular-nums shrink-0 inline-flex items-center gap-1.5 ${
+                className={`px-2.5 py-0.5 rounded-md font-mono text-xs font-black tabular-nums shrink-0 inline-flex items-center gap-1.5 ${
                   isDanger
                     ? 'bg-[#FF3B30] text-white animate-pulse'
                     : isTurnActiveNow
@@ -816,7 +874,7 @@ export function CardControllerDeck({
               >
                 {!isTurnActiveNow && situation?.activePlayerColor && (
                   <span
-                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                    className="w-2 h-2 rounded-full shrink-0"
                     style={{ backgroundColor: situation.activePlayerColor }}
                   />
                 )}
@@ -831,7 +889,7 @@ export function CardControllerDeck({
 
               {situation?.tableBadge && (
                 <span
-                  className="px-1.5 py-0.5 rounded font-mono text-[10px] font-black shrink-0"
+                  className="px-2 py-0.5 rounded-md font-mono text-[11px] font-black shrink-0"
                   style={{
                     backgroundColor: situation.tableBadge.bg,
                     color: situation.tableBadge.fg,
@@ -841,20 +899,16 @@ export function CardControllerDeck({
                 </span>
               )}
 
-              <span className="text-xs font-bold text-white truncate">{hintText}</span>
-
-              {!isTurnActiveNow && (
-                <span className="hidden md:inline text-[10px] font-medium text-[#9CA3AF] whitespace-nowrap shrink-0">
-                  · {t('Hand auto-hidden', '等待时已自动隐藏手牌')}
-                </span>
-              )}
+              <span className="text-xs sm:text-sm font-bold text-white truncate">
+                {overviewLine}
+              </span>
             </div>
 
             {onToggleHandCollapsed && (
               <button
                 type="button"
                 onClick={onToggleHandCollapsed}
-                className={`h-8 px-3 rounded-lg font-display font-black text-xs inline-flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap active:scale-95 transition-transform ${
+                className={`h-8 px-3.5 rounded-lg font-display font-black text-xs inline-flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap active:scale-95 transition-transform ${
                   isTurnActiveNow
                     ? 'bg-[#10D98B] hover:bg-[#22E89B] text-[#0A1913]'
                     : 'bg-[#FFB800] hover:bg-[#FFC933] text-[#14120B]'
@@ -869,203 +923,218 @@ export function CardControllerDeck({
               </button>
             )}
           </div>
-        ) : isColorClash && cardState.awaitingColorPick ? (
-          <div className="pointer-events-auto rounded-2xl bg-[#0D1017]/90 border border-white/18 p-2 backdrop-blur-sm shrink-0 space-y-1.5">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-extrabold text-[#FFB800]">{hintText}</span>
-              <span className="font-mono text-xs font-black text-white">{timeSecs}s</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2 h-16 sm:h-20">
-              {(['red', 'blue', 'gold', 'green'] as const).map((col, idx) => {
-                const spec = CLASH_STYLE[col];
-                return (
-                  <button
-                    key={col}
-                    type="button"
-                    onClick={() => onAction({ type: 'pick-color', color: col })}
-                    className="tactile-btn swatch-pop-anim rounded-2xl font-display font-black text-sm sm:text-lg flex flex-col items-center justify-center cursor-pointer active:scale-95"
-                    style={{
-                      backgroundColor: spec.bg,
-                      color: spec.text,
-                      boxShadow: `0 5px 0 ${spec.dark}`,
-                      animationDelay: `${idx * 45}ms`,
-                    }}
-                  >
-                    <span>{lang === 'zh' ? spec.nameZh : spec.nameEn}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex-1 grid grid-cols-12 gap-2 min-h-0 relative z-10 pointer-events-none">
+        {/* LEFT COLUMN (42%): Upper Zoomed Table Camera Window + Lower Opponents Key Info */}
+        <div className="col-span-5 flex flex-col gap-1.5 min-h-0 pointer-events-none">
+          <div className="h-[54%] shrink-0 rounded-2xl pointer-events-none" />
+          {renderPocketOpponentsPanel()}
+        </div>
+
+        {/* RIGHT COLUMN (58%): My Cards + Actions */}
+        <div
+          className="col-span-7 pointer-events-auto relative flex flex-col rounded-2xl border border-white/18 min-w-0 min-h-0 backdrop-blur-sm overflow-hidden"
+          style={{
+            backgroundColor: `rgba(13, 16, 23, ${Math.max(0.76, Math.min(0.95, hudOpacity + 0.14))})`,
+          }}
+        >
+          {/* Compact Turn Status & Card Toolbar */}
           <div
-            className={`flex items-stretch gap-2 shrink-0 pointer-events-none ${
-              actionsSide === 'left' ? 'flex-row-reverse' : 'flex-row'
+            className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 border-b shrink-0 transition-colors ${
+              isDanger
+                ? 'bg-[#FF3B30]/30 border-[#FF3B30]/70'
+                : cardState.isActionRequired
+                ? 'bg-[#10D98B]/18 border-[#10D98B]/45'
+                : 'bg-black/35 border-white/10'
             }`}
           >
-            {/* Card Hand Overlay Panel */}
-            <div
-              className="pointer-events-auto relative flex-1 flex flex-col rounded-2xl border border-white/18 min-w-0 backdrop-blur-sm"
-              style={{
-                backgroundColor: `rgba(13, 16, 23, ${Math.max(0.58, Math.min(0.92, hudOpacity + 0.08))})`,
-              }}
-            >
-              {/* Unified Turn Status + Card Toolbar (1 compact row) */}
-              <div
-                className={`flex items-center justify-between gap-2 px-2.5 py-1 border-b rounded-t-2xl shrink-0 transition-colors ${
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className={`px-2 py-0.5 rounded font-mono text-[11px] font-black tabular-nums shrink-0 ${
                   isDanger
-                    ? 'bg-[#FF3B30]/30 border-[#FF3B30]/70'
+                    ? 'bg-[#FF3B30] text-white animate-pulse'
                     : cardState.isActionRequired
-                    ? 'bg-[#10D98B]/18 border-[#10D98B]/45'
-                    : 'bg-black/35 border-white/10'
+                    ? 'bg-[#10D98B] text-[#0A1913]'
+                    : 'bg-[#242A36] text-[#D1D5DB]'
                 }`}
               >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-black tabular-nums shrink-0 ${
-                      isDanger
-                        ? 'bg-[#FF3B30] text-white animate-pulse'
-                        : cardState.isActionRequired
-                        ? 'bg-[#10D98B] text-[#0A1913]'
-                        : 'bg-[#242A36] text-[#D1D5DB]'
-                    }`}
-                  >
-                    {cardState.isActionRequired
-                      ? isDanger
-                        ? `${t('HURRY!', '快出!')} ${timeSecs}s`
-                        : `${t('TURN', '出牌')} ${timeSecs}s`
-                      : `${timeSecs}s`}
+                {cardState.isActionRequired
+                  ? isDanger
+                    ? `${t('HURRY!', '快出!')} ${timeSecs}s`
+                    : `${t('TURN', '出牌')} ${timeSecs}s`
+                  : `${timeSecs}s`}
+              </span>
+
+              {isColorClash && activeColorSpec ? (
+                <span
+                  className="px-1.5 py-0.5 rounded font-mono text-[10px] font-black shrink-0"
+                  style={{ backgroundColor: activeColorSpec.bg, color: activeColorSpec.text }}
+                >
+                  {lang === 'zh' ? activeColorSpec.nameZh : activeColorSpec.nameEn}
+                </span>
+              ) : cardState.targetRank ? (
+                <span className="px-1.5 py-0.5 rounded bg-[#FFB800] text-[#14120B] font-mono text-[10px] font-black shrink-0">
+                  {t('TARGET:', '目标:')} {cardState.targetRank}
+                </span>
+              ) : null}
+
+              {isColorClash && (cardState.drawPenalty ?? 0) > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-[#FF4D2E] text-white font-mono text-[10px] font-black shrink-0">
+                  +{cardState.drawPenalty}
+                </span>
+              )}
+
+              <span className="text-xs font-bold text-white truncate">
+                {hintText}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {onChangeViewMode && (
+                <button
+                  type="button"
+                  onClick={() => onChangeViewMode(effectiveView === 'fan' ? 'grid' : 'fan')}
+                  title={
+                    effectiveView === 'fan'
+                      ? t('Expand All Cards Grid', '展开全部手牌网格')
+                      : t('Switch to Fan Strip', '切回扇形手牌条')
+                  }
+                  className={`px-2 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                    effectiveView === 'grid'
+                      ? 'bg-[#FFB800] border-[#FFB800] text-[#14120B]'
+                      : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
+                  }`}
+                >
+                  <LayoutGrid className="w-3 h-3" />
+                  <span>
+                    {effectiveView === 'grid'
+                      ? t('Fan', '收起')
+                      : t(`All (${cardState.hand.length})`, `全览(${cardState.hand.length})`)}
                   </span>
+                </button>
+              )}
 
-                  {isColorClash && activeColorSpec ? (
-                    <span
-                      className="px-1.5 py-0.5 rounded font-mono text-[10px] font-black shrink-0"
-                      style={{ backgroundColor: activeColorSpec.bg, color: activeColorSpec.text }}
-                    >
-                      {lang === 'zh' ? activeColorSpec.nameZh : activeColorSpec.nameEn}
-                    </span>
-                  ) : cardState.targetRank ? (
-                    <span className="px-1.5 py-0.5 rounded bg-[#FFB800] text-[#14120B] font-mono text-[10px] font-black shrink-0">
-                      {t('TARGET:', '目标:')} {cardState.targetRank}
-                    </span>
-                  ) : null}
-
-                  {isColorClash && (cardState.drawPenalty ?? 0) > 0 && (
-                    <span className="px-1.5 py-0.5 rounded bg-[#FF4D2E] text-white font-mono text-[10px] font-black shrink-0">
-                      +{cardState.drawPenalty}
-                    </span>
-                  )}
-
-                  <span className="text-[11px] font-bold text-white truncate">
-                    {hintText}
+              {onCycleSortMode && (
+                <button
+                  type="button"
+                  onClick={onCycleSortMode}
+                  title={t('Sort Hand', '智能理牌')}
+                  className={`px-2 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                    sortMode !== 'server'
+                      ? 'bg-[#00C2FF]/20 border-[#00C2FF]/60 text-[#00C2FF]'
+                      : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
+                  }`}
+                >
+                  <ArrowDownUp className="w-3 h-3" />
+                  <span className="hidden sm:inline">
+                    {sortMode === 'playable'
+                      ? t('Playable', '可出')
+                      : sortMode === 'rank'
+                      ? t('Rank', '点数')
+                      : t('Sort', '理牌')}
                   </span>
-                </div>
+                </button>
+              )}
 
-                <div className="flex items-center gap-1 shrink-0">
-                  {onChangeViewMode && (
-                    <button
-                      type="button"
-                      onClick={() => onChangeViewMode(effectiveView === 'fan' ? 'grid' : 'fan')}
-                      title={
-                        effectiveView === 'fan'
-                          ? t('Expand All Cards Grid', '展开全部手牌网格')
-                          : t('Switch to Fan Strip', '切回扇形手牌条')
-                      }
-                      className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                        effectiveView === 'grid'
-                          ? 'bg-[#FFB800] border-[#FFB800] text-[#14120B]'
-                          : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
-                      }`}
-                    >
-                      <LayoutGrid className="w-2.5 h-2.5" />
-                      <span>
-                        {effectiveView === 'grid'
-                          ? t('Fan', '收起')
-                          : t(`All (${cardState.hand.length})`, `全览(${cardState.hand.length})`)}
-                      </span>
-                    </button>
-                  )}
+              {onTogglePrivacy && (
+                <button
+                  type="button"
+                  onClick={onTogglePrivacy}
+                  title={t('Toggle Privacy Cover', '切换防偷窥盖牌')}
+                  className={`px-1.5 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                    privacyShield
+                      ? 'bg-[#FFB800]/20 border-[#FFB800] text-[#FFB800]'
+                      : 'bg-[#181C26] border-[#2A303D] text-[#9CA3AF] hover:text-white'
+                  }`}
+                >
+                  {privacyShield ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </button>
+              )}
 
-                  {onCycleSortMode && (
-                    <button
-                      type="button"
-                      onClick={onCycleSortMode}
-                      title={t('Sort Hand', '智能理牌')}
-                      className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                        sortMode !== 'server'
-                          ? 'bg-[#00C2FF]/20 border-[#00C2FF]/60 text-[#00C2FF]'
-                          : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
-                      }`}
-                    >
-                      <ArrowDownUp className="w-2.5 h-2.5" />
-                      <span className="hidden sm:inline">
-                        {sortMode === 'playable'
-                          ? t('Playable', '可出')
-                          : sortMode === 'rank'
-                          ? t('Rank', '点数')
-                          : t('Sort', '理牌')}
-                      </span>
-                    </button>
+              {onToggleHandCollapsed && (
+                <button
+                  type="button"
+                  onClick={onToggleHandCollapsed}
+                  title={
+                    isTurnActiveNow
+                      ? t('Collapse hand to view full table', '收起手牌查看完整牌桌')
+                      : t('Hide hand and return to full table', '隐藏手牌回到全桌视角')
+                  }
+                  className={`px-2 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                    !isTurnActiveNow
+                      ? 'bg-[#00C2FF]/20 border-[#00C2FF] text-[#00C2FF] hover:bg-[#00C2FF]/30'
+                      : 'bg-[#181C26] border-[#2A303D] text-[#00C2FF] hover:text-white'
+                  }`}
+                >
+                  {!isTurnActiveNow ? (
+                    <>
+                      <EyeOff className="w-3 h-3 shrink-0" />
+                      <span>{t('Hide', '收起')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-3 h-3 shrink-0" />
+                      <span className="hidden sm:inline">{t('Table', '看全桌')}</span>
+                    </>
                   )}
+                </button>
+              )}
+            </div>
+          </div>
 
-                  {onTogglePrivacy && (
-                    <button
-                      type="button"
-                      onClick={onTogglePrivacy}
-                      title={t('Toggle Privacy Cover', '切换防偷窥盖牌')}
-                      className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                        privacyShield
-                          ? 'bg-[#FFB800]/20 border-[#FFB800] text-[#FFB800]'
-                          : 'bg-[#181C26] border-[#2A303D] text-[#9CA3AF] hover:text-white'
-                      }`}
-                    >
-                      {privacyShield ? <EyeOff className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
-                    </button>
-                  )}
-
-                  {onToggleHandCollapsed && (
-                    <button
-                      type="button"
-                      onClick={onToggleHandCollapsed}
-                      title={
-                        isTurnActiveNow
-                          ? t('Collapse hand to view full table', '收起手牌查看完整牌桌')
-                          : t('Hide hand and return to full table', '隐藏手牌回到全桌视角')
-                      }
-                      className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                        !isTurnActiveNow
-                          ? 'bg-[#00C2FF]/20 border-[#00C2FF] text-[#00C2FF] hover:bg-[#00C2FF]/30'
-                          : 'bg-[#181C26] border-[#2A303D] text-[#00C2FF] hover:text-white'
-                      }`}
-                    >
-                      {!isTurnActiveNow ? (
-                        <>
-                          <EyeOff className="w-2.5 h-2.5 shrink-0" />
-                          <span>{t('Hide Hand', '收起手牌')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Maximize2 className="w-2.5 h-2.5 shrink-0" />
-                          <span className="hidden sm:inline">{t('Full Table', '看全桌')}</span>
-                        </>
-                      )}
-                    </button>
-                  )}
-
-                  {onFlipActionsSide && (
-                    <button
-                      type="button"
-                      onClick={onFlipActionsSide}
-                      title={t('Swap Action Buttons Left/Right', '左右切换操作按钮位置')}
-                      className="px-1.5 py-0.5 rounded-md bg-[#181C26] border border-[#2A303D] text-[10px] font-bold text-[#9CA3AF] hover:text-white inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                    >
-                      <ArrowLeftRight className="w-2.5 h-2.5" />
-                    </button>
-                  )}
-                </div>
+          {coachTip && (
+            <div className="shrink-0 flex items-center justify-between gap-2 px-2.5 py-1 bg-[#00C2FF]/12 border-b border-[#00C2FF]/30 text-[11px] leading-tight">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Sparkles className="w-3 h-3 text-[#00C2FF] shrink-0" />
+                <span className="font-bold text-[#E0F2FE] truncate">{coachTip}</span>
               </div>
+              {onDismissCoach && (
+                <button
+                  type="button"
+                  onClick={onDismissCoach}
+                  aria-label={t('Dismiss tip', '关闭提示')}
+                  className="w-5 h-5 rounded flex items-center justify-center text-[#9CA3AF] hover:text-white shrink-0 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
 
-              {/* Cards Area (with generous vertical clearance so lifted cards never clip!) */}
+          {/* Spacious Hand Cards OR Wild Color Picker */}
+          {isColorClash && cardState.awaitingColorPick ? (
+            <div className="flex-1 min-h-0 p-3 flex flex-col justify-center gap-2">
+              <div className="text-xs font-extrabold text-[#FFB800] text-center">
+                {t('Choose Next Active Color', '选择接下来的颜色')}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 flex-1 max-h-[180px]">
+                {(['red', 'blue', 'gold', 'green'] as const).map((col, idx) => {
+                  const spec = CLASH_STYLE[col];
+                  return (
+                    <button
+                      key={col}
+                      type="button"
+                      onClick={() => onAction({ type: 'pick-color', color: col })}
+                      className="tactile-btn swatch-pop-anim rounded-2xl font-display font-black text-base sm:text-lg flex items-center justify-center cursor-pointer active:scale-95"
+                      style={{
+                        backgroundColor: spec.bg,
+                        color: spec.text,
+                        boxShadow: `0 5px 0 ${spec.dark}`,
+                        animationDelay: `${idx * 45}ms`,
+                      }}
+                    >
+                      <span>{lang === 'zh' ? spec.nameZh : spec.nameEn}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <>
               {isMaskActive ? (
                 <div
                   onPointerDown={() => setPeeking(true)}
@@ -1073,13 +1142,13 @@ export function CardControllerDeck({
                   onPointerCancel={() => setPeeking(false)}
                   onPointerLeave={() => setPeeking(false)}
                   onContextMenu={(e) => e.preventDefault()}
-                  className="min-h-[104px] flex flex-col items-center justify-center p-3 text-center touch-none select-none cursor-pointer bg-[#121620]/85 rounded-b-2xl hover:bg-[#161B28]"
+                  className="flex-1 min-h-0 flex flex-col items-center justify-center p-3 text-center touch-none select-none cursor-pointer bg-[#121620]/85 hover:bg-[#161B28]"
                 >
-                  <EyeOff className="w-6 h-6 text-[#FFB800] mb-1" />
+                  <EyeOff className="w-7 h-7 text-[#FFB800] mb-1" />
                   <div className="font-display font-extrabold text-xs sm:text-sm text-white">
                     {t('Cards Hidden · Hold Here to Peek', '手牌已遮盖防偷窥 · 按住此处查看')}
                   </div>
-                  <div className="text-[10px] text-[#9CA3AF]">
+                  <div className="text-[11px] text-[#9CA3AF]">
                     {t(
                       `${cardState.hand.length} cards in hand — lifts while held`,
                       `共 ${cardState.hand.length} 张牌 — 松手自动隐藏`
@@ -1090,8 +1159,8 @@ export function CardControllerDeck({
                 <div
                   className={
                     effectiveView === 'grid'
-                      ? 'max-h-[45dvh] overflow-y-auto arcade-scrollbar grid grid-cols-5 sm:grid-cols-7 gap-2 px-2.5 pt-3 pb-2.5 content-start justify-items-center'
-                      : 'flex items-end overflow-x-auto arcade-scrollbar px-3 pt-3 pb-2 min-h-[102px] sm:min-h-[114px]'
+                      ? 'flex-1 min-h-0 overflow-y-auto arcade-scrollbar grid grid-cols-4 sm:grid-cols-5 gap-2 px-2.5 pt-3 pb-2.5 content-start justify-items-center'
+                      : 'flex-1 min-h-0 flex items-center overflow-x-auto arcade-scrollbar px-3 pt-3 pb-2'
                   }
                 >
                   {renderHandCards()}
@@ -1099,18 +1168,18 @@ export function CardControllerDeck({
               )}
 
               {privacyShield && !isMaskActive && (
-                <div className="shrink-0 h-5 bg-[#FFB800]/15 border-t border-[#FFB800]/35 text-[10px] font-bold text-[#FFB800] flex items-center justify-center rounded-b-2xl">
+                <div className="shrink-0 h-5 bg-[#FFB800]/15 border-t border-[#FFB800]/35 text-[10px] font-bold text-[#FFB800] flex items-center justify-center">
                   {t('Release finger to hide cards again', '松开手指即刻隐藏手牌')}
                 </div>
               )}
-            </div>
 
-            {/* Side Action Buttons Beside Card Hand Overlay */}
-            <div className="pointer-events-auto flex flex-col justify-center gap-1.5 shrink-0 w-[112px] sm:w-[136px] self-stretch">
-              {renderActionButtons()}
-            </div>
-          </div>
-        )}
+              {/* Bottom Thumb-Friendly Action Row */}
+              <div className="shrink-0 px-2.5 py-2 border-t border-white/10 bg-black/30 flex items-stretch gap-2">
+                {renderActionButtons()}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     );
   }

@@ -1405,13 +1405,13 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
   init({ players, settingValue }) {
     const totalTime = settingValue || 75;
     const coins: DozerCoin[] = [];
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < 76; i++) {
       coins.push({
         id: `cd_${i}`,
-        x: 240 + Math.random() * 720,
-        y: 250 + Math.random() * 340,
-        r: i % 9 === 0 ? 18 : 14,
-        kind: i % 9 === 0 ? 'gem' : 'gold',
+        x: 235 + Math.random() * 730,
+        y: 265 + Math.random() * 342,
+        r: i % 8 === 0 ? 18 : 14,
+        kind: i % 8 === 0 ? 'gem' : 'gold',
         ownerSlot: -1,
       });
     }
@@ -1445,8 +1445,8 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
     const mult = frenzy ? 2 : 1;
 
     const prevPusherY = state.pusherY;
-    state.pusherPhase += dt * 1.9;
-    state.pusherY = 215 + Math.sin(state.pusherPhase) * 78;
+    state.pusherPhase += dt * 2.1;
+    state.pusherY = 250 + Math.sin(state.pusherPhase) * 95;
     const pushDelta = Math.max(0, state.pusherY - prevPusherY);
 
     for (const p of state.players) {
@@ -1462,7 +1462,7 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
         state.coins.push({
           id: `cd_${state.cSeq++}`,
           x: p.x + (Math.random() - 0.5) * 14,
-          y: state.pusherY + 26,
+          y: state.pusherY + 28,
           r: 14,
           kind: 'gold',
           ownerSlot: p.slotIndex,
@@ -1474,7 +1474,7 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
         state.coins.push({
           id: `cd_${state.cSeq++}`,
           x: p.x,
-          y: state.pusherY + 34,
+          y: state.pusherY + 36,
           r: 26,
           kind: 'mega',
           ownerSlot: p.slotIndex,
@@ -1489,8 +1489,10 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
     // Pusher shoves coins forward + coin-to-coin shoving
     if (pushDelta > 0) {
       for (const c of state.coins) {
-        if (c.y < state.pusherY + 60) {
-          c.y += pushDelta * 1.15;
+        if (c.y < state.pusherY + 85) {
+          c.y += pushDelta * 1.25;
+        } else if (c.y < 612) {
+          c.y += dt * 4.0;
         }
       }
     }
@@ -1498,21 +1500,21 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
       const a = state.coins[i];
       for (let j = i + 1; j < state.coins.length; j++) {
         const b = state.coins[j];
-        const minD = a.r + b.r - 2;
+        const minD = a.r + b.r + 3;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const d = Math.hypot(dx, dy);
         if (d < minD && d > 0.01) {
-          const ov = (minD - d) * 0.55;
+          const ov = (minD - d) * 0.62;
           const nx = dx / d;
           const ny = dy / d;
           if (a.y < b.y) {
             b.x = clamp(b.x + nx * ov, 215, ARENA_WIDTH - 215);
-            b.y += Math.max(0.2, ny * ov);
+            b.y += Math.max(0.35, ny * ov);
             if (b.ownerSlot === -1 && a.ownerSlot >= 0) b.ownerSlot = a.ownerSlot;
           } else {
             a.x = clamp(a.x - nx * ov, 215, ARENA_WIDTH - 215);
-            a.y += Math.max(0.2, -ny * ov);
+            a.y += Math.max(0.35, -ny * ov);
             if (a.ownerSlot === -1 && b.ownerSlot >= 0) a.ownerSlot = b.ownerSlot;
           }
         }
@@ -1541,18 +1543,28 @@ export const coinDozerModule: CompactGameModule<CoinDozerState, CoinDozerSnapsho
       }
     }
 
-    // Keep table stocked with gems
-    if (state.coins.filter((c) => c.kind === 'gem').length < 4) {
+    // Keep table stocked with gems & coins so cascades stay juicy
+    if (state.coins.filter((c) => c.kind === 'gem').length < 5) {
       state.coins.push({
         id: `cd_${state.cSeq++}`,
-        x: 280 + Math.random() * 640,
-        y: 340 + Math.random() * 140,
+        x: 260 + Math.random() * 680,
+        y: 300 + Math.random() * 140,
         r: 18,
         kind: 'gem',
         ownerSlot: -1,
       });
     }
-    if (state.coins.length > 95) state.coins.splice(0, state.coins.length - 95);
+    while (state.coins.length < 52) {
+      state.coins.push({
+        id: `cd_${state.cSeq++}`,
+        x: 240 + Math.random() * 720,
+        y: 265 + Math.random() * 120,
+        r: 14,
+        kind: 'gold',
+        ownerSlot: -1,
+      });
+    }
+    if (state.coins.length > 105) state.coins.splice(0, state.coins.length - 105);
 
     return { finished: state.timeLeft <= 0, sounds };
   },

@@ -879,7 +879,7 @@ function renderTurboDrift(
       ctx.rotate(car.angle + car.fallProgress * Math.PI * 2.4);
     } else {
       if (car.respawnBlink > 0) {
-        const blink = Math.floor(Date.now() / 90) % 2 === 0;
+        const blink = Math.floor(driftNow * 11) % 2 === 0;
         ctx.globalAlpha = blink ? 0.55 : 1;
       }
       // Track shadow

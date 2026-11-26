@@ -986,7 +986,10 @@ export const codenamesGridModule: CompactGameModule<CodeGridState, CodeGridSnaps
       clueWordZh: state.clueWordZh,
       clueCount: state.clueCount,
       foundCount: state.foundCount,
-      cards: state.cards,
+      cards: state.cards.map((c) => ({
+        ...c,
+        kind: c.revealed ? c.kind : 'neutral',
+      })),
       players: state.players.map((p) => ({
         id: p.id,
         slotIndex: p.slotIndex,

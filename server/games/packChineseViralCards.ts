@@ -209,9 +209,9 @@ function dealDdzRound(state: LandlordClashState) {
   state.tableCards = [];
   state.tableEval = null;
   state.trickOwnerId = null;
-  state.turnTotal = 12;
-  state.turnTimeLeft = 12;
-  state.botThinkTimer = 0.85;
+  state.turnTotal = 11;
+  state.turnTimeLeft = 11;
+  state.botThinkTimer = 0.52;
   state.banner = `ROUND ${state.round}/${state.totalRounds} — BID FOR LANDLORD!`;
   state.bannerColor = '#F59E0B';
 }
@@ -226,9 +226,9 @@ function finalizeDdzBid(state: LandlordClashState) {
   state.kittyRevealed = true;
   state.phase = 'playing';
   state.activeIdx = state.seats.indexOf(ll);
-  state.turnTotal = 16;
-  state.turnTimeLeft = 16;
-  state.botThinkTimer = 0.9;
+  state.turnTotal = 14;
+  state.turnTimeLeft = 14;
+  state.botThinkTimer = 0.55;
   state.banner = `${ll.name} IS LANDLORD (×${state.multiplier})!`;
   state.bannerColor = '#DC2626';
   state.pendingSounds.push({ type: 'score', playerId: ll.id });
@@ -257,6 +257,27 @@ function findLowestValidDdzPlay(hand: LandlordCardView[], tableEval: DdzComboEva
       if (ddzCardWeight(sorted[i]) === ddzCardWeight(sorted[i + 2]) && ddzCardWeight(sorted[i]) > tableEval.power) {
         return [sorted[i], sorted[i + 1], sorted[i + 2]];
       }
+    }
+  } else if (tableEval.type === 'triple1') {
+    for (let i = 0; i < sorted.length - 2; i++) {
+      if (ddzCardWeight(sorted[i]) === ddzCardWeight(sorted[i + 2]) && ddzCardWeight(sorted[i]) > tableEval.power) {
+        const kicker = sorted.find((c) => c !== sorted[i] && c !== sorted[i + 1] && c !== sorted[i + 2]);
+        if (kicker) return [sorted[i], sorted[i + 1], sorted[i + 2], kicker];
+      }
+    }
+  } else if (tableEval.type === 'straight') {
+    const uniqByW = new Map<number, LandlordCardView>();
+    for (const c of sorted) {
+      const w = ddzCardWeight(c);
+      if (w <= 14 && !uniqByW.has(w)) uniqByW.set(w, c);
+    }
+    for (let top = tableEval.power + 1; top <= 14; top++) {
+      const seq: LandlordCardView[] = [];
+      for (let w = top - tableEval.length + 1; w <= top; w++) {
+        const hit = uniqByW.get(w);
+        if (hit) seq.push(hit);
+      }
+      if (seq.length === tableEval.length) return seq;
     }
   }
   // Check Bomb or Rocket
@@ -320,14 +341,14 @@ function applyDdzPlay(state: LandlordClashState, seat: DdzSeat, cards: LandlordC
     }
     state.bannerColor = '#10D98B';
     state.phase = 'round-over';
-    state.roundDelayTimer = 3.0;
+    state.roundDelayTimer = 1.8;
     state.pendingSounds.push({ type: 'win', playerId: seat.id });
     return true;
   }
 
   state.activeIdx = (state.activeIdx + 1) % state.seats.length;
   state.turnTimeLeft = state.turnTotal;
-  state.botThinkTimer = 0.85;
+  state.botThinkTimer = 0.48;
   return true;
 }
 
@@ -342,7 +363,7 @@ function applyDdzPass(state: LandlordClashState, seat: DdzSeat) {
     for (const s of state.seats) s.passedTrick = false;
   }
   state.turnTimeLeft = state.turnTotal;
-  state.botThinkTimer = 0.75;
+  state.botThinkTimer = 0.42;
 }
 
 export const landlordClashModule: ServerGameModule<LandlordClashState, LandlordClashSnapshot> = {
@@ -415,7 +436,10 @@ export const landlordClashModule: ServerGameModule<LandlordClashState, LandlordC
         if (state.highestBid < 3) extraActions.push({ label: 'BID 3×', labelZh: '叫3分(抢)', action: { type: 'custom', id: 'bid', payload: '3' }, colorHex: '#DC2626', textColor: '#FFFFFF' });
         secondaryBtn = { label: 'PASS BID', labelZh: '不叫', action: { type: 'custom', id: 'bid', payload: '0' }, colorHex: '#475569', textColor: '#FFFFFF' };
       } else if (state.phase === 'playing' && isTurn) {
-        primaryBtn = { label: 'PLAY SELECTED', labelZh: '出牌', action: { type: 'submit-selected' }, colorHex: '#10D98B', textColor: '#052E16' };
+        const selCards = seat.hand.filter((c) => seat.selectedIds.has(c.id));
+        const selEval = evalDdzCombo(selCards);
+        const canSubmit = Boolean(selEval && canBeatDdz(selEval, state.tableEval));
+        primaryBtn = { label: 'PLAY SELECTED', labelZh: '出牌', action: { type: 'submit-selected' }, colorHex: '#10D98B', textColor: '#052E16', disabled: !canSubmit };
         extraActions.push({ label: 'SMART PLAY', labelZh: '智能出牌', action: { type: 'custom', id: 'smart-play' }, colorHex: '#38BDF8', textColor: '#082F49' });
         if (state.tableEval) {
           secondaryBtn = { label: 'PASS', labelZh: '不出', action: { type: 'draw-or-pass' }, colorHex: '#EF4444', textColor: '#FFFFFF' };
@@ -475,7 +499,7 @@ export const landlordClashModule: ServerGameModule<LandlordClashState, LandlordC
       } else {
         state.activeIdx = (state.activeIdx + 1) % state.seats.length;
         state.turnTimeLeft = state.turnTotal;
-        state.botThinkTimer = 0.8;
+        state.botThinkTimer = 0.48;
       }
     } else if (action.type === 'submit-selected' && state.phase === 'playing') {
       const picked = seat.hand.filter((c) => seat.selectedIds.has(c.id));
@@ -523,7 +547,7 @@ export const landlordClashModule: ServerGameModule<LandlordClashState, LandlordC
         else {
           state.activeIdx = (state.activeIdx + 1) % state.seats.length;
           state.turnTimeLeft = state.turnTotal;
-          state.botThinkTimer = 0.8;
+          state.botThinkTimer = 0.48;
         }
       } else {
         const valid = findLowestValidDdzPlay(active.hand, state.tableEval);
@@ -634,10 +658,12 @@ function canHu8Tiles(tiles: MahjongTileView[], meldsCount: number): boolean {
 function createMahjongWall(): MahjongTileView[] {
   const wall: MahjongTileView[] = [];
   let seq = 0;
-  for (let copy = 0; copy < 4; copy++) {
+  for (let copy = 0; copy < 6; copy++) {
     for (let v = 1; v <= 9; v++) {
       wall.push({ id: `mj_${seq++}`, suit: 'wan', value: v, label: WAN_LABELS[v], sublabel: `${v}W` });
     }
+  }
+  for (let copy = 0; copy < 4; copy++) {
     for (let d = 1; d <= 3; d++) {
       wall.push({ id: `mj_${seq++}`, suit: 'dragon', value: d, label: DRAGON_LABELS[d], sublabel: DRAGON_EN[d] });
     }
@@ -867,11 +893,12 @@ export const speedMahjongModule: ServerGameModule<SpeedMahjongState, SpeedMahjon
         const remIds = new Set(matches.map((m) => m.id));
         seat.hand = seat.hand.filter((t) => !remIds.has(t.id));
         seat.melds.push([...matches, state.lastDiscard]);
-        seat.lastAction = `PONG ${state.lastDiscard.label}!`;
+        seat.score += 30;
+        seat.lastAction = `PONG ${state.lastDiscard.label}! +30`;
         state.lastDiscard = null;
         state.activeIdx = state.seats.indexOf(seat);
         state.turnTimeLeft = state.turnTotal;
-        state.botTimer = 0.85;
+        state.botTimer = 0.75;
         state.banner = `${seat.name} PONG! 碰!`;
         state.pendingSounds.push({ type: 'score', playerId: seat.id });
       }
@@ -909,6 +936,50 @@ export const speedMahjongModule: ServerGameModule<SpeedMahjongState, SpeedMahjon
     if (isBot) state.botTimer -= dt;
 
     if (active && (state.turnTimeLeft <= 0 || (isBot && state.botTimer <= 0))) {
+      // Allow bots to claim Ron Hu or Pong on the latest discard before drawing
+      if (state.lastDiscard) {
+        const disc = state.lastDiscard;
+        const ronBot = state.seats.find(
+          (s) => s.id !== active.id && s.isBot && s.name !== state.lastDiscardBy && canHu8Tiles([...s.hand, disc], s.melds.length)
+        );
+        if (ronBot) {
+          const fullHand = [...ronBot.hand, disc];
+          const pts = 240 * (frenzyActive ? 2 : 1);
+          ronBot.score += pts;
+          ronBot.lastAction = `RON HU! +${pts}`;
+          state.winnerHand = [...fullHand, ...ronBot.melds.flat()];
+          state.winnerLabel = `${ronBot.name} HU! 胡牌 (+${pts})`;
+          state.banner = state.winnerLabel;
+          state.bannerColor = '#F59E0B';
+          state.roundOverTimer = 2.6;
+          state.pendingSounds.push({ type: 'win', playerId: ronBot.id });
+          return { finished: false, sounds: state.pendingSounds.splice(0), privateStates: this.getPrivateStates!(state, players) };
+        }
+        const discKey = tileKey(disc);
+        const pongBot = state.seats.find(
+          (s) =>
+            s.id !== active.id &&
+            s.isBot &&
+            s.name !== state.lastDiscardBy &&
+            s.hand.filter((t) => tileKey(t) === discKey).length >= 2
+        );
+        if (pongBot && Math.random() < 0.72) {
+          const matches = pongBot.hand.filter((t) => tileKey(t) === discKey).slice(0, 2);
+          const remIds = new Set(matches.map((m) => m.id));
+          pongBot.hand = pongBot.hand.filter((t) => !remIds.has(t.id));
+          pongBot.melds.push([...matches, disc]);
+          pongBot.score += 30;
+          pongBot.lastAction = `PONG ${disc.label}! +30`;
+          state.lastDiscard = null;
+          state.activeIdx = state.seats.indexOf(pongBot);
+          state.turnTimeLeft = state.turnTotal;
+          state.botTimer = 0.65;
+          state.banner = `${pongBot.name} PONG! 碰!`;
+          state.pendingSounds.push({ type: 'score', playerId: pongBot.id });
+          return { finished: false, sounds: state.pendingSounds.splice(0), privateStates: this.getPrivateStates!(state, players) };
+        }
+      }
+
       if (canHu8Tiles(active.hand, active.melds.length)) {
         const pts = 320 * (frenzyActive ? 2 : 1);
         active.score += pts;
@@ -917,7 +988,7 @@ export const speedMahjongModule: ServerGameModule<SpeedMahjongState, SpeedMahjon
         state.winnerLabel = `${active.name} SELF-DRAW HU! 自摸 (+${pts})`;
         state.banner = state.winnerLabel;
         state.bannerColor = '#F59E0B';
-        state.roundOverTimer = 3.0;
+        state.roundOverTimer = 2.6;
         state.pendingSounds.push({ type: 'win', playerId: active.id });
       } else if (active.hand.length > 0) {
         // Smart bot discard: drop isolated tile
@@ -1127,7 +1198,14 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
   getPrivateStates(state): Record<string, CardPrivateState> {
     const out: Record<string, CardPrivateState> = {};
     const active = state.seats[state.activeIdx];
-    const minQty = Math.max(2, state.currentBidQty === 0 ? Math.max(2, state.seats.filter((s) => s.alive).length) : state.currentBidQty);
+    const totalDice = Math.max(
+      2,
+      state.seats.reduce((sum, s) => sum + (s.alive ? s.dice.length : 0), 0)
+    );
+    const minQty = Math.min(
+      totalDice,
+      Math.max(2, state.currentBidQty === 0 ? Math.max(2, state.seats.filter((s) => s.alive).length) : state.currentBidQty)
+    );
 
     for (const seat of state.seats) {
       const isTurn = seat.alive && active?.id === seat.id && state.phase === 'bidding';
@@ -1146,13 +1224,15 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
       if (isTurn) {
         const nextQty = state.currentBidQty === 0 ? minQty : state.currentBidQty + 1;
         const nextFace = state.currentBidQty === 0 ? 3 : state.currentBidFace < 6 ? state.currentBidFace + 1 : 2;
-        extraActions.push({
-          label: `BID ${nextQty}× ${DICE_GLYPHS[state.currentBidFace]}`,
-          labelZh: `叫 ${nextQty}个${state.currentBidFace}`,
-          action: { type: 'custom', id: 'bid', payload: `${nextQty}:${state.currentBidFace}` },
-          colorHex: '#10D98B',
-          textColor: '#052E16',
-        });
+        if (nextQty <= totalDice) {
+          extraActions.push({
+            label: `BID ${nextQty}× ${DICE_GLYPHS[state.currentBidFace]}`,
+            labelZh: `叫 ${nextQty}个${state.currentBidFace}`,
+            action: { type: 'custom', id: 'bid', payload: `${nextQty}:${state.currentBidFace}` },
+            colorHex: '#10D98B',
+            textColor: '#052E16',
+          });
+        }
         if (state.currentBidQty > 0 && state.currentBidFace < 6) {
           extraActions.push({
             label: `BID ${state.currentBidQty}× ${DICE_GLYPHS[nextFace]}`,
@@ -1162,13 +1242,15 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
             textColor: '#082F49',
           });
         }
-        extraActions.push({
-          label: `BID ${nextQty + 1}× ⚅`,
-          labelZh: `加码 ${nextQty + 1}个6`,
-          action: { type: 'custom', id: 'bid', payload: `${nextQty + 1}:6` },
-          colorHex: '#F59E0B',
-          textColor: '#141008',
-        });
+        if (nextQty + 1 <= totalDice) {
+          extraActions.push({
+            label: `BID ${nextQty + 1}× ⚅`,
+            labelZh: `加码 ${nextQty + 1}个6`,
+            action: { type: 'custom', id: 'bid', payload: `${nextQty + 1}:6` },
+            colorHex: '#F59E0B',
+            textColor: '#141008',
+          });
+        }
         if (state.currentBidQty > 0) {
           secondaryBtn = {
             label: 'CALL LIAR! 开骰',
@@ -1207,13 +1289,25 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
     const seat = state.seats.find((s) => s.id === playerId);
     if (!seat || state.seats[state.activeIdx]?.id !== playerId) return { sounds: [] };
 
+    const totalDice = Math.max(
+      2,
+      state.seats.reduce((sum, s) => sum + (s.alive ? s.dice.length : 0), 0)
+    );
     if (action.type === 'call-bluff' && state.currentBidQty > 0) {
       resolveLiarCall(state, seat, isStateFrenzyActive(state));
     } else if (action.type === 'custom' && action.id === 'bid' && action.payload) {
       const [qStr, fStr] = action.payload.split(':');
       const q = Number(qStr);
       const f = Number(fStr);
-      if (q > state.currentBidQty || (q === state.currentBidQty && f > state.currentBidFace)) {
+      if (
+        Number.isFinite(q) &&
+        Number.isFinite(f) &&
+        q >= 1 &&
+        q <= totalDice &&
+        f >= 1 &&
+        f <= 6 &&
+        (q > state.currentBidQty || (q === state.currentBidQty && f > state.currentBidFace))
+      ) {
         state.currentBidQty = q;
         state.currentBidFace = f;
         if (f === 1) state.pureMode = true;
@@ -1253,17 +1347,17 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
     if (active && (state.turnTimeLeft <= 0 || (isBot && state.botTimer <= 0))) {
       const totalDice = state.seats.reduce((sum, s) => sum + (s.alive ? s.dice.length : 0), 0);
       const expectedMax = Math.ceil(totalDice * 0.42);
-      if (state.currentBidQty > 0 && (state.currentBidQty >= expectedMax || Math.random() < 0.28)) {
+      const nextQty = state.currentBidQty === 0 ? Math.max(2, Math.floor(totalDice * 0.25)) : state.currentBidQty + 1;
+      if (state.currentBidQty > 0 && (state.currentBidQty >= expectedMax || nextQty > totalDice || Math.random() < 0.28)) {
         resolveLiarCall(state, active, frenzyActive);
       } else {
-        const nextQty = state.currentBidQty === 0 ? Math.max(2, Math.floor(totalDice * 0.25)) : state.currentBidQty + 1;
         const bestFace = [2, 3, 4, 5, 6].sort(
           (a, b) => active.dice.filter((d) => d === b).length - active.dice.filter((d) => d === a).length
         )[0];
-        state.currentBidQty = nextQty;
+        state.currentBidQty = Math.min(totalDice, nextQty);
         state.currentBidFace = bestFace;
         state.lastBidderId = active.id;
-        active.lastAction = `${nextQty}×${DICE_GLYPHS[bestFace]}`;
+        active.lastAction = `${state.currentBidQty}×${DICE_GLYPHS[bestFace]}`;
         state.activeIdx = nextAliveTavernIdx(state, state.activeIdx);
         state.turnTimeLeft = state.turnTotal;
         state.botTimer = 0.95;

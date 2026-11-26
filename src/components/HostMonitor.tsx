@@ -25,6 +25,7 @@ import {
   QrCode,
   RotateCcw,
   Search,
+  Share2,
   Shuffle,
   Smartphone,
   Sparkles,
@@ -76,6 +77,7 @@ import {
 } from '../shared/types';
 import { arcadeAudio } from '../lib/audio';
 import { getJoinUrl, ManagedWebSocket } from '../lib/ws';
+import { copyRoomInvite, shareRoomInvite } from '../lib/shareInvite';
 import {
   getLocalizedDifficulty,
   getLocalizedFilterLabel,
@@ -138,6 +140,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
   const [showInGameTutorial, setShowInGameTutorial] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<null | 'shared' | 'copied'>(null);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [floatingEmotes, setFloatingEmotes] = useState<FloatingEmote[]>([]);
   const [isMonitorFullscreen, setIsMonitorFullscreen] = useState(false);
@@ -929,14 +932,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     arcadeAudio.setMuted(next);
   };
 
+  const handleShareInvite = async () => {
+    if (!room) return;
+    const result = await shareRoomInvite({
+      roomCode: room.code,
+      lang,
+      gameName: getLocalizedGameMeta(getGameMeta(room.selectedGameId), lang).name,
+    });
+    if (result === 'shared' || result === 'copied') {
+      setShareFeedback(result);
+      setTimeout(() => setShareFeedback(null), 1800);
+    }
+  };
+
   const handleCopyJoinLink = async () => {
     if (!room) return;
-    try {
-      await navigator.clipboard.writeText(getJoinUrl(room.code, lang));
+    const ok = await copyRoomInvite(room.code, lang);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // Ignore clipboard failure
     }
   };
 
@@ -1451,6 +1465,22 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                   {t('on any phone', '')}
                 </p>
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleShareInvite}
+                    className={`tactile-btn h-10 px-4 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors ${
+                      shareFeedback
+                        ? 'bg-[#10D98B] text-[#0A1913]'
+                        : 'bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219]'
+                    }`}
+                  >
+                    {shareFeedback ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+                    {shareFeedback === 'shared'
+                      ? t('Invite Shared!', '已分享邀请！')
+                      : shareFeedback === 'copied'
+                      ? t('Link Copied!', '链接已复制！')
+                      : t('Share Invite', '一键邀请')}
+                  </button>
                   <button
                     type="button"
                     onClick={handleCopyJoinLink}

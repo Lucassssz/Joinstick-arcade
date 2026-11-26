@@ -12,9 +12,9 @@ import type {
 } from '../../src/shared/types.ts';
 import type { HapticTrigger, PlayerHudUpdate, ServerGameModule, ServerPlayerInputState } from './engine.ts';
 
-const TURN_LIMIT_SEC = 15.0;
-const CHALLENGE_LIMIT_SEC = 10.0;
-const REVEAL_DURATION_SEC = 4.2;
+const TURN_LIMIT_SEC = 13.0;
+const CHALLENGE_LIMIT_SEC = 7.5;
+const REVEAL_DURATION_SEC = 3.0;
 
 const TARGET_RANKS: ('A' | 'K' | 'Q' | 'J' | '10')[] = ['A', 'K', 'Q', 'J', '10'];
 const SUITS: LiarSuit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
@@ -154,7 +154,7 @@ function declareWinner(state: LiarsDeckState, winner: LiarPlayerInternal) {
 function advanceTurnToSelecting(state: LiarsDeckState, nextIdx?: number) {
   const n = state.players.length;
   if (n === 0) return;
-  if (state.round >= 18) {
+  if (state.round >= 12) {
     const sorted = [...state.players].sort((a, b) => a.hand.length - b.hand.length || b.score - a.score);
     if (sorted[0]) declareWinner(state, sorted[0]);
     return;
@@ -167,7 +167,7 @@ function advanceTurnToSelecting(state: LiarsDeckState, nextIdx?: number) {
   state.trustedPlayerIds.clear();
   state.revealedCards = [];
   state.revealVerdict = null;
-  state.botThinkTimer = 1.6 + Math.random() * 0.8;
+  state.botThinkTimer = 0.95 + Math.random() * 0.45;
 }
 
 function startChallengeWindow(state: LiarsDeckState, claimant: LiarPlayerInternal, played: LiarCard[]) {
@@ -183,12 +183,12 @@ function startChallengeWindow(state: LiarsDeckState, claimant: LiarPlayerInterna
   // Compute each bot's suspicion for this claim
   for (const p of state.players) {
     if (!p.isBot || p.id === claimant.id) continue;
-    let bluffProb = 0.14;
-    if (played.length === 2) bluffProb = 0.28;
-    if (played.length >= 3) bluffProb = 0.48;
-    if (claimant.hand.length === 0) bluffProb = Math.max(bluffProb, 0.58);
+    let bluffProb = 0.16;
+    if (played.length === 2) bluffProb = 0.3;
+    if (played.length >= 3) bluffProb = 0.5;
+    if (claimant.hand.length === 0) bluffProb = Math.max(bluffProb, 0.62);
     p.botWantsChallenge = Math.random() < bluffProb;
-    p.botChallengeTimer = 2.3 + Math.random() * 1.9;
+    p.botChallengeTimer = 1.1 + Math.random() * 0.85;
   }
 
   setBanner(
@@ -409,8 +409,7 @@ function resolveChallengeNoCall(state: LiarsDeckState) {
     return;
   }
   setBanner(state, 'TRUSTED!', '#00C2FF', 1.2);
-  // Rotate target rank if pile grows large
-  if (state.tablePile.length >= 6) {
+  if (state.tablePile.length >= 4) {
     state.round += 1;
     state.targetRank = TARGET_RANKS[(state.round - 1) % TARGET_RANKS.length];
     state.tablePile = [];
@@ -558,7 +557,7 @@ export const liarsDeckModule: ServerGameModule<LiarsDeckState> = {
       revealedCards: [],
       revealVerdict: null,
       pendingNextPlayerIndex: 0,
-      botThinkTimer: 2.4,
+      botThinkTimer: 1.2,
       banner: `TARGET: ${firstRank}`,
       bannerColor: '#FFB800',
       bannerTimer: 2.6,

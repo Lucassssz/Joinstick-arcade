@@ -155,7 +155,7 @@ function startRoll(
   haptics: HapticTrigger[]
 ): void {
   state.phase = 'rolling';
-  state.phaseTimer = 1.15;
+  state.phaseTimer = 0.72;
   state.diceRolling = true;
   const d1 = 1 + Math.floor(Math.random() * 6);
   const d2 = 1 + Math.floor(Math.random() * 6);
@@ -177,7 +177,7 @@ function handleLanding(
     state.eventText = `${active.name} landed on GO! +$150 Bonus!`;
     sounds.push({ type: 'pickup', playerId: active.id });
     state.phase = 'event';
-    state.phaseTimer = 2.3;
+    state.phaseTimer = 1.25;
     recalcWealth(state);
     return;
   }
@@ -191,7 +191,7 @@ function handleLanding(
     sounds.push({ type: 'win', playerId: active.id });
     haptics.push({ playerId: active.id, pattern: [30, 40, 50], reason: 'jackpot' });
     state.phase = 'event';
-    state.phaseTimer = 2.7;
+    state.phaseTimer = 1.5;
     recalcWealth(state);
     return;
   }
@@ -201,7 +201,7 @@ function handleLanding(
     state.eventText = `${active.name} visited Chill Jail! Next turn rolls to exit.`;
     sounds.push({ type: 'bump', playerId: active.id });
     state.phase = 'event';
-    state.phaseTimer = 2.2;
+    state.phaseTimer = 1.25;
     recalcWealth(state);
     return;
   }
@@ -214,7 +214,7 @@ function handleLanding(
     sounds.push({ type: 'hit', playerId: active.id });
     haptics.push({ playerId: active.id, pattern: 35, reason: 'tax' });
     state.phase = 'event';
-    state.phaseTimer = 2.3;
+    state.phaseTimer = 1.25;
     recalcWealth(state);
     return;
   }
@@ -262,7 +262,7 @@ function handleLanding(
       sounds.push({ type: 'bump', playerId: active.id });
     }
     state.phase = 'event';
-    state.phaseTimer = 2.5;
+    state.phaseTimer = 1.35;
     recalcWealth(state);
     return;
   }
@@ -279,7 +279,7 @@ function handleLanding(
     } else {
       state.eventText = `${active.name} can't afford ${tile.name} ($${tile.price})`;
       state.phase = 'event';
-      state.phaseTimer = 2.0;
+      state.phaseTimer = 1.1;
     }
     recalcWealth(state);
     return;
@@ -299,7 +299,7 @@ function handleLanding(
       state.eventText = `${active.name} visited own ${tile.name}! +$50 VIP bonus`;
       sounds.push({ type: 'pickup', playerId: active.id });
       state.phase = 'event';
-      state.phaseTimer = 2.0;
+      state.phaseTimer = 1.1;
     }
     recalcWealth(state);
     return;
@@ -312,7 +312,7 @@ function handleLanding(
     state.eventText = `${active.name}'s Rent Shield blocked rent on ${tile.name}!`;
     sounds.push({ type: 'pulse', playerId: active.id });
     state.phase = 'event';
-    state.phaseTimer = 2.3;
+    state.phaseTimer = 1.25;
     recalcWealth(state);
     return;
   }
@@ -334,7 +334,7 @@ function handleLanding(
     state.eventText = `${active.name} paid $${paid}${tile.monopoly ? ' (2X MONOPOLY!)' : ''} rent to ${owner?.name ?? 'Rival'}!`;
   }
   state.phase = 'event';
-  state.phaseTimer = 2.5;
+  state.phaseTimer = 1.4;
   recalcWealth(state);
 }
 
@@ -454,7 +454,7 @@ export const richStreetModule: ServerGameModule<RichStreetState> = {
           sounds.push({ type: 'bump', playerId: active.id });
         }
       } else if (state.phase === 'moving') {
-        state.hopProgress += dt * 3.6;
+        state.hopProgress += dt * 5.6;
         if (state.hopProgress >= 1) {
           state.hopProgress = 0;
           active.tileIndex = (active.tileIndex + 1) % state.tiles.length;
@@ -493,12 +493,12 @@ export const richStreetModule: ServerGameModule<RichStreetState> = {
           haptics.push({ playerId: active.id, pattern: [20, 25, 35], reason: 'buy-property' });
           recalcWealth(state);
           state.phase = 'event';
-          state.phaseTimer = 2.0;
+          state.phaseTimer = 1.1;
         } else if (justB || state.turnTimeLeft <= 0) {
           state.eventText = `${active.name} saved cash and skipped.`;
           sounds.push({ type: 'nav', playerId: active.id });
           state.phase = 'event';
-          state.phaseTimer = 1.5;
+          state.phaseTimer = 0.85;
         }
       } else if (state.phase === 'event') {
         state.phaseTimer -= dt;

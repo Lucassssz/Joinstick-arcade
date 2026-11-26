@@ -62,7 +62,7 @@ const CARD_PAD = (
 });
 
 /**
- * Curated 106-Game Auto-Mapping Registry.
+ * Curated 150-Game Auto-Mapping Registry.
  * Every title automatically selects its most comfortable universal pad + sub-preset.
  */
 export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
@@ -352,9 +352,9 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'block-hop': TRACKPAD(
     'glide',
-    'Press & hold right trigger for jump-charge distance',
-    '大扳机按住蓄力跳一跳，手感更稳',
-    { tapForA: true }
+    'Drag pad gently for mid-air nudge; hold right trigger A to charge jump',
+    '左滑微调空中落点，按住右侧超大 A 键蓄力跳一跳',
+    { tapForA: false }
   ),
   'platform-leap': ARROWS_4WAY(
     'Simple Left/Right tap movement down 100 floors',
@@ -790,6 +790,264 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
     'grid',
     'Grid view makes scanning matching board coordinates effortless',
     '网格牌台方便快速对照棋盘数字格落子连线'
+  ),
+  // === Expansion Pack 8 — Physics & Builder Action (10 Games) ===
+  'trap-builder-run': ARROWS_4WAY(
+    '8-way arrows give crisp platformer footing & clean trap placement jumps',
+    '八向大箭头跳跃跑酷精准落脚，放置机关不打滑',
+    { strictFourWay: false }
+  ),
+  'track-crafter-gp': ANALOG_360(
+    'Smooth 360° analog steering handles banked curves & nitro drift angles',
+    '360° 摇杆最适合连贯过弯漂移与直线氮气冲刺'
+  ),
+  'slingshot-fortress': TRACKPAD(
+    'glide',
+    '1:1 touch-drag pullback aiming mimics classic angry-slingshot tension',
+    '滑控板 1:1 拖拽瞄准弹弓抛物线，轻点即可瞬发射击',
+    { tapForA: true }
+  ),
+  'rope-slice-physics': TRACKPAD(
+    'glide',
+    'Direct finger-glide slicing through swinging ropes feels natural and fast',
+    '直接滑指一刀划断晃动绳索让宝石掉入宝箱，爽快跟手',
+    { tapForA: true }
+  ),
+  'wobbly-timber-pull': TRACKPAD(
+    'glide',
+    'Fine 1:1 cursor glide lets you extract loose Jenga blocks without shaking the tower',
+    '精细 1:1 滑控对准松动积木抽出叠上塔顶，不误触崩塌'
+  ),
+  'artillery-crater-war': TRACKPAD(
+    'glide',
+    'Smooth touch-glide sets exact ballistic arc angle and charged shot power',
+    '滑控精确微调抛物线炮口角度与蓄力力度，指哪打哪'
+  ),
+  'bridge-load-stress': ARROWS_4WAY(
+    'Strict 4-way stepping snaps steel struts & deck spans onto exact bridge nodes',
+    '严格四向走格将钢架精准吸附到桥梁受力节点，不歪斜',
+    { strictFourWay: true }
+  ),
+  'hill-torque-climb': ARROWS_4WAY(
+    'Responsive Left/Right gas & pitch tilt arrows nail bumpy hill landings',
+    '明确左右大键控制油门与空中俯仰，爬坡落地超稳健',
+    { strictFourWay: false }
+  ),
+  'three-lane-metro': TRACKPAD(
+    'flick',
+    'Snappy swipe flicks hop between 3 subway tracks and leap over trains instantly',
+    '快甩上滑/左右切轨瞬间变道起跳，完美还原地铁跑酷手感',
+    { tapForA: true }
+  ),
+  'tilt-labyrinth': ANALOG_360(
+    '360° analog tilt rolls the steel ball smoothly around wooden wall mazes',
+    '360° 全向摇杆就像亲手倾斜木盘滚珠，过弯绕洞超丝滑'
+  ),
+  // === Expansion Pack 9 — Crew, Defense & Co-op Chaos (10 Games) ===
+  'lane-tower-blitz': ARROWS_4WAY(
+    'Strict 4-way stepping jumps cleanly across lane grid tiles to deploy turrets',
+    '严格四向精准跳格在五条战道部署炮台，零斜向误触',
+    { strictFourWay: true }
+  ),
+  'path-tower-defense': ARROWS_4WAY(
+    'Strict 4-way grid steps line up turret build slots along the enemy road',
+    '四向棋格稳步选位建造与升级防御塔，绝不偏格',
+    { strictFourWay: true }
+  ),
+  'horde-survivor': ANALOG_360(
+    '360° analog kiting weaves smoothly between dense monster swarms while auto-firing',
+    '360° 全向走位拉扯风筝怪群，自动开火收割钻石最爽快',
+    true
+  ),
+  'starship-crew-chaos': ANALOG_360(
+    '360° sprint moves rapidly between Reactor, Shield & Cannon consoles in the hull',
+    '360° 摇杆飞奔穿梭于反应堆、护盾与舰炮舱室救火'
+  ),
+  'swarm-herd-clash': ANALOG_360(
+    'Fluid 360° movement rallies stray units and sweeps rival squads cleanly',
+    '360° 自由走位招兵买马带队兜圈围剿敌方兵团'
+  ),
+  'rail-switch-rush': ARROWS_4WAY(
+    'Strict 4-way cursor jumps between track junctions for instant switch flips',
+    '四向箭头瞬间跳至铁路扳道岔口，一键翻轨绝不错过',
+    { strictFourWay: true }
+  ),
+  'air-traffic-landing': TRACKPAD(
+    'glide',
+    'Touch-glide guidance steers incoming jets cleanly into matching colored runways',
+    '直接滑控引导进近客机对准同色跑道安全降落',
+    { tapForA: true }
+  ),
+  'pipe-flow-sprint': ARROWS_4WAY(
+    'Strict 4-way grid cursor + single tap rotate connects water pipes before overflow',
+    '严格四向选格 + 一键旋转弯管接通水流，干净利落',
+    { strictFourWay: true }
+  ),
+  'moving-day-havoc': ANALOG_360(
+    '360° steering weaves bulky furniture smoothly through doorways onto the truck',
+    '360° 全向摇杆搬运大家具绕过门框与障碍物装车'
+  ),
+  'fishing-tension-tug': TRACKPAD(
+    'glide',
+    'Direct glide balance keeps the reel needle inside the green tension zone',
+    '滑控灵敏平衡收线张力指针稳住绿区，拉起巨鱼不爆线'
+  ),
+  // === Expansion Pack 10 — Tabletop Strategy Gems (10 Games) ===
+  'mosaic-tile-draft': ARROWS_4WAY(
+    'Strict 4-way taps hop cleanly between factory display plates & tile colors',
+    '四向箭头干脆切换工坊盘与瓷砖颜色，落砖零失误',
+    { strictFourWay: true }
+  ),
+  'maze-wall-duel': ARROWS_4WAY(
+    'Strict 4-way stepping guarantees clean pawn advances and exact wall traps',
+    '严格四向棋步绝不斜滑，关键时刻一秒拍墙拦住对手',
+    { strictFourWay: true }
+  ),
+  'corner-polyomino': ARROWS_4WAY(
+    'Strict 4-way grid cursor stamps polyomino shapes edge-to-edge accurately',
+    '四向格步精准对齐棋盘空位旋转盖章，斜角连击超省心',
+    { strictFourWay: true }
+  ),
+  'pillar-ascent-3d': ARROWS_4WAY(
+    'Strict 4-way island stepping makes 3D marble tower building & climbing crystal clear',
+    '四向走格清晰搭起三层石柱台阶并盖顶封死对手',
+    { strictFourWay: true }
+  ),
+  'camel-stack-derby': CARD_PAD(
+    'grid',
+    'Grid betting tickets keep live camel odds & Privacy Shield clean on couch play',
+    '网格下注券一目了然押注领头骆驼，防偷窥保护绝密赔率'
+  ),
+  'route-express': CARD_PAD(
+    'fan',
+    'Private train-card hand fan lets you count matching rail sets effortlessly',
+    '私密扇形列车手牌轻松凑齐同色车厢抢修跨国铁路'
+  ),
+  'gem-engine-guild': CARD_PAD(
+    'grid',
+    'Grid market view highlights affordable discount cards & Royal Nobles at a glance',
+    '网格市场卡片高亮标出可买宝石折扣卡，滚雪球构筑超顺手'
+  ),
+  'hex-island-settlers': ARROWS_4WAY(
+    'Strict 4-way island hopping selects fertile resource hexes & upgrades Cities fast',
+    '四向箭头在六边形海岛资源区游走，掷骰建城一气呵成',
+    { strictFourWay: true }
+  ),
+  'hex-insect-chess': ARROWS_4WAY(
+    'Strict 4-way hive stepping places Beetles & Hoppers accurately around rival Queens',
+    '四向精准走格落子排布虫群包围敌方蜂后',
+    { strictFourWay: true }
+  ),
+  'secret-rank-flags': CARD_PAD(
+    'grid',
+    'Grid unit command keeps Marshal, Spy, Miner & Flag ranks hidden behind Privacy Shield',
+    '网格部队指令台隐藏元帅、工兵与军旗军衔，防偷窥智斗'
+  ),
+  // === Expansion Pack 11 — Mind, Deduction & Logic (10 Games) ===
+  'row-six-bust': CARD_PAD(
+    'fan',
+    'Secret arched number fan hides your bull-card pick until everyone reveals',
+    '私密数字扇形手牌完美隐藏出牌策略，避开第 6 张爆牛'
+  ),
+  'silent-sync': CARD_PAD(
+    'fan',
+    'Private ascending hand fan hides your exact numbers during silent telepathy play',
+    '私密扇牌只看自己手里数字，考验全队默契读秒同步出牌'
+  ),
+  'deep-sea-oxygen': ARROWS_4WAY(
+    'Strict 4-way depth stepping + big Turn Back trigger keeps greedy dives crisp',
+    '严格四向深海步进配合一键转身返航，生死只在一念之间',
+    { strictFourWay: true }
+  ),
+  'one-card-court': CARD_PAD(
+    'fan',
+    '2-card royal hand fan protects your Princess/King secret behind Privacy Shield',
+    '双张宫廷扇牌轻松挑选出招并把最大底牌藏到最后决胜'
+  ),
+  'firework-hints': CARD_PAD(
+    'grid',
+    'Grid rocket deck shows color & number hints cleanly for 1→5 firework launches',
+    '网格烟花卡槽高亮标出可按 1→5 接龙升空的烟花，配合零失误'
+  ),
+  'tunnel-saboteur': CARD_PAD(
+    'grid',
+    'Grid miner hand separates Tunnel, Dynamite & Cave-In plays clearly',
+    '网格矿工卡台清晰区分掘进、炸药与塌方拦截，一触即发'
+  ),
+  'picross-nonogram': ARROWS_4WAY(
+    'Strict 4-way grid movement ensures zero mis-tapped pixels on 5×5 nonograms',
+    '严格四向逐格移动精准涂亮数织像素方块，不误点扣分',
+    { strictFourWay: true }
+  ),
+  'speed-sudoku-duel': ARROWS_4WAY(
+    'Strict 4-way stepping + instant 1–6 digit cycling makes 6×6 Sudoku lightning fast',
+    '四向走格搭配 B 键秒切 1–6 数字填入，脑力抢答超顺滑',
+    { strictFourWay: true }
+  ),
+  'word-tile-crossroads': CARD_PAD(
+    'grid',
+    '7-tile letter rack grid highlights exact letters needed by active TV words',
+    '七砖字母网格高亮提示能嵌进大屏单词的字母，手快抢词'
+  ),
+  'tangram-silhouette': TRACKPAD(
+    'glide',
+    'Direct 1:1 touch-glide slides geometric tangrams right into target silhouettes',
+    '直接滑指拖拽七巧板贴合白色发光剪影，比手速更比准度',
+    { tapForA: true }
+  ),
+  // === Expansion Pack 12 — Cult Arcade, Sports & Asian Classics (10 Games) ===
+  'blade-fruit-slice': TRACKPAD(
+    'glide',
+    'Direct finger-glide slashes flying fruit trajectories cleanly without lifting',
+    '指尖直接划屏挥刀连斩抛空水果，真正还原切水果爽感'
+  ),
+  'peg-fever-bounce': TRACKPAD(
+    'glide',
+    '1:1 cannon glide aiming + tap to fire spheres into orange peg clusters',
+    '滑控板精准瞄准橙色钉群，轻点即刻发射银球连环弹射',
+    { tapForA: true }
+  ),
+  'halfpipe-skate-combo': ARROWS_4WAY(
+    'Snappy Left/Right ramp pumping + oversized A/B trick triggers',
+    '左右明确大键在 U 型池来回蓄力，大键起跳炫技连击',
+    { strictFourWay: false }
+  ),
+  'five-second-microgames': ARROWS_4WAY(
+    'Instant big directional arrows + mash A reaction speed for 5-second microgames',
+    '大号方向键配合大 A 键，应付 5 秒极速切换指令零延迟',
+    { strictFourWay: false }
+  ),
+  'corridor-fencing': ARROWS_4WAY(
+    'Strict 4-way arrows switch High/Mid/Low guard stance & lunge along the strip',
+    '严格四向箭头瞬间切换高中低剑势与疾刺突进，格斗精准',
+    { strictFourWay: true }
+  ),
+  'pro-darts-301': TRACKPAD(
+    'glide',
+    'Micro-precision thumb glide aims onto Triple-20 & Bullseye, tap to throw dart',
+    '高精度滑控稳稳套住红心与三倍 20 区，轻点瞬间掷镖',
+    { tapForA: true }
+  ),
+  'wau-kite-cut': TRACKPAD(
+    'glide',
+    'Fluid aerial touch-glide carves sweeping monsoon curves behind rival Wau kites',
+    '顺滑空中划控驾驭月亮风筝随风盘旋并俯冲断线'
+  ),
+  'five-stones-toss': TRACKPAD(
+    'glide',
+    'Direct mat-glide sweeps across Batu Seremban stones with tap-to-scoop pickup',
+    '滑指横扫草席一网捞起三角布石包，完美模拟抓五粒子手速',
+    { tapForA: true }
+  ),
+  'chapteh-juggle': ARROWS_4WAY(
+    'Crisp Left/Right footwork dashes + rhythmic Kick A keep Chapteh airborne',
+    '左右箭步追落点配合节奏踢击，轻松刷出高连踢鸡毛毽',
+    { strictFourWay: false }
+  ),
+  'xiangqi-river-clash': ARROWS_4WAY(
+    'Strict 4-way grid steps cross the Chu-Han River and capture Generals cleanly',
+    '严格四向棋步跨越楚河汉界车马炮斩将，绝不错格',
+    { strictFourWay: true }
   ),
 };
 

@@ -1183,6 +1183,9 @@ interface RattanVolleyInternal {
   servePause: number;
   banner: string | null;
   bannerTimer: number;
+  rallyCount: number;
+  matchTimeLeft: number;
+  suddenDeath: boolean;
   popups: RattanVolleySnapshot['popups'];
   players: RattanVolleySnapshot['players'];
   finished: boolean;
@@ -1191,12 +1194,13 @@ interface RattanVolleyInternal {
 function serveTakrawBall(state: RattanVolleyInternal, side: 'left' | 'right') {
   state.ball.x = side === 'left' ? 320 : ARENA_WIDTH - 320;
   state.ball.y = 220;
-  state.ball.vx = side === 'left' ? 140 : -140;
+  state.ball.vx = side === 'left' ? 150 : -150;
   state.ball.vy = -120;
   state.ball.trail = [];
   state.sideTouchesLeft = 0;
   state.sideTouchesRight = 0;
-  state.servePause = 0.6;
+  state.rallyCount = 0;
+  state.servePause = 0.55;
 }
 
 export const rattanVolleyModule: ServerGameModule<RattanVolleyInternal> = {
@@ -1217,6 +1221,9 @@ export const rattanVolleyModule: ServerGameModule<RattanVolleyInternal> = {
       servePause: 0.4,
       banner: 'SEPAK TAKRAW · 3 TOUCHES!',
       bannerTimer: 2.0,
+      rallyCount: 0,
+      matchTimeLeft: 90,
+      suddenDeath: false,
       popups: [],
       finished: false,
       players: players.map((p, idx) => {
@@ -1251,6 +1258,17 @@ export const rattanVolleyModule: ServerGameModule<RattanVolleyInternal> = {
     }
 
     if (!state.finished) {
+      state.matchTimeLeft = Math.max(0, state.matchTimeLeft - dt);
+      if (state.matchTimeLeft <= 0 && !state.suddenDeath) {
+        if (state.scoreLeft !== state.scoreRight) {
+          state.finished = true;
+          sounds.push({ type: 'win' });
+        } else {
+          state.suddenDeath = true;
+          state.banner = 'SUDDEN DEATH · NEXT POINT WINS!';
+          state.bannerTimer = 2.5;
+        }
+      }
       for (const p of state.players) {
         const inp = inputMap.get(p.id);
         const dx = inp?.input.dx ?? 0;
@@ -1296,7 +1314,8 @@ export const rattanVolleyModule: ServerGameModule<RattanVolleyInternal> = {
         state.servePause -= dt;
       } else {
         const b = state.ball;
-        b.vy += 690 * dt;
+        const rallyGrav = 690 * (1 + Math.min(0.5, state.rallyCount * 0.035));
+        b.vy += rallyGrav * dt;
         b.x += b.vx * dt;
         b.y += b.vy * dt;
         b.rot += b.vx * 0.012 * dt;
@@ -1333,23 +1352,25 @@ export const rattanVolleyModule: ServerGameModule<RattanVolleyInternal> = {
           const dist = Math.hypot(b.x - p.x, b.y - (p.y - 10));
           const hitRadius = p.kickTimer > 0 ? 64 : 46;
           if (dist < hitRadius) {
+            state.rallyCount += 1;
+            const rMult = 1 + Math.min(0.85, state.rallyCount * 0.07) + (state.suddenDeath ? 0.25 : 0);
             const dir = p.team === 'left' ? 1 : -1;
             const isSpike = p.kickTimer > 0 && Boolean(inp?.input.a || p.y < state.floorY - 75);
             const isLift = Boolean(inp?.input.b);
             if (isSpike) {
               // Authentic Sepak Takraw Bicycle Spike (Lipat Gulung!)
-              b.vx = dir * 590;
-              b.vy = -210;
+              b.vx = dir * 610 * rMult;
+              b.vy = -195;
               state.popups.push({ x: p.x, y: p.y - 46, text: 'LIPAT SPIKE!', colorHex: '#FFB800', alpha: 1 });
               sounds.push({ type: 'hit', playerId: p.id });
             } else if (isLift) {
               // Soft control lift (Timang)
-              b.vx = dir * 185 + (inp?.input.dx ?? 0) * 120;
-              b.vy = -510;
+              b.vx = (dir * 210 + (inp?.input.dx ?? 0) * 120) * rMult;
+              b.vy = -485;
               sounds.push({ type: 'bump', playerId: p.id });
             } else {
-              b.vx = dir * 320 + (b.x - p.x) * 3.5;
-              b.vy = -465;
+              b.vx = (dir * 340 + (b.x - p.x) * 3.5) * rMult;
+              b.vy = -445;
               sounds.push({ type: 'bump', playerId: p.id });
             }
             b.y = Math.min(b.y, p.y - 34);
@@ -1399,7 +1420,11 @@ export const rattanVolleyModule: ServerGameModule<RattanVolleyInternal> = {
           }
           sounds.push({ type: 'pickup' });
 
-          if (state.scoreLeft >= state.targetPoints || state.scoreRight >= state.targetPoints) {
+          if (
+            state.scoreLeft >= state.targetPoints ||
+            state.scoreRight >= state.targetPoints ||
+            (state.suddenDeath && state.scoreLeft !== state.scoreRight)
+          ) {
             state.finished = true;
             sounds.push({ type: 'win' });
           }
@@ -1857,7 +1882,7 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
       if (state.sowingInHand > 0 && state.sowingPos !== null) {
         state.sowStepTimer -= dt;
         if (state.sowStepTimer <= 0) {
-          state.sowStepTimer = 0.085;
+          state.sowStepTimer = 0.065;
           let nextPos = nextCongkakPos(state.sowingPos, state.activeSide);
           // Skip burnt pits (Rumah Terbakar)
           while (nextPos >= 0 && state.burntPits[nextPos]) {
@@ -1892,7 +1917,7 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
               // Continuous sowing! Scoop up the pit and keep moving!
               state.sowingInHand = state.pits[nextPos];
               state.pits[nextPos] = 0;
-              state.sowStepTimer = 0.14;
+              state.sowStepTimer = 0.1;
             } else {
               // Landed in empty pit (now has 1 marble) -> check Tembak (Capture opposite pit!)
               const isOwnPit =
@@ -1949,7 +1974,7 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
             state.sowingInHand = state.pits[idx];
             state.pits[idx] = 0;
             state.sowingPos = idx;
-            state.sowStepTimer = 0.08;
+            state.sowStepTimer = 0.065;
             activePlayer.cursorPit = idx - start;
             activePlayer.lastAction = `SOW PIT ${idx - start + 1}`;
             sounds.push({ type: 'boost', playerId: activePlayer.id });
@@ -1957,7 +1982,7 @@ export const pitHarvestModule: ServerGameModule<PitHarvestInternal> = {
 
           if (isVirtualBot) {
             if (state.botThinkTimer === undefined) {
-              state.botThinkTimer = getTurnBotDelayMs(inp?.botDifficulty) / 1000;
+              state.botThinkTimer = Math.min(0.95, getTurnBotDelayMs(inp?.botDifficulty) / 1000);
             }
             state.botThinkTimer -= dt;
             if (state.botThinkTimer <= 0) {

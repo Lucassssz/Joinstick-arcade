@@ -25,6 +25,26 @@ import {
   PACK_STRATEGY_CLASSICS_CATALOG,
   PACK_STRATEGY_CLASSICS_ZH,
 } from '../shared/packStrategyClassicsCatalog';
+import {
+  PACK_PHYSICS_BUILDER_GAME_CATALOG,
+  PACK_PHYSICS_BUILDER_ZH,
+} from '../shared/packPhysicsBuilderCatalog';
+import {
+  PACK_CREW_DEFENSE_GAME_CATALOG,
+  PACK_CREW_DEFENSE_ZH,
+} from '../shared/packCrewDefenseCatalog';
+import {
+  PACK_TABLETOP_GEMS_GAME_CATALOG,
+  PACK_TABLETOP_GEMS_ZH,
+} from '../shared/packTabletopGemsCatalog';
+import {
+  PACK_MIND_LOGIC_GAME_CATALOG,
+  PACK_MIND_LOGIC_ZH,
+} from '../shared/packMindLogicCatalog';
+import {
+  PACK_CULT_HERITAGE_GAME_CATALOG,
+  PACK_CULT_HERITAGE_ZH,
+} from '../shared/packCultHeritageCatalog';
 
 export type Language = 'en' | 'zh';
 
@@ -1478,6 +1498,55 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
       ];
     })
   ) as Record<keyof typeof PACK_STRATEGY_CLASSICS_ZH, GameTranslationZh>),
+  ...(Object.fromEntries(
+    [
+      { cat: PACK_PHYSICS_BUILDER_GAME_CATALOG, zhMap: PACK_PHYSICS_BUILDER_ZH as Record<string, any> },
+      { cat: PACK_CREW_DEFENSE_GAME_CATALOG, zhMap: PACK_CREW_DEFENSE_ZH as Record<string, any> },
+      { cat: PACK_TABLETOP_GEMS_GAME_CATALOG, zhMap: PACK_TABLETOP_GEMS_ZH as Record<string, any> },
+      { cat: PACK_MIND_LOGIC_GAME_CATALOG, zhMap: PACK_MIND_LOGIC_ZH as Record<string, any> },
+      { cat: PACK_CULT_HERITAGE_GAME_CATALOG, zhMap: PACK_CULT_HERITAGE_ZH as Record<string, any> },
+    ].flatMap(({ cat, zhMap }) =>
+      cat.map((meta) => {
+        const zh = zhMap[meta.id];
+        const optMap: Record<number, string> = {};
+        meta.settingOptions.forEach((opt) => {
+          optMap[opt.value] = opt.label
+            .replace(/s$/i, ' 秒')
+            .replace(/Rounds/g, '回合');
+        });
+        return [
+          meta.id,
+          {
+            name: zh.name,
+            category: zh.category,
+            tagline: zh.tagline,
+            description: zh.description,
+            playerModeLabel: meta.playerModeLabel
+              .replace(/1P/g, '单人')
+              .replace(/2–8P/g, '2–8人')
+              .replace(/2P/g, '双人')
+              .replace(/3–8P/g, '3–8人'),
+            rules: zh.rules,
+            joystickLabel: zh.joystickLabel,
+            actionALabel: zh.actionA[0],
+            actionASublabel: zh.actionA[1],
+            actionBLabel: zh.actionB[0],
+            actionBSublabel: zh.actionB[1],
+            controlTip: zh.controlTip,
+            settingLabel: meta.settingLabel.replace('Match Time', '对战时长'),
+            settingOptions: optMap,
+          } satisfies GameTranslationZh,
+        ];
+      })
+    )
+  ) as Record<
+    | keyof typeof PACK_PHYSICS_BUILDER_ZH
+    | keyof typeof PACK_CREW_DEFENSE_ZH
+    | keyof typeof PACK_TABLETOP_GEMS_ZH
+    | keyof typeof PACK_MIND_LOGIC_ZH
+    | keyof typeof PACK_CULT_HERITAGE_ZH,
+    GameTranslationZh
+  >),
 };
 
 export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMetadata {

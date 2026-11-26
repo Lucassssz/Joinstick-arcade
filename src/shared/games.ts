@@ -6,6 +6,11 @@ import { PACK_RETRO_ARCADE_GAME_CATALOG } from './packRetroArcadeCatalog.ts';
 import { PACK_SPORTS_PHYSICS_GAME_CATALOG } from './packSportsPhysicsCatalog.ts';
 import { PACK_CHAOS_SURVIVAL_GAME_CATALOG } from './packChaosSurvivalCatalog.ts';
 import { PACK_STRATEGY_CLASSICS_CATALOG } from './packStrategyClassicsCatalog.ts';
+import { PACK_PHYSICS_BUILDER_GAME_CATALOG } from './packPhysicsBuilderCatalog.ts';
+import { PACK_CREW_DEFENSE_GAME_CATALOG } from './packCrewDefenseCatalog.ts';
+import { PACK_TABLETOP_GEMS_GAME_CATALOG } from './packTabletopGemsCatalog.ts';
+import { PACK_MIND_LOGIC_GAME_CATALOG } from './packMindLogicCatalog.ts';
+import { PACK_CULT_HERITAGE_GAME_CATALOG } from './packCultHeritageCatalog.ts';
 
 export const PLAYER_FILTER_OPTIONS: {
   id: PlayerFilterMode;
@@ -34,6 +39,10 @@ export const HERITAGE_GAME_IDS = new Set<GameId>([
   'lucky-21',
   'ten-pair-showdown',
   'carrom-arena',
+  'wau-kite-cut',
+  'five-stones-toss',
+  'chapteh-juggle',
+  'xiangqi-river-clash',
 ]);
 
 export const BOARD_GAME_IDS = new Set<GameId>([
@@ -65,6 +74,17 @@ export const BOARD_GAME_IDS = new Set<GameId>([
   'backgammon-sprint',
   'mancala-jewels',
   'curling-masters',
+  'mosaic-tile-draft',
+  'maze-wall-duel',
+  'corner-polyomino',
+  'pillar-ascent-3d',
+  'hex-island-settlers',
+  'hex-insect-chess',
+  'deep-sea-oxygen',
+  'picross-nonogram',
+  'speed-sudoku-duel',
+  'tangram-silhouette',
+  'xiangqi-river-clash',
 ]);
 
 export const CARD_GAME_IDS = new Set<GameId>([
@@ -97,6 +117,16 @@ export const CARD_GAME_IDS = new Set<GameId>([
   'baccarat-club',
   'memory-pairs',
   'sequence-jack',
+  'camel-stack-derby',
+  'route-express',
+  'gem-engine-guild',
+  'secret-rank-flags',
+  'row-six-bust',
+  'silent-sync',
+  'one-card-court',
+  'firework-hints',
+  'tunnel-saboteur',
+  'word-tile-crossroads',
 ]);
 
 export function getGameGenre(id: GameId): GameGenre {
@@ -2440,6 +2470,11 @@ export const GAME_CATALOG: GameMetadata[] = [
   ...PACK_SPORTS_PHYSICS_GAME_CATALOG,
   ...PACK_CHAOS_SURVIVAL_GAME_CATALOG,
   ...PACK_STRATEGY_CLASSICS_CATALOG,
+  ...PACK_PHYSICS_BUILDER_GAME_CATALOG,
+  ...PACK_CREW_DEFENSE_GAME_CATALOG,
+  ...PACK_TABLETOP_GEMS_GAME_CATALOG,
+  ...PACK_MIND_LOGIC_GAME_CATALOG,
+  ...PACK_CULT_HERITAGE_GAME_CATALOG,
 ];
 
 export const GAME_BY_ID: Record<GameId, GameMetadata> = GAME_CATALOG.reduce(

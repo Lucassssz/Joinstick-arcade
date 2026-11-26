@@ -2419,7 +2419,11 @@ export const memoryPairsModule: CompactGameModule<MemoryState, MemoryPairsSnapsh
       gameId: 'memory-pairs',
       timeLeft: state.timeLeft,
       totalTime: state.totalTime,
-      cards: state.cards,
+      cards: state.cards.map((c) => ({
+        ...c,
+        symbol: c.flipped || c.matchedByColor ? c.symbol : '?',
+        colorHex: c.flipped || c.matchedByColor ? c.colorHex : '#334155',
+      })),
       players: state.players.map((p) => ({
         id: p.id,
         slotIndex: p.slotIndex,

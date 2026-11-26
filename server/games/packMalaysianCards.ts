@@ -409,9 +409,9 @@ function dealBigTwoRound(state: BigTwoInternal) {
   state.tableCards = [];
   state.tableEval = null;
   state.mustInclude3D = true;
-  state.turnTimeLeft = 18;
-  state.turnTotal = 18;
-  state.botThinkTimer = 1.05;
+  state.turnTimeLeft = 14;
+  state.turnTotal = 14;
+  state.botThinkTimer = 0.65;
   state.banner = `${state.seats[starter].name} HOLDS 3♦ · LEADS FIRST!`;
   state.bannerColor = '#FFB800';
   state.bannerTimer = 2.4;
@@ -444,7 +444,7 @@ function advanceBigTwoTurn(state: BigTwoInternal) {
       state.trickOwnerId = null;
       state.seats.forEach((s) => (s.passedTrick = false));
       state.turnTimeLeft = state.turnTotal;
-      state.botThinkTimer = 0.95;
+      state.botThinkTimer = 0.55;
       state.banner = `${seat.name} WINS TRICK · FREE LEAD!`;
       state.bannerColor = seat.colorHex;
       state.bannerTimer = 1.6;
@@ -453,7 +453,7 @@ function advanceBigTwoTurn(state: BigTwoInternal) {
     if (!seat.passedTrick) {
       state.activeIdx = nextIdx;
       state.turnTimeLeft = state.turnTotal;
-      state.botThinkTimer = 0.95;
+      state.botThinkTimer = 0.55;
       return;
     }
   }
@@ -558,9 +558,9 @@ export const bigTwoRoyaleModule: ServerGameModule<BigTwoInternal> = {
       tableCards: [],
       tableEval: null,
       mustInclude3D: true,
-      turnTimeLeft: 18,
-      turnTotal: 18,
-      botThinkTimer: 1.0,
+      turnTimeLeft: 14,
+      turnTotal: 14,
+      botThinkTimer: 0.65,
       banner: null,
       bannerColor: null,
       bannerTimer: 0,
@@ -602,11 +602,14 @@ export const bigTwoRoyaleModule: ServerGameModule<BigTwoInternal> = {
     }
 
     if (action.type === 'submit-selected' || action.type === 'play-card') {
-      const chosen = seat.hand.filter((c) => seat.selectedIds.has(c.id));
+      let chosen = seat.hand.filter((c) => seat.selectedIds.has(c.id));
+      if (chosen.length === 0 && action.type === 'play-card' && action.cardId) {
+        const single = seat.hand.find((c) => c.id === action.cardId);
+        if (single) chosen = [single];
+      }
       if (chosen.length > 0 && executeBigTwoPlay(state, seat, chosen)) {
         return;
       }
-      // Fallback: if single tap or invalid, guide player with smart hint
       state.popups.push({ x: TABLE_CENTER_X, y: TABLE_CENTER_Y - 120, text: 'INVALID COMBO!', colorHex: '#FF4D2E', alpha: 1 });
       return;
     }

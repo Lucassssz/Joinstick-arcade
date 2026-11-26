@@ -704,7 +704,7 @@ function drawSeatPod(
   turnTotal: number
 ): void {
   const seat = getCardSeatPosition(seatIdx, total);
-  const now = Date.now() * 0.005;
+  const now = fx.orbitAngle * 2.8;
   const isDanger = isActiveTurn && turnTimeLeft <= 5;
   const st = fx.seats.get(p.id);
   const activeLerp = st?.activeLerp ?? (isActiveTurn ? 1 : 0);
@@ -1128,8 +1128,6 @@ export function renderColorClash(
 
   drawCasinoCardTable(ctx, fx.feltAccentHex, 'rgba(16, 217, 139, 0.08)');
 
-  const now = Date.now() * 0.0018;
-
   // Smoothly orbiting turn direction arrows circling the center piles
   ctx.save();
   ctx.translate(TABLE_CENTER_X, TABLE_CENTER_Y);
@@ -1209,7 +1207,7 @@ export function renderColorClash(
   // Active Top Card with glowing ring + easeOutBack slam-settle spring!
   ctx.save();
   ctx.fillStyle = fx.feltAccentHex;
-  ctx.globalAlpha = 0.25 + Math.sin(now * 3) * 0.08 + fx.pileSlam * 0.25;
+  ctx.globalAlpha = 0.25 + Math.sin(fx.orbitAngle * 4.5) * 0.08 + fx.pileSlam * 0.25;
   ctx.beginPath();
   ctx.roundRect(pileX - 58, pileY - 77, 116, 154, 16);
   ctx.fill();
@@ -1251,7 +1249,7 @@ export function renderColorClash(
   ctx.restore();
 
   if (snap.drawPenalty > 0) {
-    const bounce = Math.sin(now * 4) * 4;
+    const bounce = Math.sin(fx.orbitAngle * 6) * 4;
     ctx.save();
     ctx.fillStyle = '#FF3B30';
     ctx.beginPath();

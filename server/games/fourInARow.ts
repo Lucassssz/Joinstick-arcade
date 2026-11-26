@@ -72,6 +72,21 @@ function findFourConnect(
   return null;
 }
 
+function countFriendlyClusterBonus(grid: (string | null)[], col: number, row: number, playerId: string): number {
+  let neighbors = 0;
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const nc = col + dc;
+      const nr = row + dr;
+      if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS && grid[idxOf(nc, nr)] === playerId) {
+        neighbors++;
+      }
+    }
+  }
+  return neighbors * 8;
+}
+
 function applyColumnGravity(grid: (string | null)[], colorGrid: (string | null)[]): void {
   for (let c = 0; c < COLS; c++) {
     let writeRow = ROWS - 1;
@@ -250,7 +265,7 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
         state.colorGrid[idxOf(col, targetRow)] = active.colorHex;
         state.fallingToken = { col, row: targetRow, currentY: -0.6, colorHex: active.colorHex };
         active.tokensPlaced++;
-        active.score += 25;
+        active.score += 20 + countFriendlyClusterBonus(state.grid, col, targetRow, active.id);
         state.banner = 'ANVIL CRUSH!';
         state.eventText = `🔨 ${active.name} crushed Column ${col + 1} with an Anvil Token!`;
         sounds.push({ type: 'boost', playerId: active.id });
@@ -275,7 +290,7 @@ export const fourInARowModule: ServerGameModule<FourInARowState> = {
           state.colorGrid[idxOf(col, dropRow)] = active.colorHex;
           state.fallingToken = { col, row: dropRow, currentY: -0.6, colorHex: active.colorHex };
           active.tokensPlaced++;
-          active.score += 15;
+          active.score += 10 + countFriendlyClusterBonus(state.grid, col, dropRow, active.id);
           state.banner = null;
           state.eventText = `${active.name} dropped a token in Column ${col + 1}!`;
           sounds.push({ type: 'confirm', playerId: active.id });

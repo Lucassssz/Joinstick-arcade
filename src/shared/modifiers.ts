@@ -6,6 +6,11 @@ import { PACK_RETRO_ARCADE_FRENZY_PERKS } from './packRetroArcadeCatalog.ts';
 import { PACK_SPORTS_PHYSICS_FRENZY_PERKS } from './packSportsPhysicsCatalog.ts';
 import { PACK_CHAOS_SURVIVAL_FRENZY_PERKS } from './packChaosSurvivalCatalog.ts';
 import { PACK_STRATEGY_CLASSICS_FRENZY_PERKS } from './packStrategyClassicsCatalog.ts';
+import { PACK_PHYSICS_BUILDER_FRENZY_PERKS } from './packPhysicsBuilderCatalog.ts';
+import { PACK_CREW_DEFENSE_FRENZY_PERKS } from './packCrewDefenseCatalog.ts';
+import { PACK_TABLETOP_GEMS_FRENZY_PERKS } from './packTabletopGemsCatalog.ts';
+import { PACK_MIND_LOGIC_FRENZY_PERKS } from './packMindLogicCatalog.ts';
+import { PACK_CULT_HERITAGE_FRENZY_PERKS } from './packCultHeritageCatalog.ts';
 
 export type MutatorId =
   | 'normal'
@@ -454,6 +459,11 @@ export const GAME_FRENZY_PERKS: Record<GameId, FrenzyGamePerk> = {
   ...PACK_SPORTS_PHYSICS_FRENZY_PERKS,
   ...PACK_CHAOS_SURVIVAL_FRENZY_PERKS,
   ...PACK_STRATEGY_CLASSICS_FRENZY_PERKS,
+  ...PACK_PHYSICS_BUILDER_FRENZY_PERKS,
+  ...PACK_CREW_DEFENSE_FRENZY_PERKS,
+  ...PACK_TABLETOP_GEMS_FRENZY_PERKS,
+  ...PACK_MIND_LOGIC_FRENZY_PERKS,
+  ...PACK_CULT_HERITAGE_FRENZY_PERKS,
 };
 
 export const TOURNAMENT_TOTAL_GAMES = 5;

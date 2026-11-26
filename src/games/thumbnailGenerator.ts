@@ -1029,6 +1029,34 @@ export function getCachedGameThumbnail(gameId: GameId): string | null {
   return hit;
 }
 
+async function fetchDemoSnapshotWithRetry(
+  gameId: GameId,
+  maxAttempts = 3
+): Promise<GameSnapshot | null> {
+  const url = `/api/demo-snapshot/${encodeURIComponent(gameId)}`;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const snap = (await resp.json()) as GameSnapshot | null;
+        if (snap && typeof snap.gameId === 'string') {
+          return snap;
+        }
+        return null;
+      }
+      if (resp.status >= 400 && resp.status < 500) {
+        return null;
+      }
+    } catch {
+      // Transient network / server restart error — retry with short backoff
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 350 : 900));
+    }
+  }
+  return null;
+}
+
 export function getStylizedGameThumbnail(
   gameId: GameId,
   accentHex: string,
@@ -1042,12 +1070,11 @@ export function getStylizedGameThumbnail(
 
   const promise = runQueued<string | null>(async () => {
     try {
-      const [resp] = await Promise.all([
-        fetch(`/api/demo-snapshot/${encodeURIComponent(gameId)}`),
+      const [snap] = await Promise.all([
+        fetchDemoSnapshotWithRetry(gameId),
         ensureGameRendererLoaded(gameId),
       ]);
-      if (!resp.ok) return null;
-      const snap = (await resp.json()) as GameSnapshot;
+      if (!snap) return null;
 
       const { src, dst } = getOffscreenCanvases();
       const srcCtx = src.getContext('2d');
@@ -1067,8 +1094,7 @@ export function getStylizedGameThumbnail(
         thumbnailCache.set(gameId, dataUrl);
       }
       return dataUrl || null;
-    } catch (err) {
-      console.error(`[ThumbnailGenerator] Failed for ${gameId}:`, err);
+    } catch {
       return null;
     } finally {
       inflightMap.delete(gameId);

@@ -2077,7 +2077,7 @@ export class RoomManager {
     }
 
     this.playHostSound(room, 'confirm');
-    this.startMatch(room, true);
+    this.startMatch(room, room.roomMode !== 'pocket');
     return true;
   }
 
@@ -2363,12 +2363,12 @@ export class RoomManager {
     this.playHostSound(room, 'confirm');
     this.broadcastRoom(room);
 
-    // Celebrate the winning pick briefly, then open Rules Briefing
+    // Celebrate the winning pick briefly, then open Rules Briefing (or live countdown in Pocket Mode)
     room.voteLockTimeout = setTimeout(() => {
       room.voteLockTimeout = null;
       if (room.status !== 'VOTING' || !room.tournament?.active) return;
       room.tournament.vote = null;
-      this.startMatch(room, true);
+      this.startMatch(room, room.roomMode !== 'pocket');
     }, 1800);
   }
 
@@ -2910,8 +2910,31 @@ export class RoomManager {
         return snap.players.some((p) => p.cardCount <= 2) || snap.turnCount >= (earlyFrenzy ? 7 : 13);
       case 'sushi-draft':
         return snap.round >= Math.max(2, snap.totalRounds - (earlyFrenzy ? 1 : 0));
-      default:
-        return false;
+      default: {
+        const sAny = snap as unknown as {
+          timeLeft?: number;
+          totalTime?: number;
+          round?: number;
+          maxRounds?: number;
+          totalRounds?: number;
+        };
+        if (typeof sAny.timeLeft === 'number' && typeof sAny.totalTime === 'number' && sAny.totalTime > 0) {
+          const threshold = earlyFrenzy
+            ? sAny.totalTime * 0.52
+            : Math.min(18, Math.max(10, sAny.totalTime * 0.34));
+          return sAny.timeLeft <= threshold && sAny.timeLeft > 2.5;
+        }
+        const maxR =
+          typeof sAny.maxRounds === 'number'
+            ? sAny.maxRounds
+            : typeof sAny.totalRounds === 'number'
+            ? sAny.totalRounds
+            : 0;
+        if (typeof sAny.round === 'number' && maxR >= 2) {
+          return sAny.round >= (earlyFrenzy ? Math.max(2, Math.ceil(maxR * 0.5)) : maxR);
+        }
+        return elapsedSec >= (earlyFrenzy ? 20 : 35);
+      }
     }
   }
 
@@ -3226,6 +3249,26 @@ export class RoomManager {
         room.selectedGameId === 'carrom-arena' ||
         room.selectedGameId === 'dungeon-crawl-board' ||
         room.selectedGameId === 'lucky-auction' ||
+        room.selectedGameId === 'pit-harvest' ||
+        room.selectedGameId === 'gomoku-blitz' ||
+        room.selectedGameId === 'chess-blitz' ||
+        room.selectedGameId === 'domino-chain' ||
+        room.selectedGameId === 'hexagon-conquest' ||
+        room.selectedGameId === 'backgammon-sprint' ||
+        room.selectedGameId === 'mancala-jewels' ||
+        room.selectedGameId === 'curling-masters' ||
+        room.selectedGameId === 'truth-bomb' ||
+        room.selectedGameId === 'draw-guess-relay' ||
+        room.selectedGameId === 'mosaic-tile-draft' ||
+        room.selectedGameId === 'maze-wall-duel' ||
+        room.selectedGameId === 'corner-polyomino' ||
+        room.selectedGameId === 'pillar-ascent-3d' ||
+        room.selectedGameId === 'hex-island-settlers' ||
+        room.selectedGameId === 'hex-insect-chess' ||
+        room.selectedGameId === 'deep-sea-oxygen' ||
+        room.selectedGameId === 'picross-nonogram' ||
+        room.selectedGameId === 'speed-sudoku-duel' ||
+        room.selectedGameId === 'xiangqi-river-clash' ||
         CARD_GAME_IDS.has(room.selectedGameId);
       const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);
@@ -3435,6 +3478,18 @@ export class RoomManager {
           'laser-jump-rope',
           'paint-rush',
           'four-in-a-row',
+          'ludo-royale',
+          'star-party-board',
+          'reversi-clash',
+          'neon-checkers',
+          'pit-harvest',
+          'gomoku-blitz',
+          'chess-blitz',
+          'domino-chain',
+          'backgammon-sprint',
+          'mancala-jewels',
+          'rummy-royale',
+          'sequence-jack',
         ]);
         const preserveOrder = RANK_PRIORITY_GAMES.has(room.selectedGameId);
         const enriched = baseRankings.map((r) => {

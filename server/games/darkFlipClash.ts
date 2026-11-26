@@ -10,7 +10,7 @@ import type {
 } from '../../src/shared/types.ts';
 import type { HapticTrigger, PlayerHudUpdate, ServerGameModule } from './engine.ts';
 
-const TURN_LIMIT_SEC = 14.0;
+const TURN_LIMIT_SEC = 12.0;
 const BASIC_COLORS: Exclude<CardColor, 'wild'>[] = ['red', 'blue', 'gold', 'green'];
 
 const LIGHT_HEX: Record<Exclude<CardColor, 'wild'>, string> = {
@@ -172,7 +172,7 @@ function advanceTurn(state: DarkFlipClashState, steps = 1) {
   state.awaitingColorPick = false;
   state.turnTimeLeft = TURN_LIMIT_SEC;
   state.turnCount += 1;
-  state.botThinkTimer = 1.15 + Math.random() * 0.65;
+  state.botThinkTimer = 0.65 + Math.random() * 0.4;
 }
 
 function playCard(state: DarkFlipClashState, player: DarkFlipPlayerInternal, idx: number): boolean {
@@ -255,7 +255,7 @@ function playCard(state: DarkFlipClashState, player: DarkFlipPlayerInternal, idx
     setBanner(state, `${player.name} SKIPPED EVERYONE! GO AGAIN!`, '#EC4899', 1.8);
     state.shockwaves.push({ x: TABLE_CENTER_X, y: TABLE_CENTER_Y, radius: 20, maxRadius: 240, colorHex: '#EC4899', alpha: 0.95 });
     state.turnTimeLeft = TURN_LIMIT_SEC;
-    state.botThinkTimer = 1.0;
+    state.botThinkTimer = 0.65;
     return true;
   }
 
@@ -414,16 +414,16 @@ export const darkFlipClashModule: ServerGameModule<DarkFlipClashState> = {
       turnTimeLeft: TURN_LIMIT_SEC,
       turnTotal: TURN_LIMIT_SEC,
       turnCount: 0,
-      botThinkTimer: 1.3,
+      botThinkTimer: 0.75,
       banner: 'PLAY FLIP TO UNLEASH THE DARK SIDE!',
       bannerColor: '#A855F7',
-      bannerTimer: 2.3,
+      bannerTimer: 2.0,
       flyingCards: [],
       shockwaves: [],
       popups: [],
       players: internalPlayers,
       winnerId: null,
-      finishDelay: 2.3,
+      finishDelay: 1.6,
       pendingSounds: [{ type: 'card' }],
       pendingHaptics: [],
     };

@@ -16,6 +16,7 @@ import {
   PadMode,
   TrackpadMode,
 } from '../shared/padProfiles';
+import { GAME_CATALOG } from '../shared/games';
 import { useLanguage } from '../lib/i18n';
 
 export type ButtonLayoutMode = 'vertical' | 'angled' | 'horizontal';
@@ -385,8 +386,8 @@ export function ControllerSettingsOverlay({
             </h2>
             <p className="text-[10px] sm:text-[11px] text-[#9CA3AF] truncate">
               {t(
-                'Auto-matched for every game · Saved locally on your phone',
-                '按 150 款游戏智能匹配最佳手柄 · 自动保存于本机'
+                `Auto-matched across all ${GAME_CATALOG.length} games · Saved locally on your phone`,
+                `按 ${GAME_CATALOG.length} 款游戏智能匹配最佳手柄 · 自动保存于本机`
               )}
             </p>
           </div>
@@ -877,6 +878,33 @@ export function ControllerSettingsOverlay({
                     {t(opt.en, opt.zh)}
                   </button>
                 ))}
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-[#9CA3AF]">
+                  {t('Tap Screen = Action A', '轻点屏幕触发 A 动作')}
+                </span>
+                <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-[#101217] border border-[#262C38]">
+                  {(
+                    [
+                      { val: null, en: 'Auto', zh: '自动' },
+                      { val: true, en: 'On', zh: '开启' },
+                      { val: false, en: 'Off', zh: '关闭' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={String(opt.val)}
+                      type="button"
+                      onClick={() => update({ trackpadTapForAOverride: opt.val })}
+                      className={`py-0.5 px-2 rounded text-[10px] font-bold cursor-pointer whitespace-nowrap ${
+                        prefs.trackpadTapForAOverride === opt.val
+                          ? 'bg-[#10D98B] text-[#091812]'
+                          : 'text-[#9CA3AF] hover:text-white'
+                      }`}
+                    >
+                      {t(opt.en, opt.zh)}
+                    </button>
+                  ))}
+                </div>
               </div>
               <label className="block space-y-1">
                 <div className="flex items-center justify-between text-[10px]">

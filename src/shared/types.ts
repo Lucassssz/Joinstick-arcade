@@ -33,6 +33,28 @@ import type {
   PackStrategyGameId,
   PackStrategySnapshot,
 } from './packStrategyClassicsTypes.ts';
+import type {
+  PackPhysicsBuilderGameId,
+  PackPhysicsBuilderSnapshot,
+} from './packPhysicsBuilderTypes.ts';
+import type {
+  PackCrewDefenseGameId,
+  PackCrewDefenseSnapshot,
+} from './packCrewDefenseTypes.ts';
+import type {
+  PackTabletopCardGameId,
+  PackTabletopGemsGameId,
+  PackTabletopGemsSnapshot,
+} from './packTabletopGemsTypes.ts';
+import type {
+  PackMindLogicCardGameId,
+  PackMindLogicGameId,
+  PackMindLogicSnapshot,
+} from './packMindLogicTypes.ts';
+import type {
+  PackCultHeritageGameId,
+  PackCultHeritageSnapshot,
+} from './packCultHeritageTypes.ts';
 
 export * from './packMalaysianTypes.ts';
 export * from './packChineseViralTypes.ts';
@@ -41,6 +63,11 @@ export * from './packRetroArcadeTypes.ts';
 export * from './packSportsPhysicsTypes.ts';
 export * from './packChaosSurvivalTypes.ts';
 export * from './packStrategyClassicsTypes.ts';
+export * from './packPhysicsBuilderTypes.ts';
+export * from './packCrewDefenseTypes.ts';
+export * from './packTabletopGemsTypes.ts';
+export * from './packMindLogicTypes.ts';
+export * from './packCultHeritageTypes.ts';
 
 export type GameId =
   | 'bumper-brawl'
@@ -97,7 +124,12 @@ export type GameId =
   | PackRetroArcadeGameId
   | PackSportsPhysicsGameId
   | PackChaosSurvivalGameId
-  | PackStrategyGameId;
+  | PackStrategyGameId
+  | PackPhysicsBuilderGameId
+  | PackCrewDefenseGameId
+  | PackTabletopGemsGameId
+  | PackMindLogicGameId
+  | PackCultHeritageGameId;
 
 export type CardGameId =
   | 'color-clash'
@@ -111,7 +143,9 @@ export type CardGameId =
   | PackMalaysianCardGameId
   | PackChineseViralCardGameId
   | PackGlobalViralCardGameId
-  | PackStrategyCardGameId;
+  | PackStrategyCardGameId
+  | PackTabletopCardGameId
+  | PackMindLogicCardGameId;
 
 export type RoomStatus =
   | 'SETUP'
@@ -1647,7 +1681,12 @@ export type GameSnapshot =
   | PackRetroArcadeSnapshot
   | PackSportsPhysicsSnapshot
   | PackChaosSurvivalSnapshot
-  | PackStrategySnapshot;
+  | PackStrategySnapshot
+  | PackPhysicsBuilderSnapshot
+  | PackCrewDefenseSnapshot
+  | PackTabletopGemsSnapshot
+  | PackMindLogicSnapshot
+  | PackCultHeritageSnapshot;
 
 // --- 33. Volley Smash (Arcade Beach Volleyball) ---
 export interface VolleyPlayerState {
