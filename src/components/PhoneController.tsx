@@ -65,6 +65,7 @@ import {
   saveControllerPrefs,
 } from './ControllerSettingsOverlay';
 import { EasyArrowsDeck, SwipeTrackpadDeck } from './GamePadDecks';
+import { FrenzyBannerOverlay } from './FrenzyBannerOverlay';
 import { PocketArenaCanvas } from './PocketArenaCanvas';
 import { PocketLobbyView } from './PocketLobbyView';
 import {
@@ -5631,6 +5632,16 @@ export function PhoneController({
         </div>
       )}
 
+      {/* Pocket Mode Frenzy Time Fly-Through Banner + Fiery Active Edge Vignette */}
+      {useIntegratedHud && (
+        <FrenzyBannerOverlay
+          gameId={room.selectedGameId}
+          status={room.status}
+          frenzy={room.frenzy}
+          compact
+        />
+      )}
+
       {topControlBar}
 
       {/* Non-Blocking Live In-Game Coach Strip (First 6.5s of Pocket Arcade Match) */}
@@ -5841,16 +5852,10 @@ export function PhoneController({
       )}
 
       {isCardGame ? (
-        /* PAD 4: Private Card Hand + Actions (Option A Turn-Driven Split & Full-Table Overview) */
-        <div className="relative flex-1 min-h-0 flex flex-col">
-          {useIntegratedHud && (
-            <div
-              className={`pointer-events-none z-0 overflow-hidden transition-all duration-200 ${
-                isPocketCardHandShown
-                  ? 'absolute top-0 left-0 w-[calc(41.666%-4px)] h-[54%] rounded-2xl border border-white/15 bg-[#080A0F]'
-                  : 'absolute inset-0 pb-[48px]'
-              }`}
-            >
+        /* PAD 4: Private Card Hand + Actions Below Live Table (Pocket Mode Top-to-Bottom Tabletop) */
+        (() => {
+          const pocketTableCanvasEl = useIntegratedHud ? (
+            <>
               <PocketArenaCanvas
                 gameId={room.selectedGameId}
                 status={room.status}
@@ -5886,72 +5891,85 @@ export function PhoneController({
                   </div>
                 </div>
               )}
+            </>
+          ) : null;
+
+          return (
+            <div className="relative flex-1 min-h-0 flex flex-col">
+              {useIntegratedHud && !isPocketCardHandShown && (
+                <div className="pointer-events-none z-0 overflow-hidden absolute inset-0 pb-[46px]">
+                  {pocketTableCanvasEl}
+                </div>
+              )}
+              <CardControllerDeck
+                cardState={cardState}
+                playerColorHex={me.color.hex}
+                embedded={embedded}
+                pocketOverlay={isPocketRoom}
+                pocketTableSlot={
+                  useIntegratedHud && isPocketCardHandShown ? pocketTableCanvasEl : null
+                }
+                hudOpacity={hudOpacity}
+                isCountdown={room.status === 'COUNTDOWN'}
+                countdownValue={room.countdownValue}
+                viewMode={controllerPrefs.cardViewMode}
+                recommendedView={effectiveCardDefaultView}
+                sortMode={controllerPrefs.cardSortMode}
+                privacyShield={controllerPrefs.cardPrivacyShield}
+                actionsSide={controllerPrefs.cardActionsSide}
+                coachTip={pocketCardCoachTip}
+                onDismissCoach={() => setPocketCoachDismissed(true)}
+                situation={
+                  isPocketRoom
+                    ? buildPocketCardSituation(
+                        latestSnapshotRef.current,
+                        room,
+                        cardState,
+                        me.id,
+                        lang
+                      )
+                    : null
+                }
+                handCollapsed={isPocketRoom ? !isPocketCardHandShown : false}
+                onToggleHandCollapsed={
+                  isPocketRoom
+                    ? () =>
+                        setPocketCardViewOverride(
+                          isPocketCardHandShown
+                            ? isMyCardTurnNow
+                              ? 'show-table'
+                              : 'auto'
+                            : isMyCardTurnNow
+                            ? 'auto'
+                            : 'show-hand'
+                        )
+                    : undefined
+                }
+                onChangeViewMode={(next) =>
+                  updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
+                }
+                onCycleSortMode={() => {
+                  const order = ['server', 'playable', 'rank'] as const;
+                  const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
+                  updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
+                }}
+                onTogglePrivacy={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
+                  })
+                }
+                onFlipActionsSide={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
+                  })
+                }
+                onAction={sendCardAction}
+              />
             </div>
-          )}
-          <CardControllerDeck
-            cardState={cardState}
-            playerColorHex={me.color.hex}
-            embedded={embedded}
-            pocketOverlay={isPocketRoom}
-            hudOpacity={hudOpacity}
-            isCountdown={room.status === 'COUNTDOWN'}
-            countdownValue={room.countdownValue}
-            viewMode={controllerPrefs.cardViewMode}
-            recommendedView={effectiveCardDefaultView}
-            sortMode={controllerPrefs.cardSortMode}
-            privacyShield={controllerPrefs.cardPrivacyShield}
-            actionsSide={controllerPrefs.cardActionsSide}
-            coachTip={pocketCardCoachTip}
-            onDismissCoach={() => setPocketCoachDismissed(true)}
-            situation={
-              isPocketRoom
-                ? buildPocketCardSituation(
-                    latestSnapshotRef.current,
-                    room,
-                    cardState,
-                    me.id,
-                    lang
-                  )
-                : null
-            }
-            handCollapsed={isPocketRoom ? !isPocketCardHandShown : false}
-            onToggleHandCollapsed={
-              isPocketRoom
-                ? () =>
-                    setPocketCardViewOverride(
-                      isPocketCardHandShown
-                        ? isMyCardTurnNow
-                          ? 'show-table'
-                          : 'auto'
-                        : isMyCardTurnNow
-                        ? 'auto'
-                        : 'show-hand'
-                    )
-                : undefined
-            }
-            onChangeViewMode={(next) =>
-              updateControllerPrefs({ ...controllerPrefs, cardViewMode: next })
-            }
-            onCycleSortMode={() => {
-              const order = ['server', 'playable', 'rank'] as const;
-              const next = order[(order.indexOf(controllerPrefs.cardSortMode) + 1) % order.length];
-              updateControllerPrefs({ ...controllerPrefs, cardSortMode: next });
-            }}
-            onTogglePrivacy={() =>
-              updateControllerPrefs({
-                ...controllerPrefs,
-                cardPrivacyShield: !controllerPrefs.cardPrivacyShield,
-              })
-            }
-            onFlipActionsSide={() =>
-              updateControllerPrefs({
-                ...controllerPrefs,
-                cardActionsSide: controllerPrefs.cardActionsSide === 'right' ? 'left' : 'right',
-              })
-            }
-            onAction={sendCardAction}
-          />
-        </div>
+          );
+        })()
       ) : (
         <div
           className={`flex-1 min-h-0 flex flex-col justify-end ${

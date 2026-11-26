@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -55,6 +55,7 @@ interface CardControllerDeckProps {
   privacyShield?: boolean;
   actionsSide?: 'right' | 'left';
   situation?: PocketCardSituation | null;
+  pocketTableSlot?: ReactNode;
   handCollapsed?: boolean;
   coachTip?: string | null;
   onDismissCoach?: () => void;
@@ -137,6 +138,7 @@ export function CardControllerDeck({
   privacyShield = false,
   actionsSide = 'right',
   situation = null,
+  pocketTableSlot = null,
   handCollapsed = false,
   coachTip = null,
   onDismissCoach,
@@ -376,13 +378,13 @@ export function CardControllerDeck({
   const isMaskActive = privacyShield && !peeking;
   const handMid = (sortedEntries.length - 1) / 2;
 
-  // Compact overlap spacing for larger pocket hands so more cards are immediately visible
+  // Compact overlap spacing for larger pocket hands in the bottom strip
   const pocketOverlapMargin =
     pocketOverlay && effectiveView === 'fan'
-      ? sortedEntries.length >= 12
-        ? '-ml-4 sm:-ml-3'
-        : sortedEntries.length >= 7
-        ? '-ml-2.5 sm:-ml-1.5'
+      ? sortedEntries.length >= 13
+        ? '-ml-3.5 sm:-ml-2.5'
+        : sortedEntries.length >= 9
+        ? '-ml-2 sm:-ml-1'
         : ''
       : '';
 
@@ -461,7 +463,7 @@ export function CardControllerDeck({
                 embedded
                   ? 'w-14 h-20'
                   : pocketOverlay
-                  ? 'w-[66px] h-[94px] sm:w-[74px] sm:h-[106px]'
+                  ? 'w-[60px] h-[86px] sm:w-[70px] sm:h-[98px]'
                   : 'w-[68px] h-[98px] sm:w-[76px] sm:h-[110px]'
               } ${
                 canTapPlay
@@ -549,7 +551,7 @@ export function CardControllerDeck({
                 embedded
                   ? 'w-16 h-22'
                   : pocketOverlay
-                  ? 'w-[74px] h-[94px] sm:w-[84px] sm:h-[106px]'
+                  ? 'w-[70px] h-[86px] sm:w-[82px] sm:h-[98px]'
                   : 'w-[76px] h-[104px] sm:w-[86px] sm:h-[116px]'
               } ${
                 canTapPlay
@@ -618,7 +620,7 @@ export function CardControllerDeck({
               embedded
                 ? 'w-14 h-20'
                 : pocketOverlay
-                ? 'w-[66px] h-[94px] sm:w-[74px] sm:h-[106px]'
+                ? 'w-[60px] h-[86px] sm:w-[70px] sm:h-[98px]'
                 : 'w-[66px] h-[96px] sm:w-[74px] sm:h-[108px]'
             } ${
               isSelected
@@ -665,8 +667,6 @@ export function CardControllerDeck({
     if (cardState.extraActions && cardState.extraActions.length > 0) {
       const gridCols = pocketOverlay
         ? cardState.extraActions.length >= 3
-          ? 'grid-cols-2 sm:grid-cols-4'
-          : cardState.extraActions.length === 2
           ? 'grid-cols-2'
           : 'grid-cols-1'
         : 'grid-cols-1';
@@ -927,24 +927,36 @@ export function CardControllerDeck({
       );
     }
 
+    const hasMultiExtraActions = Boolean(
+      cardState.extraActions && cardState.extraActions.length >= 3
+    );
+
     return (
-      <div className="flex-1 grid grid-cols-12 gap-2 min-h-0 relative z-10 pointer-events-none">
-        {/* LEFT COLUMN (42%): Upper Zoomed Table Camera Window + Lower Opponents Key Info */}
-        <div className="col-span-5 flex flex-col gap-1.5 min-h-0 pointer-events-none">
-          <div className="h-[54%] shrink-0 rounded-2xl pointer-events-none" />
-          {renderPocketOpponentsPanel()}
+      <div className="flex-1 flex flex-col gap-1.5 min-h-0 relative z-10 pointer-events-none">
+        {/* TOP ROW: Live Table Canvas (left) + Opponents Key Info (right) */}
+        <div className="flex-1 min-h-0 grid grid-cols-12 gap-1.5 pointer-events-none">
+          <div className="col-span-7 sm:col-span-8 min-h-0 rounded-2xl border border-white/15 bg-[#080A0F] overflow-hidden relative pointer-events-none">
+            {pocketTableSlot}
+          </div>
+          <div className="col-span-5 sm:col-span-4 flex flex-col min-h-0">
+            {renderPocketOpponentsPanel()}
+          </div>
         </div>
 
-        {/* RIGHT COLUMN (58%): My Cards + Actions */}
+        {/* BOTTOM ROW (FULL WIDTH BELOW TABLE): My Cards + Actions */}
         <div
-          className="col-span-7 pointer-events-auto relative flex flex-col rounded-2xl border border-white/18 min-w-0 min-h-0 backdrop-blur-sm overflow-hidden"
+          className={`w-full shrink-0 pointer-events-auto relative flex flex-col rounded-2xl border border-white/18 min-w-0 backdrop-blur-sm overflow-hidden transition-[height] duration-200 ${
+            effectiveView === 'grid'
+              ? 'h-[58%] min-h-[184px] max-h-[268px]'
+              : 'h-[46%] min-h-[146px] max-h-[186px]'
+          }`}
           style={{
-            backgroundColor: `rgba(13, 16, 23, ${Math.max(0.76, Math.min(0.95, hudOpacity + 0.14))})`,
+            backgroundColor: `rgba(13, 16, 23, ${Math.max(0.78, Math.min(0.95, hudOpacity + 0.14))})`,
           }}
         >
           {/* Compact Turn Status & Card Toolbar */}
           <div
-            className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 border-b shrink-0 transition-colors ${
+            className={`flex items-center justify-between gap-1.5 px-2.5 py-1 border-b shrink-0 transition-colors ${
               isDanger
                 ? 'bg-[#FF3B30]/30 border-[#FF3B30]/70'
                 : cardState.isActionRequired
@@ -1003,7 +1015,7 @@ export function CardControllerDeck({
                       ? t('Expand All Cards Grid', '展开全部手牌网格')
                       : t('Switch to Fan Strip', '切回扇形手牌条')
                   }
-                  className={`px-2 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                  className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
                     effectiveView === 'grid'
                       ? 'bg-[#FFB800] border-[#FFB800] text-[#14120B]'
                       : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
@@ -1023,7 +1035,7 @@ export function CardControllerDeck({
                   type="button"
                   onClick={onCycleSortMode}
                   title={t('Sort Hand', '智能理牌')}
-                  className={`px-2 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                  className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
                     sortMode !== 'server'
                       ? 'bg-[#00C2FF]/20 border-[#00C2FF]/60 text-[#00C2FF]'
                       : 'bg-[#181C26] border-[#2A303D] text-[#D1D5DB] hover:text-white'
@@ -1045,13 +1057,24 @@ export function CardControllerDeck({
                   type="button"
                   onClick={onTogglePrivacy}
                   title={t('Toggle Privacy Cover', '切换防偷窥盖牌')}
-                  className={`px-1.5 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                  className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
                     privacyShield
                       ? 'bg-[#FFB800]/20 border-[#FFB800] text-[#FFB800]'
                       : 'bg-[#181C26] border-[#2A303D] text-[#9CA3AF] hover:text-white'
                   }`}
                 >
                   {privacyShield ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </button>
+              )}
+
+              {onFlipActionsSide && (
+                <button
+                  type="button"
+                  onClick={onFlipActionsSide}
+                  title={t('Swap Action Buttons Left/Right', '左右切换出牌按钮位置')}
+                  className="px-1.5 py-0.5 rounded-md border bg-[#181C26] border-[#2A303D] text-[10px] font-bold text-[#9CA3AF] hover:text-white inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
+                >
+                  <ArrowLeftRight className="w-3 h-3" />
                 </button>
               )}
 
@@ -1064,7 +1087,7 @@ export function CardControllerDeck({
                       ? t('Collapse hand to view full table', '收起手牌查看完整牌桌')
                       : t('Hide hand and return to full table', '隐藏手牌回到全桌视角')
                   }
-                  className={`px-2 py-1 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                  className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
                     !isTurnActiveNow
                       ? 'bg-[#00C2FF]/20 border-[#00C2FF] text-[#00C2FF] hover:bg-[#00C2FF]/30'
                       : 'bg-[#181C26] border-[#2A303D] text-[#00C2FF] hover:text-white'
@@ -1105,13 +1128,13 @@ export function CardControllerDeck({
             </div>
           )}
 
-          {/* Spacious Hand Cards OR Wild Color Picker */}
+          {/* Own Hand Cards + Thumb Actions OR Wild Color Picker */}
           {isColorClash && cardState.awaitingColorPick ? (
-            <div className="flex-1 min-h-0 p-3 flex flex-col justify-center gap-2">
+            <div className="flex-1 min-h-0 p-2.5 flex flex-col justify-center gap-2">
               <div className="text-xs font-extrabold text-[#FFB800] text-center">
                 {t('Choose Next Active Color', '选择接下来的颜色')}
               </div>
-              <div className="grid grid-cols-2 gap-2.5 flex-1 max-h-[180px]">
+              <div className="grid grid-cols-4 gap-2.5 flex-1">
                 {(['red', 'blue', 'gold', 'green'] as const).map((col, idx) => {
                   const spec = CLASH_STYLE[col];
                   return (
@@ -1119,7 +1142,7 @@ export function CardControllerDeck({
                       key={col}
                       type="button"
                       onClick={() => onAction({ type: 'pick-color', color: col })}
-                      className="tactile-btn swatch-pop-anim rounded-2xl font-display font-black text-base sm:text-lg flex items-center justify-center cursor-pointer active:scale-95"
+                      className="tactile-btn swatch-pop-anim rounded-2xl font-display font-black text-sm sm:text-base flex items-center justify-center cursor-pointer active:scale-95"
                       style={{
                         backgroundColor: spec.bg,
                         color: spec.text,
@@ -1134,50 +1157,62 @@ export function CardControllerDeck({
               </div>
             </div>
           ) : (
-            <>
-              {isMaskActive ? (
-                <div
-                  onPointerDown={() => setPeeking(true)}
-                  onPointerUp={() => setPeeking(false)}
-                  onPointerCancel={() => setPeeking(false)}
-                  onPointerLeave={() => setPeeking(false)}
-                  onContextMenu={(e) => e.preventDefault()}
-                  className="flex-1 min-h-0 flex flex-col items-center justify-center p-3 text-center touch-none select-none cursor-pointer bg-[#121620]/85 hover:bg-[#161B28]"
-                >
-                  <EyeOff className="w-7 h-7 text-[#FFB800] mb-1" />
-                  <div className="font-display font-extrabold text-xs sm:text-sm text-white">
-                    {t('Cards Hidden · Hold Here to Peek', '手牌已遮盖防偷窥 · 按住此处查看')}
+            <div
+              className={`flex-1 min-h-0 flex items-stretch ${
+                actionsSide === 'left' ? 'flex-row-reverse' : 'flex-row'
+              }`}
+            >
+              <div className="flex-1 min-w-0 flex flex-col min-h-0">
+                {isMaskActive ? (
+                  <div
+                    onPointerDown={() => setPeeking(true)}
+                    onPointerUp={() => setPeeking(false)}
+                    onPointerCancel={() => setPeeking(false)}
+                    onPointerLeave={() => setPeeking(false)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="flex-1 min-h-0 flex flex-col items-center justify-center p-2.5 text-center touch-none select-none cursor-pointer bg-[#121620]/85 hover:bg-[#161B28]"
+                  >
+                    <EyeOff className="w-6 h-6 text-[#FFB800] mb-1" />
+                    <div className="font-display font-extrabold text-xs sm:text-sm text-white">
+                      {t('Cards Hidden · Hold Here to Peek', '手牌已遮盖防偷窥 · 按住此处查看')}
+                    </div>
+                    <div className="text-[11px] text-[#9CA3AF]">
+                      {t(
+                        `${cardState.hand.length} cards in hand — lifts while held`,
+                        `共 ${cardState.hand.length} 张牌 — 松手自动隐藏`
+                      )}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-[#9CA3AF]">
-                    {t(
-                      `${cardState.hand.length} cards in hand — lifts while held`,
-                      `共 ${cardState.hand.length} 张牌 — 松手自动隐藏`
-                    )}
+                ) : (
+                  <div
+                    className={
+                      effectiveView === 'grid'
+                        ? 'flex-1 min-h-0 overflow-y-auto arcade-scrollbar grid grid-cols-5 sm:grid-cols-7 md:grid-cols-8 gap-1.5 px-2.5 pt-2.5 pb-2 content-start justify-items-center'
+                        : 'flex-1 min-h-0 flex items-center gap-1 overflow-x-auto arcade-scrollbar px-3 pt-2.5 pb-1.5'
+                    }
+                  >
+                    {renderHandCards()}
                   </div>
-                </div>
-              ) : (
-                <div
-                  className={
-                    effectiveView === 'grid'
-                      ? 'flex-1 min-h-0 overflow-y-auto arcade-scrollbar grid grid-cols-4 sm:grid-cols-5 gap-2 px-2.5 pt-3 pb-2.5 content-start justify-items-center'
-                      : 'flex-1 min-h-0 flex items-center overflow-x-auto arcade-scrollbar px-3 pt-3 pb-2'
-                  }
-                >
-                  {renderHandCards()}
-                </div>
-              )}
+                )}
 
-              {privacyShield && !isMaskActive && (
-                <div className="shrink-0 h-5 bg-[#FFB800]/15 border-t border-[#FFB800]/35 text-[10px] font-bold text-[#FFB800] flex items-center justify-center">
-                  {t('Release finger to hide cards again', '松开手指即刻隐藏手牌')}
-                </div>
-              )}
+                {privacyShield && !isMaskActive && (
+                  <div className="shrink-0 h-5 bg-[#FFB800]/15 border-t border-[#FFB800]/35 text-[10px] font-bold text-[#FFB800] flex items-center justify-center">
+                    {t('Release finger to hide cards again', '松开手指即刻隐藏手牌')}
+                  </div>
+                )}
+              </div>
 
-              {/* Bottom Thumb-Friendly Action Row */}
-              <div className="shrink-0 px-2.5 py-2 border-t border-white/10 bg-black/30 flex items-stretch gap-2">
+              {/* Thumb-Friendly Action Column in Bottom Own-Card Tray */}
+              <div
+                className={`shrink-0 p-1.5 flex flex-col justify-center gap-1.5 bg-black/28 border-white/10 ${
+                  actionsSide === 'left' ? 'border-r' : 'border-l'
+                } ${
+                  hasMultiExtraActions ? 'w-[162px] sm:w-[216px]' : 'w-[110px] sm:w-[138px]'
+                }`}
+              >
                 {renderActionButtons()}
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>

@@ -286,7 +286,7 @@ export function PocketArenaCanvas({
 
   const zoomClass =
     cameraFocus === 'turn-focus'
-      ? 'scale-[1.52]'
+      ? 'scale-[1.34]'
       : cameraFocus === 'table-overview-zoom'
       ? 'scale-[1.06]'
       : 'scale-100';
