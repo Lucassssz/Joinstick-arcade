@@ -10,8 +10,6 @@ import {
   Hand,
   Layers,
   LayoutGrid,
-  Maximize2,
-  Minimize2,
   RotateCcw,
   RotateCw,
   ShieldAlert,
@@ -206,6 +204,17 @@ function suitSymbol(suit?: CardPrivateHandItem['suit']): string {
   }
 }
 
+function isLightHexColor(hex?: string): boolean {
+  if (!hex || !hex.startsWith('#')) return false;
+  const clean = hex.slice(1);
+  if (clean.length !== 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return false;
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 165;
+}
+
 export function CardControllerDeck({
   cardState,
   playerColorHex,
@@ -240,6 +249,33 @@ export function CardControllerDeck({
   const [dragDeltaY, setDragDeltaY] = useState<number>(0);
   const dragStartRef = useRef<{ cardId: string; startY: number; playable: boolean } | null>(null);
   const throwTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pocketHandContainerRef = useRef<HTMLDivElement | null>(null);
+  const [pocketHandWidth, setPocketHandWidth] = useState<number>(320);
+
+  useEffect(() => {
+    if (!pocketOverlay) return;
+    const el = pocketHandContainerRef.current;
+    if (!el) return;
+
+    const updateWidth = () => {
+      const nextW = el.clientWidth;
+      if (nextW > 0) {
+        setPocketHandWidth((prev) => (Math.abs(prev - nextW) > 1 ? nextW : prev));
+      }
+    };
+
+    updateWidth();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(updateWidth);
+      observer.observe(el);
+    }
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [pocketOverlay, handCollapsed, Boolean(cardState)]);
 
   useEffect(() => {
     if (!cardState) {
@@ -306,6 +342,37 @@ export function CardControllerDeck({
     return [...base].sort((a, b) => cardSortWeight(a.card) - cardSortWeight(b.card));
   }, [handList, sortMode]);
 
+  // Dynamic fit-all layout for Pocket Mode so every card in hand is visible with zero horizontal scrolling
+  const pocketCardLayout = useMemo(() => {
+    const count = sortedEntries.length;
+    const availW = Math.max(150, pocketHandWidth - 8);
+    const isWide = availW >= 420;
+
+    let cardW = isWide ? 66 : 56;
+    let cardH = isWide ? 94 : 82;
+    if (count >= 13) {
+      cardW = isWide ? 54 : 44;
+      cardH = isWide ? 78 : 66;
+    } else if (count >= 9) {
+      cardW = isWide ? 60 : 48;
+      cardH = isWide ? 86 : 72;
+    }
+    cardW = Math.min(cardW, availW);
+
+    let marginLeft = 4;
+    if (count > 1) {
+      const idealStep = cardW + 4;
+      const maxStepToFitAll = (availW - cardW) / (count - 1);
+      const step = Math.min(idealStep, maxStepToFitAll);
+      marginLeft = Math.floor(step - cardW);
+    }
+
+    const maxDeg = count >= 12 ? 6 : count >= 7 ? 8 : 6;
+    const arcDrop = count >= 12 ? 4 : count >= 7 ? 5 : 3;
+    const isCompactCard = cardW <= 48;
+    return { cardW, cardH, marginLeft, maxDeg, arcDrop, isCompactCard };
+  }, [sortedEntries.length, pocketHandWidth]);
+
   if (!cardState) {
     if (pocketOverlay) {
       return (
@@ -341,10 +408,6 @@ export function CardControllerDeck({
   const isDanger =
     cardState.isActionRequired && cardState.turnTimeLeft > 0 && cardState.turnTimeLeft <= 5.0;
   const timeSecs = Math.max(0, Math.ceil(cardState.turnTimeLeft));
-  const turnProgressPct =
-    cardState.turnTotal > 0
-      ? Math.max(0, Math.min(100, (cardState.turnTimeLeft / cardState.turnTotal) * 100))
-      : 100;
   const isColorClash =
     cardState.gameId === 'color-clash' || cardState.gameId === 'dark-flip-clash';
   const isLiarsDeck = cardState.gameId === 'liars-deck';
@@ -354,25 +417,12 @@ export function CardControllerDeck({
   const selectedLiarCount = cardState.hand.filter((c) => c.selected).length;
 
   const effectiveView: 'fan' | 'grid' = pocketOverlay
-    ? viewMode === 'grid'
-      ? 'grid'
-      : 'fan'
+    ? 'fan'
     : viewMode === 'auto'
     ? recommendedView
     : viewMode;
-  const isMaskActive = privacyShield && !peeking;
+  const isMaskActive = !pocketOverlay && privacyShield && !peeking;
   const handMid = (sortedEntries.length - 1) / 2;
-
-  // Dynamic UNO-style curved fan overlap calculation for Pocket Mode
-  const getPocketFanMetrics = (count: number) => {
-    if (count >= 14) return { marginCls: '-ml-7 sm:-ml-5', maxDeg: 18, arcDrop: 12 };
-    if (count >= 11) return { marginCls: '-ml-6 sm:-ml-4', maxDeg: 16, arcDrop: 10 };
-    if (count >= 8) return { marginCls: '-ml-4 sm:-ml-3', maxDeg: 14, arcDrop: 8 };
-    if (count >= 5) return { marginCls: '-ml-2.5 sm:-ml-1.5', maxDeg: 11, arcDrop: 6 };
-    return { marginCls: '-ml-1 sm:ml-0', maxDeg: 7, arcDrop: 4 };
-  };
-
-  const fanMetrics = getPocketFanMetrics(sortedEntries.length);
 
   // Flick-up gesture handlers for UNO-style swipe-to-play
   const handleCardPointerDown = (
@@ -435,21 +485,27 @@ export function CardControllerDeck({
         effectiveView === 'grid'
           ? 0
           : pocketOverlay
-          ? normalizedOffset * fanMetrics.maxDeg
+          ? normalizedOffset * pocketCardLayout.maxDeg
           : (idx - handMid) * 1.65;
       const fanDrop =
         effectiveView === 'grid'
           ? 0
           : pocketOverlay
-          ? Math.pow(Math.abs(normalizedOffset), 1.55) * fanMetrics.arcDrop
+          ? Math.pow(Math.abs(normalizedOffset), 1.55) * pocketCardLayout.arcDrop
           : Math.min(8, Math.abs(idx - handMid) * 1.4);
 
       const freshOrder = freshCardOrder[card.id];
       const isThrowing = throwingCardId === card.id;
       const isDraggingThis = draggedCardId === card.id;
       const dragOffset = isDraggingThis ? dragDeltaY : 0;
-      const overlapCls =
-        pocketOverlay && effectiveView === 'fan' && idx > 0 ? fanMetrics.marginCls : '';
+      const pocketMarginStyle =
+        pocketOverlay && idx > 0 ? { marginLeft: `${pocketCardLayout.marginLeft}px` } : undefined;
+      const pocketSizeStyle = pocketOverlay
+        ? {
+            width: `${pocketCardLayout.cardW}px`,
+            height: `${pocketCardLayout.cardH}px`,
+          }
+        : undefined;
 
       // 1. UNO / Color Clash Cards
       if (card.kind === 'clash') {
@@ -460,15 +516,15 @@ export function CardControllerDeck({
         const isDimmedUnplayable = cardState.isMyTurn && !card.playable;
         const val = card.value ?? '?';
 
-        // UNO Mobile Elevation: Playable cards step up (-12px), selected/cursor steps up (-18px), unplayable sits lower (+4px)
+        // UNO Mobile Elevation: Playable cards step up (-12px), selected/cursor steps up (-16px), unplayable sits lower (+4px)
         const baseLift = isThrowing
           ? -44
           : canTapPlay
           ? isHighlighted
-            ? -18
-            : -12
+            ? -16
+            : -10
           : isDimmedUnplayable
-          ? 5
+          ? 4
           : isHighlighted
           ? -6
           : 0;
@@ -476,7 +532,7 @@ export function CardControllerDeck({
         const restTransform = isThrowing
           ? 'translate3d(0, -48px, 0) scale(0.84) rotate(6deg)'
           : `translate3d(0, ${fanDrop + baseLift + dragOffset}px, 0) scale(${
-              canTapPlay && isHighlighted ? 1.08 : canTapPlay ? 1.04 : isDimmedUnplayable ? 0.96 : 1
+              canTapPlay && isHighlighted ? 1.07 : canTapPlay ? 1.03 : isDimmedUnplayable ? 0.96 : 1
             }) rotate(${canTapPlay && isHighlighted ? fanRot * 0.35 : fanRot}deg)`;
 
         const displayVal = lang === 'zh' ? translateGameText(val, lang) : val;
@@ -485,18 +541,19 @@ export function CardControllerDeck({
         return (
           <div
             key={card.id}
-            className={`shrink-0 transition-transform duration-150 ${overlapCls} ${
+            className={`shrink-0 transition-transform duration-150 ${
               isHighlighted
                 ? 'relative z-30'
                 : canTapPlay
                 ? 'relative z-20'
                 : 'relative z-10'
             } ${freshOrder !== undefined ? 'card-deal-anim' : ''}`}
-            style={
-              freshOrder !== undefined
+            style={{
+              ...pocketMarginStyle,
+              ...(freshOrder !== undefined
                 ? { animationDelay: `${Math.min(280, freshOrder * 45)}ms` }
-                : undefined
-            }
+                : {}),
+            }}
           >
             <button
               type="button"
@@ -517,43 +574,49 @@ export function CardControllerDeck({
                 setDraggedCardId(null);
                 setDragDeltaY(0);
               }}
-              className={`card-hand-item relative rounded-2xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer touch-pan-x ${
+              className={`card-hand-item relative rounded-2xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer opacity-100 ${
                 embedded
                   ? 'w-14 h-20'
                   : pocketOverlay
-                  ? 'w-[62px] h-[90px] sm:w-[74px] sm:h-[106px]'
+                  ? ''
                   : 'w-[68px] h-[98px] sm:w-[76px] sm:h-[110px]'
               } ${
                 canTapPlay
                   ? 'ring-[2.5px] ring-white shadow-[0_10px_22px_rgba(0,0,0,0.55),0_0_16px_rgba(255,255,255,0.35)] hover:brightness-110 active:scale-95'
                   : isHighlighted
-                  ? 'ring-2 ring-white/80 opacity-95'
+                  ? 'ring-2 ring-white'
                   : isDimmedUnplayable
-                  ? 'opacity-55 brightness-75 border border-black/40'
-                  : 'opacity-90 border border-white/25'
+                  ? 'brightness-[0.72] saturate-[0.85] border border-black/40'
+                  : 'border border-white/35'
               }`}
               style={{
+                ...pocketSizeStyle,
                 transform: restTransform,
-                opacity: isThrowing ? 0.15 : undefined,
-                background:
-                  colKey === 'wild'
-                    ? 'linear-gradient(135deg, #FF4D2E 0%, #FFB800 35%, #10D98B 70%, #00C2FF 100%)'
-                    : spec.bg,
-                color: colKey === 'wild' ? '#FFFFFF' : spec.text,
+                opacity: isThrowing ? 0.25 : 1,
+                backgroundColor: spec.bg,
+                color: spec.text,
                 boxShadow: `0 5px 0 ${spec.dark}, -3px 0 10px rgba(0,0,0,0.45)`,
               }}
             >
               {/* Classic UNO Inner Oval Emblem */}
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-1.5 rounded-full border border-white/30 bg-white/12 -rotate-[22deg]"
+                className="pointer-events-none absolute inset-1.5 rounded-full border border-white/35 -rotate-[22deg]"
               />
-              <span className="relative z-10 self-start font-mono text-[11px] sm:text-xs font-black leading-none drop-shadow">
+              <span
+                className={`relative z-10 self-start font-mono font-black leading-none drop-shadow ${
+                  pocketOverlay && pocketCardLayout.isCompactCard ? 'text-[9px]' : 'text-[11px] sm:text-xs'
+                }`}
+              >
                 {displayVal}
               </span>
               <span
                 className={`relative z-10 font-display font-black leading-none drop-shadow text-center ${
-                  isZhTranslated
+                  pocketOverlay && pocketCardLayout.isCompactCard
+                    ? displayVal.length >= 3
+                      ? 'text-[10px]'
+                      : 'text-base'
+                    : isZhTranslated
                     ? displayVal.length >= 4
                       ? 'text-xs sm:text-sm'
                       : 'text-sm sm:text-base'
@@ -568,7 +631,11 @@ export function CardControllerDeck({
               >
                 {displayVal}
               </span>
-              <span className="relative z-10 self-end font-mono text-[10px] sm:text-[11px] font-black leading-none drop-shadow rotate-180">
+              <span
+                className={`relative z-10 self-end font-mono font-black leading-none drop-shadow rotate-180 ${
+                  pocketOverlay && pocketCardLayout.isCompactCard ? 'text-[9px]' : 'text-[10px] sm:text-[11px]'
+                }`}
+              >
                 {displayVal}
               </span>
             </button>
@@ -580,6 +647,12 @@ export function CardControllerDeck({
       if (card.kind === 'party') {
         const accent = card.accentHex ?? '#FFB800';
         const dark = card.secondaryHex ?? '#0F172A';
+        const solidBg = pocketOverlay ? accent : undefined;
+        const solidText = pocketOverlay
+          ? isLightHexColor(accent)
+            ? '#0B0F19'
+            : '#FFFFFF'
+          : '#FFFFFF';
         const isHighlighted = originalIndex === cardState.cursorIndex;
         const canTapPlay = cardState.isMyTurn && card.playable;
         const isDimmedUnplayable = cardState.isMyTurn && !card.playable;
@@ -604,18 +677,19 @@ export function CardControllerDeck({
         return (
           <div
             key={card.id}
-            className={`shrink-0 transition-transform duration-150 ${overlapCls} ${
+            className={`shrink-0 transition-transform duration-150 ${
               isHighlighted
                 ? 'relative z-30'
                 : canTapPlay
                 ? 'relative z-20'
                 : 'relative z-10'
             } ${freshOrder !== undefined ? 'card-deal-anim' : ''}`}
-            style={
-              freshOrder !== undefined
+            style={{
+              ...pocketMarginStyle,
+              ...(freshOrder !== undefined
                 ? { animationDelay: `${Math.min(280, freshOrder * 45)}ms` }
-                : undefined
-            }
+                : {}),
+            }}
           >
             <button
               type="button"
@@ -636,38 +710,47 @@ export function CardControllerDeck({
                 setDraggedCardId(null);
                 setDragDeltaY(0);
               }}
-              className={`card-hand-item relative rounded-2xl flex flex-col items-center justify-between p-1.5 text-center select-none cursor-pointer touch-pan-x ${
+              className={`card-hand-item relative rounded-2xl flex flex-col items-center justify-between p-1.5 text-center select-none cursor-pointer opacity-100 ${
                 embedded
                   ? 'w-16 h-22'
                   : pocketOverlay
-                  ? 'w-[70px] h-[90px] sm:w-[82px] sm:h-[106px]'
+                  ? ''
                   : 'w-[76px] h-[104px] sm:w-[86px] sm:h-[116px]'
               } ${
                 canTapPlay
                   ? 'ring-[2.5px] ring-white shadow-[0_10px_20px_rgba(0,0,0,0.5),0_0_15px_rgba(255,255,255,0.3)] hover:brightness-110 active:scale-95'
                   : isHighlighted
-                  ? 'ring-2 ring-white/70 opacity-95'
+                  ? 'ring-2 ring-white'
                   : isDimmedUnplayable
-                  ? 'opacity-55 brightness-75'
-                  : 'opacity-90 border border-white/20'
+                  ? 'brightness-[0.72] saturate-[0.85] border border-black/40'
+                  : 'border border-white/35'
               }`}
               style={{
+                ...pocketSizeStyle,
                 transform: partyTransform,
-                opacity: isThrowing ? 0.15 : undefined,
-                background: `linear-gradient(155deg, ${accent} 0%, ${dark} 100%)`,
-                color: '#FFFFFF',
-                boxShadow: '0 5px 0 rgba(0,0,0,0.55), -3px 0 8px rgba(0,0,0,0.4)',
+                opacity: isThrowing ? 0.25 : 1,
+                ...(solidBg
+                  ? { backgroundColor: solidBg }
+                  : { background: `linear-gradient(155deg, ${accent} 0%, ${dark} 100%)` }),
+                color: solidText,
+                boxShadow: `0 5px 0 ${dark}, -3px 0 8px rgba(0,0,0,0.4)`,
               }}
             >
-              <span className="self-start px-1.5 py-0.5 rounded bg-black/55 font-mono text-[9px] font-black leading-none max-w-full truncate">
+              <span className="self-start px-1 py-0.5 rounded bg-[#0B0F19] text-white font-mono text-[8px] sm:text-[9px] font-black leading-none max-w-full truncate">
                 {translateGameText(card.badge ?? 'CARD', lang)}
               </span>
-              <span className="font-display font-black text-[11px] sm:text-xs leading-tight drop-shadow px-0.5 line-clamp-2">
+              <span
+                className={`font-display font-black leading-tight px-0.5 line-clamp-2 ${
+                  pocketOverlay && pocketCardLayout.isCompactCard ? 'text-[9px]' : 'text-[11px] sm:text-xs'
+                }`}
+              >
                 {translateGameText(card.title ?? '', lang)}
               </span>
-              <span className="font-sans text-[9px] font-bold text-white/90 leading-tight line-clamp-2">
-                {translateGameText(card.subtitle ?? '', lang)}
-              </span>
+              {(!pocketOverlay || !pocketCardLayout.isCompactCard) && (
+                <span className="font-sans text-[9px] font-bold opacity-90 leading-tight line-clamp-2">
+                  {translateGameText(card.subtitle ?? '', lang)}
+                </span>
+              )}
             </button>
           </div>
         );
@@ -679,7 +762,7 @@ export function CardControllerDeck({
       const isJoker = card.rank === 'JOKER';
       const isSelected = card.selected;
       const isCursor = originalIndex === cardState.cursorIndex;
-      const baseLift = isSelected ? -18 : isCursor ? -8 : cardState.isMyTurn && card.playable ? -5 : 0;
+      const baseLift = isSelected ? -16 : isCursor ? -8 : cardState.isMyTurn && card.playable ? -5 : 0;
 
       const liarTransform = `translate3d(0, ${fanDrop + baseLift + dragOffset}px, 0) scale(${
         isSelected ? 1.07 : isCursor ? 1.02 : 1
@@ -688,18 +771,19 @@ export function CardControllerDeck({
       return (
         <div
           key={card.id}
-          className={`shrink-0 transition-transform duration-150 ${overlapCls} ${
+          className={`shrink-0 transition-transform duration-150 ${
             isSelected
               ? 'relative z-30'
               : isCursor
               ? 'relative z-20'
               : 'relative z-10'
           } ${freshOrder !== undefined ? 'card-deal-anim' : ''}`}
-          style={
-            freshOrder !== undefined
+          style={{
+            ...pocketMarginStyle,
+            ...(freshOrder !== undefined
               ? { animationDelay: `${Math.min(280, freshOrder * 45)}ms` }
-              : undefined
-          }
+              : {}),
+          }}
         >
           <button
             type="button"
@@ -710,11 +794,11 @@ export function CardControllerDeck({
                 onAction({ type: 'select-index', index: originalIndex });
               }
             }}
-            className={`card-hand-item relative rounded-2xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer bg-[#F8FAFC] border-2 active:scale-95 ${
+            className={`card-hand-item relative rounded-2xl flex flex-col items-center justify-between p-1.5 select-none cursor-pointer bg-[#FFFFFF] opacity-100 border-2 active:scale-95 ${
               embedded
                 ? 'w-14 h-20'
                 : pocketOverlay
-                ? 'w-[60px] h-[90px] sm:w-[72px] sm:h-[106px]'
+                ? ''
                 : 'w-[66px] h-[96px] sm:w-[74px] sm:h-[108px]'
             } ${
               isSelected
@@ -724,7 +808,9 @@ export function CardControllerDeck({
                 : 'border-[#CBD5E1]'
             }`}
             style={{
+              ...pocketSizeStyle,
               transform: liarTransform,
+              opacity: 1,
               color: isJoker ? '#7C3AED' : isRed ? '#DC2626' : '#0F172A',
               boxShadow: isSelected
                 ? '0 5px 0 #B58100, -3px 0 8px rgba(0,0,0,0.38)'
@@ -737,16 +823,26 @@ export function CardControllerDeck({
               </span>
             )}
             <div className="self-start flex flex-col items-center leading-none">
-              <span className="font-mono text-[11px] sm:text-xs font-black leading-none">
+              <span
+                className={`font-mono font-black leading-none ${
+                  pocketOverlay && pocketCardLayout.isCompactCard ? 'text-[10px]' : 'text-[11px] sm:text-xs'
+                }`}
+              >
                 {isJoker ? '★' : card.rank}
               </span>
               <span className="text-[10px] leading-none mt-0.5">{sym}</span>
             </div>
             <div className="flex flex-col items-center leading-none">
-              <span className="text-xl sm:text-2xl font-black">{sym}</span>
-              <span className="font-mono text-[11px] font-black mt-0.5">{card.rank}</span>
+              <span
+                className={`font-black ${
+                  pocketOverlay && pocketCardLayout.isCompactCard ? 'text-base' : 'text-xl sm:text-2xl'
+                }`}
+              >
+                {sym}
+              </span>
+              <span className="font-mono text-[10px] font-black mt-0.5">{card.rank}</span>
             </div>
-            <span className="self-end font-mono text-[10px] font-black leading-none opacity-80 rotate-180">
+            <span className="self-end font-mono text-[10px] font-black leading-none rotate-180">
               {sym}
             </span>
           </button>
@@ -1083,16 +1179,11 @@ export function CardControllerDeck({
   };
 
   // =========================================================================
-  // ZONE B — UNO MOBILE CENTER ARENA OVERLAY (360° Direction Ring, Interactive Draw Deck, Active Pile & Wild Wheel)
+  // ZONE B — CENTER ARENA OVERLAY (Turn Direction Pill + Wild Color Wheel)
   // =========================================================================
   const renderUnoCenterTableControls = () => {
-    const centerCard = situation?.centerPileCard;
     const isClockwise = (situation?.direction ?? 1) === 1;
-    const canDrawNow = Boolean(
-      cardState.isMyTurn && (isColorClash || situation?.canDrawDeck)
-    );
     const ringHex = activeColorSpec?.ring ?? playerColorHex ?? '#00C2FF';
-    const penaltyCount = cardState.drawPenalty ?? 0;
 
     return (
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-2">
@@ -1134,145 +1225,6 @@ export function CardControllerDeck({
             </>
           )}
         </div>
-
-        {/* Center Interactive UNO Draw Deck + Active Discard Pile (for Shedding / Bluff / Party Deck games) */}
-        {centerCard && !(isColorClash && cardState.awaitingColorPick) && (
-          <div className="relative flex items-center justify-center my-auto">
-            {/* 360° Glowing Turn Direction Orbit Ring */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -inset-5 sm:-inset-7 rounded-full border-2 border-dashed opacity-55 transition-colors duration-300"
-              style={{
-                borderColor: ringHex,
-                boxShadow: `0 0 36px ${activeColorSpec?.glow ?? 'rgba(0,194,255,0.22)'}`,
-              }}
-            />
-
-            <div className="pointer-events-auto relative z-10 flex items-center gap-4 sm:gap-6 px-4 py-2.5 rounded-3xl bg-transparent">
-              {/* LEFT: Interactive 3D Draw Pile (Tap directly on the table to Draw!) */}
-              {(typeof situation?.deckCount === 'number' || isColorClash) && (
-                <button
-                  type="button"
-                  disabled={!canDrawNow}
-                  onClick={() => onAction({ type: 'draw-or-pass' })}
-                  title={
-                    canDrawNow
-                      ? t('Tap deck to draw a card', '点击牌堆摸牌')
-                      : t('Draw Pile', '摸牌堆')
-                  }
-                  className={`group relative w-[56px] h-[80px] sm:w-[66px] sm:h-[94px] rounded-2xl border-2 flex flex-col items-center justify-between p-1.5 select-none transition-transform ${
-                    canDrawNow
-                      ? 'cursor-pointer border-[#FFB800] ring-2 ring-[#FFB800]/70 shadow-[0_6px_0_#78350F,0_0_20px_rgba(255,184,0,0.5)] hover:-translate-y-1 active:scale-95'
-                      : 'cursor-default border-white/25 opacity-90 shadow-[0_5px_0_#0F172A]'
-                  }`}
-                  style={{
-                    background:
-                      'linear-gradient(145deg, #1E293B 0%, #0F172A 55%, #1E1B4B 100%)',
-                  }}
-                >
-                  {/* 3D Stack Depth Layers */}
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -left-1 -top-1 inset-0 rounded-2xl border border-white/15 bg-[#1E293B]/60 -z-10"
-                  />
-                  <span className="font-mono text-[9px] font-black text-[#94A3B8] uppercase">
-                    {t('DECK', '牌堆')}
-                  </span>
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#FF4D2E]/90 border-2 border-white/80 flex items-center justify-center -rotate-12 shadow">
-                    <span className="font-display text-[10px] font-black text-white tracking-tighter">
-                      UNO
-                    </span>
-                  </div>
-                  <span className="px-1.5 py-0.2 rounded bg-black/60 font-mono text-[10px] font-black text-white tabular-nums">
-                    {typeof situation?.deckCount === 'number' ? situation.deckCount : '∞'}
-                  </span>
-
-                  {canDrawNow && (
-                    <span className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#FFB800] text-[#14120B] font-display text-[9px] font-black whitespace-nowrap shadow-md">
-                      {penaltyCount > 0
-                        ? `${t('TAKE', '罚抽')} +${penaltyCount}`
-                        : t('TAP DRAW', '点击摸牌')}
-                    </span>
-                  )}
-                </button>
-              )}
-
-              {/* RIGHT: Active Discard / Claim Pile Card */}
-              <div className="relative flex flex-col items-center">
-                {centerCard.kind === 'clash' ? (
-                  (() => {
-                    const colSpec =
-                      CLASH_STYLE[centerCard.colorKey ?? 'red'] ?? CLASH_STYLE.red;
-                    const activeSpec =
-                      CLASH_STYLE[centerCard.activeColorKey ?? centerCard.colorKey ?? 'red'] ??
-                      colSpec;
-                    const displayMain =
-                      lang === 'zh'
-                        ? translateGameText(centerCard.mainText, lang)
-                        : centerCard.mainText;
-                    return (
-                      <div
-                        className="relative w-[62px] h-[86px] sm:w-[72px] sm:h-[100px] rounded-2xl p-1.5 flex flex-col items-center justify-between ring-2 ring-white shadow-2xl rotate-[3deg]"
-                        style={{
-                          background:
-                            centerCard.colorKey === 'wild'
-                              ? 'linear-gradient(135deg, #FF4D2E 0%, #FFB800 35%, #10D98B 70%, #00C2FF 100%)'
-                              : activeSpec.bg,
-                          color: activeSpec.text,
-                          boxShadow: `0 6px 0 ${activeSpec.dark}, 0 0 24px ${activeSpec.glow}`,
-                        }}
-                      >
-                        <div
-                          aria-hidden="true"
-                          className="pointer-events-none absolute inset-1.5 rounded-full border border-white/35 bg-white/15 -rotate-[22deg]"
-                        />
-                        <span className="relative z-10 self-start font-mono text-[10px] font-black leading-none">
-                          {displayMain}
-                        </span>
-                        <span className="relative z-10 font-display text-xl sm:text-2xl font-black leading-none drop-shadow">
-                          {displayMain}
-                        </span>
-                        <span className="relative z-10 self-end font-mono text-[10px] font-black leading-none rotate-180">
-                          {displayMain}
-                        </span>
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <div
-                    className="relative min-w-[68px] h-[84px] sm:min-w-[80px] sm:h-[96px] px-2.5 py-1.5 rounded-2xl border-2 border-white/80 flex flex-col items-center justify-between text-center shadow-2xl rotate-[2deg]"
-                    style={{
-                      background: `linear-gradient(150deg, ${
-                        centerCard.accentHex ?? '#FFB800'
-                      } 0%, #111827 100%)`,
-                      color: '#FFFFFF',
-                    }}
-                  >
-                    {centerCard.badgeText && (
-                      <span className="px-1.5 py-0.5 rounded bg-black/55 font-mono text-[9px] font-black uppercase">
-                        {translateGameText(centerCard.badgeText, lang)}
-                      </span>
-                    )}
-                    <span className="font-display text-xl sm:text-2xl font-black leading-tight drop-shadow">
-                      {translateGameText(centerCard.mainText, lang)}
-                    </span>
-                    {centerCard.subText && (
-                      <span className="text-[9px] font-bold text-white/90 truncate max-w-[110px]">
-                        {translateGameText(centerCard.subText, lang)}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {penaltyCount > 0 && (
-                  <span className="absolute -top-2.5 -right-2.5 px-2 py-0.5 rounded-full bg-[#FF3B30] text-white font-mono text-xs font-black ring-2 ring-white shadow-lg animate-bounce">
-                    +{penaltyCount}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* 4-Quadrant UNO Wild Color Wheel Modal directly over the Center Table when choosing Wild Color */}
         {isColorClash && cardState.awaitingColorPick && (
@@ -1438,177 +1390,83 @@ export function CardControllerDeck({
           {renderUnoCenterTableControls()}
         </div>
 
-        {/* ZONE C: Bottom UNO-Style Curved Hand Fan + Corner Thumb Action Dock (Transparent behind cards) */}
-        <div
-          className="relative z-10 w-full shrink-0 flex flex-col justify-end bg-transparent"
-          style={{
-            opacity: Math.max(0.88, Math.min(1, hudOpacity + 0.2)),
-          }}
-        >
-          {/* Live Shot-Clock Progress Line along Top Edge of Hand Dock */}
-          <div className="w-full h-1 bg-transparent overflow-hidden shrink-0">
-            <div
-              className={`h-full transition-all duration-200 ${
+        {/* ZONE C: Bottom All-Visible Solid Hand + Bottom-Right Action Buttons (No green line, no sort/grid/utility buttons, no scroll) */}
+        <div className="relative z-10 w-full shrink-0 flex flex-col justify-end bg-transparent">
+          {/* Compact Turn Badge & Hint Row */}
+          <div className="flex items-center justify-start gap-1.5 px-2.5 pt-1 pb-0.5 shrink-0 pointer-events-none">
+            <span
+              className={`px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-black tabular-nums shrink-0 inline-flex items-center gap-1 ${
                 isDanger
-                  ? 'bg-[#FF3B30]'
+                  ? 'bg-[#FF3B30] text-white animate-pulse shadow-[0_0_12px_rgba(255,59,48,0.7)]'
                   : isTurnActiveNow
-                  ? 'bg-[#10D98B]'
-                  : 'bg-[#00C2FF]/50'
+                  ? 'bg-[#10D98B] text-[#0A1913] shadow-[0_0_10px_rgba(16,217,139,0.45)]'
+                  : 'bg-[#1E2534] text-[#D1D5DB]'
               }`}
-              style={{ width: `${turnProgressPct}%` }}
-            />
+            >
+              {isTurnActiveNow
+                ? isDanger
+                  ? `${t('HURRY!', '快出!')} ${timeSecs}s`
+                  : `${t('YOUR TURN', '你的回合')} · ${timeSecs}s`
+                : `${situation?.activePlayerName ? `${situation.activePlayerName} · ` : ''}${timeSecs}s`}
+            </span>
+
+            {cardState.hand.length === 1 && (
+              <span className="px-2 py-0.5 rounded-full bg-[#FF3B30] text-white font-display text-[10px] font-black tracking-wider animate-pulse shrink-0">
+                UNO!
+              </span>
+            )}
+
+            <span className="text-xs font-bold text-[#F3F4F6] truncate max-w-[65%] drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
+              {hintText}
+            </span>
           </div>
 
-          {/* Thumb Control Bar: Left Status/Timer + Utility Chips + Right Primary/Secondary Action Pills */}
-          <div className="flex items-center justify-between gap-1.5 px-2.5 pt-1.5 pb-0.5 shrink-0 overflow-x-auto arcade-scrollbar">
-            {/* Left Thumb Zone: Turn Badge + Hint + Quick Hand Tools */}
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span
-                className={`px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-black tabular-nums shrink-0 inline-flex items-center gap-1 ${
-                  isDanger
-                    ? 'bg-[#FF3B30] text-white animate-pulse shadow-[0_0_12px_rgba(255,59,48,0.7)]'
-                    : isTurnActiveNow
-                    ? 'bg-[#10D98B] text-[#0A1913] shadow-[0_0_10px_rgba(16,217,139,0.45)]'
-                    : 'bg-[#1E2534] text-[#D1D5DB]'
-                }`}
-              >
-                {isTurnActiveNow
-                  ? isDanger
-                    ? `${t('HURRY!', '快出!')} ${timeSecs}s`
-                    : `${t('YOUR TURN', '你的回合')} · ${timeSecs}s`
-                  : `${situation?.activePlayerName ? `${situation.activePlayerName} · ` : ''}${timeSecs}s`}
-              </span>
-
-              {cardState.hand.length === 1 && (
-                <span className="px-2 py-0.5 rounded-full bg-[#FF3B30] text-white font-display text-[10px] font-black tracking-wider animate-pulse shrink-0">
-                  UNO!
-                </span>
-              )}
-
-              <span className="text-xs font-bold text-[#F3F4F6] truncate max-w-[145px] sm:max-w-[230px]">
-                {hintText}
-              </span>
+          {/* Bottom Row: All Hand Cards Fit Without Scrolling + Draw/Action Buttons at Bottom-Right */}
+          <div className="w-full flex items-end justify-between gap-2 px-2 pb-1.5 pt-1">
+            {/* Fit-All Card Fan Container (Zero horizontal scroll) */}
+            <div
+              ref={pocketHandContainerRef}
+              className="flex-1 min-w-0 flex items-end justify-center overflow-visible pt-4 pb-0.5"
+              style={{ minHeight: `${pocketCardLayout.cardH + 22}px` }}
+            >
+              {renderHandCards()}
             </div>
 
-            {/* Right Thumb Zone: Action Pills + Compact Hand Controls */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              {!(isColorClash && cardState.awaitingColorPick) && renderActionButtons(true)}
-
-              <div className="h-4 w-px bg-white/15 mx-0.5 shrink-0" />
-
-              {onCycleSortMode && (
-                <button
-                  type="button"
-                  onClick={onCycleSortMode}
-                  title={t('Sort Hand', '智能理牌')}
-                  className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                    sortMode !== 'server'
-                      ? 'bg-[#00C2FF]/20 border-[#00C2FF]/60 text-[#00C2FF]'
-                      : 'bg-[#171C28] border-white/12 text-[#D1D5DB] hover:text-white'
-                  }`}
-                >
-                  <ArrowDownUp className="w-3 h-3" />
-                  <span className="hidden sm:inline">
-                    {sortMode === 'playable'
-                      ? t('Playable', '可出')
-                      : sortMode === 'rank'
-                      ? t('Rank', '点数')
-                      : t('Sort', '理牌')}
-                  </span>
-                </button>
-              )}
-
-              {onChangeViewMode && (
-                <button
-                  type="button"
-                  onClick={() => onChangeViewMode(effectiveView === 'fan' ? 'grid' : 'fan')}
-                  title={
-                    effectiveView === 'fan'
-                      ? t('Switch to All-Cards Grid', '展开全部手牌网格')
-                      : t('Switch to UNO Curved Fan', '切回扇形手牌')
-                  }
-                  className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                    effectiveView === 'grid'
-                      ? 'bg-[#FFB800] border-[#FFB800] text-[#14120B]'
-                      : 'bg-[#171C28] border-white/12 text-[#D1D5DB] hover:text-white'
-                  }`}
-                >
-                  <LayoutGrid className="w-3 h-3" />
-                  <span className="hidden sm:inline">
-                    {effectiveView === 'grid' ? t('Fan', '扇形') : t('Grid', '网格')}
-                  </span>
-                </button>
-              )}
-
-              {onTogglePrivacy && (
-                <button
-                  type="button"
-                  onClick={onTogglePrivacy}
-                  title={t('Toggle Privacy Cover', '切换防偷窥盖牌')}
-                  className={`h-7 px-2 rounded-lg border text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                    privacyShield
-                      ? 'bg-[#FFB800]/20 border-[#FFB800] text-[#FFB800]'
-                      : 'bg-[#171C28] border-white/12 text-[#9CA3AF] hover:text-white'
-                  }`}
-                >
-                  {privacyShield ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                </button>
-              )}
-
-              {onToggleHandCollapsed && (
-                <button
-                  type="button"
-                  onClick={onToggleHandCollapsed}
-                  title={t('Minimize hand to inspect full table', '收起手牌查看完整桌面')}
-                  className="h-7 px-2 rounded-lg border bg-[#171C28] border-white/12 text-[10px] font-bold text-[#00C2FF] hover:text-white inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                >
-                  {handCollapsed ? (
-                    <Maximize2 className="w-3 h-3 shrink-0" />
-                  ) : (
-                    <Minimize2 className="w-3 h-3 shrink-0" />
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* UNO-Style Curved Hand Fan or Full Grid */}
-          <div
-            className={
-              effectiveView === 'grid'
-                ? 'h-[154px] sm:h-[188px] w-full flex flex-col'
-                : 'h-[112px] sm:h-[132px] w-full flex flex-col'
-            }
-          >
-            {isMaskActive ? (
-              <div
-                onPointerDown={() => setPeeking(true)}
-                onPointerUp={() => setPeeking(false)}
-                onPointerCancel={() => setPeeking(false)}
-                onPointerLeave={() => setPeeking(false)}
-                onContextMenu={(e) => e.preventDefault()}
-                className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 text-center touch-none select-none cursor-pointer bg-[#121620]/90 hover:bg-[#161B28]"
-              >
-                <EyeOff className="w-5 h-5 text-[#FFB800] mb-0.5" />
-                <div className="font-display font-extrabold text-xs sm:text-sm text-white">
-                  {t('Cards Hidden · Hold Here to Peek', '手牌已遮盖防偷窥 · 按住此处查看')}
-                </div>
-                <div className="text-[11px] text-[#9CA3AF]">
-                  {t(
-                    `${cardState.hand.length} cards in hand — lifts while held`,
-                    `共 ${cardState.hand.length} 张牌 — 松手自动隐藏`
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div
-                className={
-                  effectiveView === 'grid'
-                    ? 'flex-1 min-h-0 w-full overflow-y-auto arcade-scrollbar grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-1.5 px-3 pt-2 pb-1.5 content-start justify-items-center'
-                    : 'flex-1 min-h-0 w-full flex items-end justify-start sm:justify-center overflow-x-auto arcade-scrollbar px-4 pt-5 pb-2'
-                }
-              >
-                {renderHandCards()}
+            {/* Right-Bottom Action Stack (Draw / Pass / Play / Game Actions) */}
+            {!(isColorClash && cardState.awaitingColorPick) && (
+              <div className="shrink-0 relative z-40 flex flex-col-reverse items-stretch justify-end gap-1.5 pb-0.5">
+                {cardState.extraActions && cardState.extraActions.length > 0 ? (
+                  <div
+                    className={
+                      cardState.extraActions.length > 2
+                        ? 'grid grid-cols-2 gap-1.5'
+                        : 'flex flex-col-reverse items-stretch gap-1.5'
+                    }
+                  >
+                    {cardState.extraActions.map((btn, i) => (
+                      <button
+                        key={`${btn.label}_${i}`}
+                        type="button"
+                        disabled={btn.disabled}
+                        onClick={() => onAction(btn.action)}
+                        className="h-9 px-2.5 rounded-xl font-display font-black text-[11px] inline-flex items-center justify-center whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-transform"
+                        style={{
+                          backgroundColor: btn.colorHex,
+                          color: btn.textColor ?? '#FFFFFF',
+                          boxShadow: '0 3px 0 rgba(0,0,0,0.45)',
+                        }}
+                      >
+                        <span className="truncate max-w-[100px]">
+                          {lang === 'zh'
+                            ? translateGameText(btn.labelZh || btn.label, lang)
+                            : btn.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  renderActionButtons(true)
+                )}
               </div>
             )}
           </div>
