@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   Bot,
   ChevronRight,
@@ -486,15 +487,22 @@ export function RuleChatbotFloatingButton({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleOpen}
-        aria-label={t('Open Guide Bot', '打开平台助手')}
-        title={t('Guide Bot', '平台助手')}
-        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full bg-[#0E1624]/95 hover:bg-[#142238] border border-[#00C2FF]/60 text-white shadow-[0_8px_24px_rgba(0,194,255,0.28)] backdrop-blur-md inline-flex items-center justify-center cursor-pointer hover:scale-105 hover:brightness-110 active:scale-95 transition-all"
+      <motion.div
+        initial={{ opacity: 0, scale: 0.72, y: 18 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 360, damping: 22, delay: 0.42 }}
+        className="fixed bottom-4 right-4 z-50"
       >
-        <Bot className="w-5 h-5 text-[#00C2FF]" />
-      </button>
+        <button
+          type="button"
+          onClick={handleOpen}
+          aria-label={t('Open Guide Bot', '打开平台助手')}
+          title={t('Guide Bot', '平台助手')}
+          className="w-12 h-12 rounded-full bg-[#0E1624]/95 hover:bg-[#142238] border border-[#00C2FF]/60 text-white shadow-[0_8px_24px_rgba(0,194,255,0.28)] backdrop-blur-md inline-flex items-center justify-center cursor-pointer hover:scale-105 hover:brightness-110 active:scale-95 transition-all"
+        >
+          <Bot className="w-5 h-5 text-[#00C2FF]" />
+        </button>
+      </motion.div>
 
       <RuleChatbotDrawer
         isOpen={open}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowRight,
   BookOpen,
@@ -52,6 +53,9 @@ interface LandingViewProps {
   onOpenTutorial: () => void;
   onOpenGuideBot: (preferredGameId?: GameId) => void;
 }
+
+const LANDING_EASE = [0.16, 1, 0.3, 1] as const;
+const IN_VIEW_ONCE = { once: true, amount: 0.08 } as const;
 
 export function LandingView({
   onHostRoom,
@@ -619,20 +623,33 @@ export function LandingView({
       style={{ fontFamily: 'system-ui, -apple-system, sans-serif, "PingFang SC", "Microsoft YaHei"' }}
     >
       {/* Part 1: Header */}
-      <header className="w-full border-b border-[#1F2633] bg-[#0B0E14]/85 backdrop-blur-xl sticky top-0 z-40 transition-all">
+      <motion.header
+        initial={{ opacity: 0, y: -16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: LANDING_EASE }}
+        className="w-full border-b border-[#1F2633] bg-[#0B0E14]/85 backdrop-blur-xl sticky top-0 z-40 transition-all"
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-          <a
+          <motion.a
             href="#top"
             onClick={handleSecretBrandTap}
+            initial={{ opacity: 0, x: -14 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.45, delay: 0.06, ease: LANDING_EASE }}
             className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0 flex items-center gap-2.5 select-none"
           >
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#FF4D2E] to-[#00C2FF] flex items-center justify-center text-white shadow-[0_0_15px_rgba(255,77,46,0.3)]">
               <Gamepad2 className="w-4 h-4" />
             </div>
             <span>{t('JoinStick Arcade', 'JoinStick 街机派对')}</span>
-          </a>
+          </motion.a>
 
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <motion.div
+            initial={{ opacity: 0, x: 14 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.45, delay: 0.08, ease: LANDING_EASE }}
+            className="flex items-center gap-2 sm:gap-3 shrink-0"
+          >
             <LanguageToggle compact className="sm:h-9 sm:px-2.5 sm:text-xs" />
             <button
               type="button"
@@ -642,35 +659,60 @@ export function LandingView({
               {!publicAccessOpen && <Lock className="w-3.5 h-3.5 text-white/80" />}
               <span>{t('Host Monitor', '开启大屏房间')}</span>
             </button>
-          </div>
+          </motion.div>
         </div>
-      </header>
+      </motion.header>
 
       <main id="top" className="flex-1 w-full min-w-0">
         {/* Part 1: Hero Section */}
         <section className="relative overflow-hidden max-w-7xl mx-auto px-4 sm:px-6 pt-16 pb-24 sm:pt-24 sm:pb-32 lg:pt-32 lg:pb-36 text-center flex flex-col items-center">
-          <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[350px] bg-gradient-to-r from-[#FF4D2E]/15 via-[#00C2FF]/15 to-[#FF4D2E]/10 blur-[150px] rounded-full pointer-events-none -z-10" />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.78 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.85, ease: LANDING_EASE }}
+            className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[350px] bg-gradient-to-r from-[#FF4D2E]/15 via-[#00C2FF]/15 to-[#FF4D2E]/10 blur-[150px] rounded-full pointer-events-none -z-10"
+          />
 
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#151B26] border border-[#263042] text-xs font-semibold text-[#00C2FF] mb-6 shadow-md">
+          <motion.div
+            initial={{ opacity: 0, y: 14, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, delay: 0.08, ease: LANDING_EASE }}
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#151B26] border border-[#263042] text-xs font-semibold text-[#00C2FF] mb-6 shadow-md"
+          >
             <span className="w-2 h-2 rounded-full bg-[#00C2FF] animate-pulse" />
             <span>{t('Private Couch Party Console', '私密客厅派对主机')}</span>
-          </div>
+          </motion.div>
 
-          <h1 className="font-display text-4xl sm:text-6xl lg:text-[4.25rem] font-extrabold tracking-tight leading-[1.08] text-white max-w-4xl text-balance">
+          <motion.h1
+            initial={{ opacity: 0, y: 22 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.15, ease: LANDING_EASE }}
+            className="font-display text-4xl sm:text-6xl lg:text-[4.25rem] font-extrabold tracking-tight leading-[1.08] text-white max-w-4xl text-balance"
+          >
             {t(
               'One room. Every phone. Instant party arcade.',
               '一间房，全员手机开玩。随时开局的派对街机。'
             )}
-          </h1>
+          </motion.h1>
 
-          <p className="mt-6 text-base sm:text-xl text-[#9CA3AF] leading-relaxed max-w-2xl text-balance">
+          <motion.p
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, delay: 0.23, ease: LANDING_EASE }}
+            className="mt-6 text-base sm:text-xl text-[#9CA3AF] leading-relaxed max-w-2xl text-balance"
+          >
             {t(
               `Host on any TV or laptop—or launch a room directly on your phone in Pocket Mode. Friends scan a QR code to play ${totalGamesCount} arcade, board, and card games with zero downloads.`,
               `支持电脑电视大屏开房，也支持手机掌机模式直接当主机。好友扫码无需下载即刻加入，畅玩 ${totalGamesCount} 款街机、桌游与派对卡牌。`
             )}
-          </p>
+          </motion.p>
 
-          <div className="mt-10 flex items-center justify-center">
+          <motion.div
+            initial={{ opacity: 0, y: 16, scale: 0.94 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.52, delay: 0.31, ease: LANDING_EASE }}
+            className="mt-10 flex items-center justify-center"
+          >
             <button
               type="button"
               onClick={() => setShowPlayModeModal(true)}
@@ -680,10 +722,15 @@ export function LandingView({
               <span>{t('Start Playing', '立即开玩')}</span>
               <ArrowRight className="w-4 h-4 opacity-90" />
             </button>
-          </div>
+          </motion.div>
 
           {/* Quick Controller Connect Box */}
-          <div className="mt-12 max-w-md w-full bg-[#121722]/90 backdrop-blur-xl border border-[#222B3B] rounded-2xl p-5 shadow-2xl">
+          <motion.div
+            initial={{ opacity: 0, y: 22, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.58, delay: 0.39, ease: LANDING_EASE }}
+            className="mt-12 max-w-md w-full bg-[#121722]/90 backdrop-blur-xl border border-[#222B3B] rounded-2xl p-5 shadow-2xl"
+          >
             <div className="flex items-center justify-between text-xs font-medium text-[#9CA3AF] mb-3">
               <span>{t('Quick Controller Connect', '快速连接手柄')}</span>
               <span className="font-mono text-[#00C2FF]">{t('8 MAX PLAYERS', '最多 8 人联机')}</span>
@@ -706,13 +753,19 @@ export function LandingView({
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
-          </div>
+          </motion.div>
         </section>
 
         {/* Part 2: Stats Strip (200 Games / 8 Max Phones / 30Hz Live Sync) */}
         <section ref={statsRef} className="border-y border-[#1A2230] bg-[#10141D]/60 py-12">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
-            <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.5, delay: 0.05, ease: LANDING_EASE }}
+              className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]"
+            >
               <div className="font-display text-4xl sm:text-5xl font-extrabold text-white tracking-tight tabular-nums">
                 {displayGames}
               </div>
@@ -722,9 +775,15 @@ export function LandingView({
               <p className="mt-1 text-xs text-[#9CA3AF]">
                 {t('Arcade, board, and card party games', '街机、桌游与纸牌派对合集')}
               </p>
-            </div>
+            </motion.div>
 
-            <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.5, delay: 0.14, ease: LANDING_EASE }}
+              className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]"
+            >
               <div className="font-display text-4xl sm:text-5xl font-extrabold text-white tracking-tight tabular-nums">
                 {displayPhones}
               </div>
@@ -734,9 +793,15 @@ export function LandingView({
               <p className="mt-1 text-xs text-[#9CA3AF]">
                 {t('Concurrent mobile controllers per room', '每房间支持 8 人同时在线联动')}
               </p>
-            </div>
+            </motion.div>
 
-            <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.5, delay: 0.23, ease: LANDING_EASE }}
+              className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]"
+            >
               <div className="font-display text-4xl sm:text-5xl font-extrabold text-white tracking-tight tabular-nums">
                 {displayHz}Hz
               </div>
@@ -746,13 +811,19 @@ export function LandingView({
               <p className="mt-1 text-xs text-[#9CA3AF]">
                 {t('Sub-30ms touch-to-screen tactile response', '触控反馈丝滑流畅，零卡顿延迟')}
               </p>
-            </div>
+            </motion.div>
           </div>
         </section>
 
         {/* Flagship Product Showcase Section (Clean & Static with Smooth CSS Transitions) */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
-          <div className="text-center max-w-3xl mx-auto mb-16">
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={IN_VIEW_ONCE}
+            transition={{ duration: 0.55, ease: LANDING_EASE }}
+            className="text-center max-w-3xl mx-auto mb-16"
+          >
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#151B26] border border-[#263042] text-xs font-semibold text-[#00C2FF] mb-4 shadow">
               <Zap className="w-3.5 h-3.5 text-[#00C2FF]" />
               <span>{t('Flagship Couch Console Experience', '旗舰级客厅派对主机体验')}</span>
@@ -766,10 +837,16 @@ export function LandingView({
                 `无需任何额外主机硬件。任意浏览器一键开房，手机扫码秒连，${totalGamesCount} 款街机、桌游与纸牌派对游戏随心畅玩。`
               )}
             </p>
-          </div>
+          </motion.div>
 
         {/* Single Element Auto-Flipping Card Showcase */}
-          <div className="relative max-w-xl mx-auto h-[420px] [perspective:1000px]">
+          <motion.div
+            initial={{ opacity: 0, y: 30, scale: 0.94 }}
+            whileInView={{ opacity: 1, y: 0, scale: 1 }}
+            viewport={IN_VIEW_ONCE}
+            transition={{ duration: 0.6, delay: 0.1, ease: LANDING_EASE }}
+            className="relative max-w-xl mx-auto h-[420px] [perspective:1000px]"
+          >
             <div
               className="absolute inset-0 w-full h-full"
               style={{
@@ -838,27 +915,38 @@ export function LandingView({
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         </section>
 
         {/* Game Types Grid Section */}
         <section ref={gameTypesRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-12 border-t border-[#1A2230]">
-          <div className="text-center mb-10">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={IN_VIEW_ONCE}
+            transition={{ duration: 0.5, ease: LANDING_EASE }}
+            className="text-center mb-10"
+          >
             <h3 className="font-display text-2xl sm:text-3xl font-extrabold text-white">
               {t('Every kind of game night. One room.', '百变派对之夜，一个房间畅玩。')}
             </h3>
             <p className="mt-1 text-xs sm:text-sm text-[#9CA3AF]">
               {t(`Computed from ${totalGamesCount} official catalogue titles`, `基于 ${totalGamesCount} 款官方精选游戏精确统计`)}
             </p>
-          </div>
+          </motion.div>
 
           <div className="flex flex-wrap justify-center gap-4">
             {gameTypesData.map((type, idx) => (
-              <a
+              <motion.a
                 key={type.id}
                 href="#games"
                 onClick={() => setPlayerFilter(type.filterMode)}
-                className="group w-[calc(50%-0.5rem)] sm:w-[calc((100%-2rem)/3)] lg:w-[calc((100%-4rem)/5)] p-5 rounded-2xl bg-[#141A26] border border-[#20293B] hover:border-[#FF4D2E] text-center transition-all cursor-pointer shadow-lg"
+                initial={{ opacity: 0, y: 22, scale: 0.94 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                viewport={IN_VIEW_ONCE}
+                transition={{ duration: 0.45, delay: idx * 0.07, ease: LANDING_EASE }}
+                whileHover={{ y: -4, scale: 1.02 }}
+                className="group w-[calc(50%-0.5rem)] sm:w-[calc((100%-2rem)/3)] lg:w-[calc((100%-4rem)/5)] p-5 rounded-2xl bg-[#141A26] border border-[#20293B] hover:border-[#FF4D2E] text-center transition-colors cursor-pointer shadow-lg"
               >
                 <div className="font-display font-extrabold text-2xl text-white group-hover:text-[#FF4D2E] tabular-nums">
                   {displayTypeCounts[idx] ?? type.count}
@@ -869,7 +957,7 @@ export function LandingView({
                 <div className="mt-2 text-xs text-[#00C2FF]">
                   {t('Explore →', '浏览 →')}
                 </div>
-              </a>
+              </motion.a>
             ))}
           </div>
         </section>
@@ -877,7 +965,12 @@ export function LandingView({
         {/* Part 5: Game Library (Existing catalogue unchanged functionally) */}
         <section id="games" className="max-w-7xl mx-auto px-4 sm:px-6 py-16 border-t border-[#1A2230]">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
-            <div>
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.5, ease: LANDING_EASE }}
+            >
               <h2 className="font-display text-3xl font-extrabold text-white">
                 {t(
                   `${GAME_CATALOG.length} Games Built for Instant Couch Play`,
@@ -890,10 +983,16 @@ export function LandingView({
                   `支持按人数筛选、点击卡片看实机演示，或打开「平台助手」秒搜全部 ${totalGamesCount} 款游戏规则。`
                 )}
               </p>
-            </div>
+            </motion.div>
 
             {/* Collapsible Filter */}
-            <div className="flex flex-col gap-2.5 lg:items-end">
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.5, delay: 0.08, ease: LANDING_EASE }}
+              className="flex flex-col gap-2.5 lg:items-end"
+            >
               <button
                 type="button"
                 onClick={() => setFilterOpen((prev) => !prev)}
@@ -948,7 +1047,7 @@ export function LandingView({
                   })}
                 </div>
               )}
-            </div>
+            </motion.div>
           </div>
 
           {filteredGames.length === 0 ? (
@@ -965,7 +1064,12 @@ export function LandingView({
               </button>
             </div>
           ) : (
-            <>
+            <motion.div
+              initial={{ opacity: 0, y: 26 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.55, delay: 0.1, ease: LANDING_EASE }}
+            >
               {/* Horizontal Auto-Scrolling Game Rail (Zero Play Buttons on Cards) */}
               <div
                 ref={setGamesRailNode}
@@ -1069,15 +1173,27 @@ export function LandingView({
                   );
                 })}
               </div>
-            </>
+            </motion.div>
           )}
         </section>
 
         {/* Interactive Tutorial & Guide Bot Section */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 border-t border-[#1A2230]">
-          <div className="rounded-3xl bg-[#141A26] border border-[#243046] overflow-hidden">
+          <motion.div
+            initial={{ opacity: 0, y: 28, scale: 0.98 }}
+            whileInView={{ opacity: 1, y: 0, scale: 1 }}
+            viewport={IN_VIEW_ONCE}
+            transition={{ duration: 0.58, ease: LANDING_EASE }}
+            className="rounded-3xl bg-[#141A26] border border-[#243046] overflow-hidden"
+          >
             <div className="grid grid-cols-1 lg:grid-cols-12 items-stretch">
-              <div className="lg:col-span-6 p-7 sm:p-10 lg:p-12 flex flex-col justify-center">
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={IN_VIEW_ONCE}
+                transition={{ duration: 0.55, delay: 0.08, ease: LANDING_EASE }}
+                className="lg:col-span-6 p-7 sm:p-10 lg:p-12 flex flex-col justify-center"
+              >
                 <div className="text-xs font-semibold uppercase tracking-wider text-[#00C2FF] flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span>{t('Platform Walkthrough', '全平台实景教程')}</span>
                   <span aria-hidden="true" className="text-[#3B4659]">·</span>
@@ -1119,9 +1235,15 @@ export function LandingView({
                     <span>{t('Ask Guide Bot', '问平台助手')}</span>
                   </button>
                 </div>
-              </div>
+              </motion.div>
 
-              <div className="lg:col-span-6 relative min-h-[240px] sm:min-h-[300px] bg-[#090C12] border-t lg:border-t-0 lg:border-l border-[#20293B] flex items-center justify-center p-3 sm:p-4">
+              <motion.div
+                initial={{ opacity: 0, x: 20, scale: 0.96 }}
+                whileInView={{ opacity: 1, x: 0, scale: 1 }}
+                viewport={IN_VIEW_ONCE}
+                transition={{ duration: 0.58, delay: 0.14, ease: LANDING_EASE }}
+                className="lg:col-span-6 relative min-h-[240px] sm:min-h-[300px] bg-[#090C12] border-t lg:border-t-0 lg:border-l border-[#20293B] flex items-center justify-center p-3 sm:p-4"
+              >
                 {tutorialPhotoFailed ? (
                   <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-8 text-center bg-gradient-to-br from-[#161E2E] to-[#0D1119]">
                     <BookOpen className="w-10 h-10 text-[#00C2FF]" />
@@ -1142,25 +1264,49 @@ export function LandingView({
                     className="w-full h-full object-contain rounded-xl border border-[#243046]"
                   />
                 )}
-              </div>
+              </motion.div>
             </div>
-          </div>
+          </motion.div>
         </section>
 
         {/* Final CTA Banner */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16">
-          <div className="rounded-3xl bg-gradient-to-r from-[#151B26] via-[#121722] to-[#151B26] border border-[#2A354A] p-8 sm:p-12 text-center shadow-2xl relative overflow-hidden">
+          <motion.div
+            initial={{ opacity: 0, y: 28, scale: 0.97 }}
+            whileInView={{ opacity: 1, y: 0, scale: 1 }}
+            viewport={IN_VIEW_ONCE}
+            transition={{ duration: 0.58, ease: LANDING_EASE }}
+            className="rounded-3xl bg-gradient-to-r from-[#151B26] via-[#121722] to-[#151B26] border border-[#2A354A] p-8 sm:p-12 text-center shadow-2xl relative overflow-hidden"
+          >
             <div className="absolute inset-0 bg-[radial-gradient(#00C2FF_1px,transparent_1px)] [background-size:16px_16px] opacity-10 pointer-events-none" />
-            <h2 className="font-display text-3xl sm:text-4xl font-extrabold text-white">
+            <motion.h2
+              initial={{ opacity: 0, y: 14 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.45, delay: 0.08, ease: LANDING_EASE }}
+              className="font-display text-3xl sm:text-4xl font-extrabold text-white"
+            >
               {t('Ready for game night?', '准备好开启派对了吗？')}
-            </h2>
-            <p className="mt-3 text-sm sm:text-base text-[#9CA3AF] max-w-xl mx-auto">
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.45, delay: 0.14, ease: LANDING_EASE }}
+              className="mt-3 text-sm sm:text-base text-[#9CA3AF] max-w-xl mx-auto"
+            >
               {t(
                 'Create your private room now and turn your living room into an arcade.',
                 '立即创建私密房间，让你的客厅秒变欢乐街机厅。'
               )}
-            </p>
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+            </motion.p>
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={IN_VIEW_ONCE}
+              transition={{ duration: 0.48, delay: 0.2, ease: LANDING_EASE }}
+              className="mt-8 flex flex-wrap items-center justify-center gap-4"
+            >
               <button
                 type="button"
                 onClick={() => requestHost(undefined, 'host')}
@@ -1178,12 +1324,18 @@ export function LandingView({
                 <Gamepad2 className="w-5 h-5" />
                 {t('Pocket Mode (No Monitor)', '掌机模式（无需大屏）')}
               </button>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         </section>
       </main>
 
-      <footer className="border-t border-[#1A2230] py-8">
+      <motion.footer
+        initial={{ opacity: 0, y: 16 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={IN_VIEW_ONCE}
+        transition={{ duration: 0.45, ease: LANDING_EASE }}
+        className="border-t border-[#1A2230] py-8"
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#9CA3AF]">
           <div className="flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 text-center sm:text-left">
             <span>
@@ -1239,21 +1391,30 @@ export function LandingView({
             </button>
           </div>
         </div>
-      </footer>
+      </motion.footer>
 
       {/* Play Mode Selector Modal (Combined from 3 Hero CTAs) */}
-      {showPlayModeModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="play-mode-title"
-          onClick={() => setShowPlayModeModal(false)}
-          className="fixed inset-0 z-50 bg-[#0B0E14]/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-md w-full rounded-3xl bg-[#151B26] border-2 border-[#2A354A] shadow-2xl p-6 space-y-4"
+      <AnimatePresence>
+        {showPlayModeModal && (
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="play-mode-title"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => setShowPlayModeModal(false)}
+            className="fixed inset-0 z-50 bg-[#0B0E14]/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
           >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              transition={{ duration: 0.22, ease: LANDING_EASE }}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-md w-full rounded-3xl bg-[#151B26] border-2 border-[#2A354A] shadow-2xl p-6 space-y-4"
+            >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 id="play-mode-title" className="font-display text-xl font-extrabold text-white">
@@ -1350,9 +1511,10 @@ export function LandingView({
                 <ArrowRight className="w-4 h-4 text-[#00C2FF] shrink-0" />
               </button>
             </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Server-Verified Master PIN / Disposable Guest Pass Unlock Modal */}
       <HostUnlockModal
