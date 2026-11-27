@@ -16,6 +16,20 @@ export function tCanvas(text: string): string {
   return translateGameText(text, activeCanvasLang);
 }
 
+let hiddenTablePlayerId: string | null = null;
+let hiddenTablePlayerName: string | null = null;
+
+export function setHiddenTablePlayer(id: string | null, name?: string | null): void {
+  hiddenTablePlayerId = id;
+  hiddenTablePlayerName = name ?? null;
+}
+
+export function isTablePlayerHidden(id?: string | null, name?: string | null): boolean {
+  if (hiddenTablePlayerId && id) return hiddenTablePlayerId === id;
+  if (hiddenTablePlayerName && name) return hiddenTablePlayerName === name;
+  return false;
+}
+
 export interface DrawnNameplateBounds {
   rx: number;
   ry: number;

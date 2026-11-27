@@ -16,7 +16,7 @@ import {
   type StepStompSnapshot,
   type TenPairShowdownSnapshot,
 } from '../shared/types';
-import { drawBoardBanner, drawHudChip, drawNameplate, drawPopupTexts, tCanvas } from './canvasHelpers';
+import { drawBoardBanner, drawHudChip, drawNameplate, drawPopupTexts, isTablePlayerHidden, tCanvas } from './canvasHelpers';
 import {
   drawArenaSlab,
   drawCharacterPod3D,
@@ -1257,6 +1257,7 @@ export function renderBigTwoRoyale(ctx: CanvasRenderingContext2D, snap: BigTwoRo
   const n = snap.players.length;
   for (let i = 0; i < n; i++) {
     const p = snap.players[i];
+    if (isTablePlayerHidden(p.id)) continue;
     const seat = getCardSeatPosition(i, n);
     const isActive = p.id === snap.activePlayerId;
 
@@ -1373,17 +1374,19 @@ export function renderLucky21(ctx: CanvasRenderingContext2D, snap: Lucky21Snapsh
     }
 
     const deltaStr = p.lastDelta > 0 ? ` (+${p.lastDelta})` : p.lastDelta < 0 ? ` (${p.lastDelta})` : '';
-    drawSeatPill(
-      ctx,
-      seat.x,
-      seat.y,
-      p.name,
-      p.colorHex,
-      `${p.chips} CHIPS${!p.isBanker && p.bet > 0 ? ` · BET ${p.bet}` : ''}${deltaStr}`,
-      isActive,
-      p.isBanker,
-      badge
-    );
+    if (!isTablePlayerHidden(p.id)) {
+      drawSeatPill(
+        ctx,
+        seat.x,
+        seat.y,
+        p.name,
+        p.colorHex,
+        `${p.chips} CHIPS${!p.isBanker && p.bet > 0 ? ` · BET ${p.bet}` : ''}${deltaStr}`,
+        isActive,
+        p.isBanker,
+        badge
+      );
+    }
   }
 
   drawCardFx(ctx, snap.flyingCards, snap.shockwaves);
@@ -1472,17 +1475,19 @@ export function renderTenPairShowdown(
     }
 
     const deltaStr = p.lastDelta > 0 ? ` (+${p.lastDelta})` : p.lastDelta < 0 ? ` (${p.lastDelta})` : '';
-    drawSeatPill(
-      ctx,
-      seat.x,
-      seat.y,
-      p.name,
-      p.colorHex,
-      `${p.chips} CHIPS${deltaStr}`,
-      snap.phase === 'arrange' && !p.lockedIn,
-      p.isBanker,
-      badge
-    );
+    if (!isTablePlayerHidden(p.id)) {
+      drawSeatPill(
+        ctx,
+        seat.x,
+        seat.y,
+        p.name,
+        p.colorHex,
+        `${p.chips} CHIPS${deltaStr}`,
+        snap.phase === 'arrange' && !p.lockedIn,
+        p.isBanker,
+        badge
+      );
+    }
   }
 
   drawCardFx(ctx, snap.flyingCards, snap.shockwaves);

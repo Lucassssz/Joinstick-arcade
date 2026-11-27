@@ -41,6 +41,7 @@ import {
   type TeamStanding,
 } from '../src/shared/party.ts';
 import {
+  BOARD_GAME_IDS,
   CARD_GAME_IDS,
   filterGamesByPlayerMode,
   GAME_CATALOG,
@@ -2441,8 +2442,15 @@ export class RoomManager {
   }
 
   private spinRoomMutator(room: RoomRecord): void {
-    const pool = CHAOS_WHEEL_MUTATORS.filter((m) => m.id !== room.activeMutator);
-    const list = pool.length > 0 ? pool : CHAOS_WHEEL_MUTATORS;
+    const isCard = CARD_GAME_IDS.has(room.selectedGameId);
+    const isBoard = BOARD_GAME_IDS.has(room.selectedGameId);
+    const eligible = CHAOS_WHEEL_MUTATORS.filter((m) => {
+      if ((isCard || isBoard) && m.id === 'early-frenzy') return false;
+      if (isCard && (m.invertControls || m.id === 'turbo')) return false;
+      return true;
+    });
+    const pool = eligible.filter((m) => m.id !== room.activeMutator);
+    const list = pool.length > 0 ? pool : eligible;
     const picked = list[Math.floor(Math.random() * list.length)];
     room.activeMutator = picked.id;
     room.mutatorSpinSeq += 1;
@@ -3147,6 +3155,7 @@ export class RoomManager {
     elapsedSec: number,
     earlyFrenzy: boolean
   ): boolean {
+    if (CARD_GAME_IDS.has(snap.gameId) || BOARD_GAME_IDS.has(snap.gameId)) return false;
     if (elapsedSec < 5) return false;
     switch (snap.gameId) {
       case 'astro-blaster':
@@ -3218,24 +3227,6 @@ export class RoomManager {
           Math.max(snap.scoreLeft, snap.scoreRight) >= Math.max(1, snap.targetGoals - 1) ||
           elapsedSec >= (earlyFrenzy ? 15 : 32)
         );
-      case 'rich-street':
-        return earlyFrenzy
-          ? snap.round >= Math.max(2, Math.ceil(snap.totalRounds * 0.5))
-          : snap.round >= Math.max(2, snap.totalRounds - 1);
-      case 'jungle-ladders':
-        return snap.players.some(
-          (p) => p.tile >= snap.targetTile * (earlyFrenzy ? 0.5 : 0.72)
-        );
-      case 'color-clash':
-        return (
-          snap.players.some((p) => p.cardCount <= 2) ||
-          snap.turnCount >= (earlyFrenzy ? 7 : 14)
-        );
-      case 'liars-deck':
-        return (
-          snap.players.some((p) => p.cardCount <= 2) ||
-          snap.round >= (earlyFrenzy ? 2 : 3)
-        );
       case 'volley-smash':
         return (
           Math.max(snap.scoreRed, snap.scoreBlue) >=
@@ -3243,32 +3234,6 @@ export class RoomManager {
         );
       case 'lava-hopper':
         return snap.timeLeft <= snap.totalTime * (earlyFrenzy ? 0.55 : 0.35);
-      case 'ludo-royale':
-      case 'star-party-board':
-      case 'naval-salvo':
-      case 'carrom-arena':
-      case 'dungeon-crawl-board':
-        return snap.round >= Math.max(2, Math.floor(snap.totalRounds * (earlyFrenzy ? 0.5 : 0.72)));
-      case 'reversi-clash':
-      case 'neon-checkers':
-        return snap.turnCount >= Math.max(4, Math.floor(snap.maxTurns * (earlyFrenzy ? 0.5 : 0.7)));
-      case 'four-in-a-row':
-        return snap.players.some((p) => p.connects >= Math.max(1, snap.targetConnects - 1));
-      case 'boom-kittens':
-        return snap.deckCount <= (earlyFrenzy ? 22 : 14) || snap.round >= (earlyFrenzy ? 6 : 10);
-      case 'property-deal':
-        return (
-          snap.players.some((p) => p.setsCompleted >= Math.max(1, snap.targetSets - 1)) ||
-          snap.round >= (earlyFrenzy ? 4 : 7)
-        );
-      case 'flip-seven':
-        return snap.round >= (earlyFrenzy ? 3 : 4) || snap.players.some((p) => p.totalScore >= snap.targetScore * 0.68);
-      case 'royal-bluff':
-        return snap.round >= (earlyFrenzy ? 5 : 8) || snap.players.filter((p) => p.alive).length <= 2;
-      case 'dark-flip-clash':
-        return snap.players.some((p) => p.cardCount <= 2) || snap.turnCount >= (earlyFrenzy ? 7 : 13);
-      case 'sushi-draft':
-        return snap.round >= Math.max(2, snap.totalRounds - (earlyFrenzy ? 1 : 0));
       default: {
         const sAny = snap as unknown as {
           timeLeft?: number;
@@ -3636,6 +3601,12 @@ export class RoomManager {
         room.selectedGameId === 'picross-nonogram' ||
         room.selectedGameId === 'speed-sudoku-duel' ||
         room.selectedGameId === 'xiangqi-river-clash' ||
+        room.selectedGameId === 'tile-triple' ||
+        room.selectedGameId === 'tile-2048-blitz' ||
+        room.selectedGameId === 'mine-sweep-duel' ||
+        room.selectedGameId === 'geo-pin-rush' ||
+        room.selectedGameId === 'wavelength-sync' ||
+        room.selectedGameId === 'tangram-silhouette' ||
         CARD_GAME_IDS.has(room.selectedGameId);
       const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);

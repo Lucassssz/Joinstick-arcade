@@ -3,6 +3,7 @@ import {
   drawHudChip,
   drawPopupTexts,
   getActiveCanvasLang,
+  isTablePlayerHidden,
   recordDrawnNameplate,
   tCanvas,
 } from './canvasHelpers';
@@ -23,6 +24,7 @@ export {
   drawSphere3D,
   drawStudioBackdrop,
   getActiveCanvasLang,
+  isTablePlayerHidden,
   shadeHex,
   tCanvas,
 };

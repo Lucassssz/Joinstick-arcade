@@ -14,6 +14,7 @@ import {
   drawNameplate,
   drawPopupTexts,
   setActiveCanvasLang,
+  setHiddenTablePlayer,
   tCanvas,
 } from './canvasHelpers';
 import {
@@ -1054,10 +1055,17 @@ export function renderGameSnapshot(
   rawSnap: GameSnapshot,
   fx: RenderFxState,
   lang: Language = 'en',
-  competitive?: CompetitiveSnapshot | null
+  competitive?: CompetitiveSnapshot | null,
+  hidePlayerId: string | null = null
 ): void {
   if (!rawSnap || typeof rawSnap.gameId !== 'string') return;
   setActiveCanvasLang(lang);
+  const hiddenPlayerName = hidePlayerId
+    ? ((rawSnap as unknown as { players?: Array<{ id?: string; name?: string }> }).players?.find(
+        (p) => p.id === hidePlayerId
+      )?.name ?? null)
+    : null;
+  setHiddenTablePlayer(hidePlayerId, hiddenPlayerName);
   const snap = prepareArcadeFrame(rawSnap, fx.arcade);
   setActiveArcadeMotion(fx.arcade);
   ctx.save();
@@ -1182,6 +1190,7 @@ export function renderGameSnapshot(
     renderCompetitiveOverlay(ctx, competitive, lang);
     drawArcadeFrontFX(ctx, fx.arcade);
   } finally {
+    setHiddenTablePlayer(null, null);
     setActiveArcadeMotion(null);
     ctx.restore();
   }

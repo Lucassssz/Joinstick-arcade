@@ -34,6 +34,7 @@ import {
   Zap,
   ZoomIn,
 } from 'lucide-react';
+import { GAME_CATALOG } from '../shared/games';
 import { GameId } from '../shared/types';
 import { LanguageToggle, useLanguage } from '../lib/i18n';
 import {
@@ -58,6 +59,7 @@ interface TutorialViewProps {
   onHostRoom: (preferredGameId?: GameId) => void;
   onStartPocket: (preferredGameId?: GameId) => void;
   onJoinController: (initialCode?: string) => void;
+  onOpenGuideBot: () => void;
 }
 
 type ButtonScreenCategory =
@@ -223,9 +225,11 @@ export function TutorialView({
   onHostRoom,
   onStartPocket,
   onJoinController,
+  onOpenGuideBot,
 }: TutorialViewProps) {
   const { lang, t } = useLanguage();
   const publicAccessOpen = usePublicAccessOpen();
+  const totalGamesCount = GAME_CATALOG.length;
 
   // Host launch unlock state
   const [showPinModal, setShowPinModal] = useState(false);
@@ -424,9 +428,9 @@ export function TutorialView({
             labelEn: 'Click + Add Robot to fill up to 8 seats instantly',
             labelZh: '点击蓝色「+ 添加机器人」按钮快速补位（上限 8 人）',
             detailEn:
-              'Each click adds an AI robot (Bot Alpha, Bot Beta, Bot Pixel…) with its own avatar and color. Bots are Always Ready and work in all 200 games.',
+              `Each click adds an AI robot (Bot Alpha, Bot Beta, Bot Pixel…) with its own avatar and color. Bots are Always Ready and work in all ${totalGamesCount} games.`,
             detailZh:
-              '每点一次加入一名自带头像与配色的 AI 机器人，状态默认「随时就绪」，全面支持 200 款街机、桌游与纸牌。',
+              `每点一次加入一名自带头像与配色的 AI 机器人，状态默认「随时就绪」，全面支持 ${totalGamesCount} 款街机、桌游与纸牌。`,
           },
           {
             labelEn: 'Select AI Difficulty: Chill, Arcade, or Spicy',
@@ -446,16 +450,16 @@ export function TutorialView({
           },
         ],
         tipEn:
-          'When everyone (and your bots) are seated, click the orange Enter Game Room → button to open the 200-game lobby.',
+          `When everyone (and your bots) are seated, click the orange Enter Game Room → button to open the ${totalGamesCount}-game lobby.`,
         tipZh:
-          '人数与机器人就绪后，点击橙色「进入游戏大厅 →」按钮即可带着全员进入 200 款游戏精选舞台。',
+          `人数与机器人就绪后，点击橙色「进入游戏大厅 →」按钮即可带着全员进入 ${totalGamesCount} 款游戏精选舞台。`,
       },
       {
         num: '03',
         tabEn: 'Game Lobby',
         tabZh: '游戏大厅',
-        titleEn: 'Browse 200 Games, Chaos Wheel & 5-Game Cup',
-        titleZh: '200 款游戏秒切、混沌转盘与 5 局杯赛',
+        titleEn: `Browse ${totalGamesCount} Games, Chaos Wheel & 5-Game Cup`,
+        titleZh: `${totalGamesCount} 款游戏秒切、混沌转盘与 5 局杯赛`,
         subtitleEn: 'Every lobby button visible on one clean TV screen—with live animated game previews.',
         subtitleZh: '真实 JoinStick 游戏大厅界面：分类筛选、即时搜索、实机预览、准备状态与底部工具栏一览无余。',
         shots: [
@@ -466,13 +470,13 @@ export function TutorialView({
             src: shotGameLobby,
             altEn: 'JoinStick Game Room Lobby UI showing Bumper Brawl live preview, category tabs, Ready Check panel, Open Bumper Brawl, 5-Game Cup, Chaos Wheel, and Add Robot',
             altZh: 'JoinStick 游戏大厅实机截图，显示游戏分类、实机演示卡片、准备状态栏、开始游戏、5 局杯赛与混沌转盘',
-            captionEn: 'Exact Platform UI · JoinStick Game Room (200 Games, Ready Check, 5-Game Cup & Chaos Wheel)',
-            captionZh: '实机界面截图 · JoinStick 游戏大厅（200 款游戏、准备确认、5 局杯赛与混沌转盘）',
+            captionEn: `Exact Platform UI · JoinStick Game Room (${totalGamesCount} Games, Ready Check, 5-Game Cup & Chaos Wheel)`,
+            captionZh: `实机界面截图 · JoinStick 游戏大厅（${totalGamesCount} 款游戏、准备确认、5 局杯赛与混沌转盘）`,
           },
         ],
         steps: [
           {
-            labelEn: 'Filter by All (200), MY Classics, Arcade, Board, Cards, or Quick Search',
+            labelEn: `Filter by All (${totalGamesCount}), MY Classics, Arcade, Board, Cards, or Quick Search`,
             labelZh: '顶部按全部分类、马新经典、街机、桌游、卡牌筛选或关键词搜索',
             detailEn:
               'The center spotlight plays a live 5-second gameplay clip, shows the matched phone pad type (e.g. Pad 1 · Pro Stick), and lists Button A / Button B actions.',
@@ -602,30 +606,30 @@ export function TutorialView({
             captionZh: '手机实机截图 · 赛前规则与操控布局切换（点击「我准备好了！」立即通知房主）',
           },
         ],
-        steps: [
+            steps: [
           {
             labelEn: 'Switch between 1·Stick, 2·Arrows, and 3·Swipe anytime',
             labelZh: '顶部一键秒切「1·摇杆」「2·方向键」「3·滑动」三种手感',
             detailEn:
-              'Every player independently chooses their favorite movement layout right on the top bar—plus tap the sliders icon to adjust size, opacity, and haptics, or toggle Turbo.',
+              'Every player independently chooses their favorite movement layout—or gets a full private Card Pad in card games with a compact status chip on the left (tap to peek details).',
             detailZh:
-              '每位玩家可在手机顶部随时切换最顺手的移动方式，点击调节图标还能微调大小、透明度与震动，甚至开启 Turbo 连发。',
+              '每位玩家可在顶部自由切换移动方式；玩纸牌游戏时会自动变为私密「手牌操控台」，左侧紧凑状态芯片点开即可查看详情。',
           },
           {
             labelEn: 'In the Lobby, Host’s phone becomes a Couch TV Remote',
             labelZh: '进入大厅时，房主手机自动变身「客厅电视遥控器」',
             detailEn:
-              'Use the big D-Pad + OK button to browse all 200 games on the TV, tap Kick / Host (gold button) to transfer remote control or remove inactive players, and fire bottom emojis.',
+              `Use the big D-Pad + OK button to browse all ${totalGamesCount} games on the TV, tap Kick / Host (gold button) to transfer remote control or remove inactive players, and fire bottom emojis.`,
             detailZh:
-              '用大号十字方向键与橙色 OK 键隔空翻选 200 款游戏；金色「Kick / Host」键可移交房主或管理成员，左下角随时向大屏发表情。',
+              `用大号十字方向键与橙色 OK 键隔空翻选 ${totalGamesCount} 款游戏；金色「Kick / Host」键可移交房主或管理成员，左下角随时向大屏发表情。`,
           },
           {
-            labelEn: 'Tap I’m Ready! on the Pre-Match screen (or Pause mid-match)',
-            labelZh: '赛前轻点「我准备好了！」，局内也可直接点暂停或发表情',
+            labelEn: 'Tap I’m Ready! on Pre-Match (or open Guide Bot anytime)',
+            labelZh: '赛前轻点「我准备好了！」，局内随时打开「平台助手」',
             detailEn:
-              'Each game automatically labels your A & B buttons (e.g. DASH / PULSE) so you never have to memorize abstract controls.',
+              'Each game labels your A & B buttons automatically. Need a quick rule refresher or help mid-match? Tap Guide Bot inside the top menu.',
             detailZh:
-              '每款游戏都会自动给 A / B 键标上具体技能名称（如 DASH 冲刺 / PULSE 冲击波），上手零记忆负担。',
+              '每款游戏都会自动给 A / B 键标上技能名称。中途忘了规则或操作？点顶部菜单即可打开「平台助手」秒查。',
           },
         ],
         tipEn:
@@ -640,7 +644,7 @@ export function TutorialView({
         titleEn: 'Pocket Mode — Host & Play Directly on Your Phone',
         titleZh: '掌机模式：无需电视电脑，手机直接开房畅玩',
         subtitleEn: 'Actual Pocket Mode smartphone interface hosting a full multiplayer room anywhere.',
-        subtitleZh: '真实手机掌机模式截图：自带 200 款游戏浏览、筛选、混沌转盘、杯赛与回合设置，随时随地开黑。',
+        subtitleZh: `真实手机掌机模式截图：自带 ${totalGamesCount} 款游戏浏览、筛选、混沌转盘、杯赛与回合设置，随时随地开黑。`,
         shots: [
           {
             id: 'pocket-mode',
@@ -649,8 +653,8 @@ export function TutorialView({
             src: shotPocketMode,
             altEn: 'Actual JoinStick Pocket Mode smartphone UI showing landscape game carousel, Search, Filter, Random, Chaos, Cup, Round options, Tap Ready, and Start button',
             altZh: 'JoinStick 掌机模式手机实机截图：横屏游戏卡片、搜索、筛选、随机、混沌、杯赛、回合档位与准备开始按钮',
-            captionEn: 'Exact Phone UI · Pocket Mode (Full 200-Game Host Console Inside Your Smartphone)',
-            captionZh: '手机实机截图 · 掌机模式（无需大屏，手机横屏即刻化身完整 200 款游戏主机）',
+            captionEn: `Exact Phone UI · Pocket Mode (Full ${totalGamesCount}-Game Host Console Inside Your Smartphone)`,
+            captionZh: `手机实机截图 · 掌机模式（无需大屏，手机横屏即刻化身完整 ${totalGamesCount} 款游戏主机）`,
           },
         ],
         steps: [
@@ -658,7 +662,7 @@ export function TutorialView({
             labelEn: 'Open Start Playing → Pocket Mode (No Monitor)',
             labelZh: '在首页点击「立即开玩」→「掌机模式（无需大屏）」',
             detailEn:
-              'Pick your callsign, avatar, and controller color, then tap Create Pocket Room. Your phone generates a real room code (e.g. E9WA) right in the top bar.',
+              'Pick your callsign, avatar, and controller color, then tap Create Pocket Room. Your phone generates a real room code right in the top bar.',
             detailZh:
               '选好昵称、头像与颜色并点击「创建掌机房间」，手机顶部立即生成 4 位房间码，直接进入横屏掌机大厅。',
           },
@@ -666,26 +670,26 @@ export function TutorialView({
             labelEn: 'All Host Tools Built In: Search, Filter, Random, Chaos & Cup',
             labelZh: '完整保留搜索、筛选、随机、混沌转盘、杯赛与回合档位',
             detailEn:
-              'Swipe through game cards, choose 3 Rounds / 5 Rounds / 1 Quick Round at the bottom, and tap Share to invite nearby friends onto their own phones.',
+              `Swipe through all ${totalGamesCount} games, choose rounds at the bottom, and tap Share to invite nearby friends onto their own phones.`,
             detailZh:
-              '横滑挑选全部 200 款游戏，底部一键切回合数，点顶部「分享」即可让身旁朋友用各自手机连入同玩。',
+              `横滑挑选全部 ${totalGamesCount} 款游戏，底部一键切回合数，点顶部「分享」即可让身旁朋友用各自手机连入同玩。`,
           },
           {
-            labelEn: 'Tap Ready → ▶ Start to play with translucent controls over the arena',
-            labelZh: '点击「准备」→「▶ 开始」，半透明手柄直接叠加在实时赛场上',
+            labelEn: 'Clean Compact Hand & Controls Over the Live Arena',
+            labelZh: '手牌、紧凑状态芯片与半透明按键优雅叠加在赛场画面上',
             detailEn:
-              'No TV, laptop, or projector needed—ideal for cafés, road trips, dorms, or quick solo robot matches.',
+              'Card games show your full hand across the bottom with a mini Personal Status Chip on the left (tap to peek details) and Draw/action buttons on the right.',
             detailZh:
-              '不需要电视、电脑或投影仪，咖啡厅小聚、旅途候车或宿舍开黑掏出手机就能立即开打。',
+              '在卡牌游戏中，底部完整摊开你的手牌、左侧配有紧凑个人状态芯片（点击展开详情），右侧直达摸牌与出牌操作。',
           },
         ],
         tipEn:
-          'Rotate your phone horizontally in Pocket Mode—the live arena renders fullscreen behind your translucent thumbstick and buttons.',
+          'Rotate your phone horizontally in Pocket Mode—the live arena renders fullscreen behind your translucent thumbstick or card hand.',
         tipZh:
-          '掌机模式下建议横屏握持，赛场画面会铺满整个屏幕，半透明按键不遮挡视野。',
+          '掌机模式下建议横屏握持，赛场画面会铺满整个屏幕，半透明按键或手牌区清晰不遮挡视野。',
       },
     ],
-    []
+    [totalGamesCount]
   );
 
   const buttonDirectory = useMemo<ButtonGuideItem[]>(
@@ -724,20 +728,36 @@ export function TutorialView({
         icon: Smartphone,
       },
       {
-        id: 'surprise-me',
+        id: 'player-filter-preview',
         screen: 'home',
-        nameEn: 'Surprise Me & Game Preview',
-        nameZh: '随机挑一款与游戏预览',
+        nameEn: 'Player Filter & Live Game Preview',
+        nameZh: '按人数筛选与 5 秒实机预览',
         locationEn: 'Homepage Game Library',
         locationZh: '首页游戏库区域',
         descEn:
-          'Filter all 200 titles by player count, search by keyword, or click Surprise Me to open a random game’s live 5s video demo and animated rules.',
+          `Filter all ${totalGamesCount} games by player mode or genre, scroll the showcase rail, and tap any game card to view its 5s video demo, animated rules, and Ask Guide Bot button.`,
         descZh:
-          '支持按人数筛选或关键词搜索 200 款游戏；点击「随机挑一款」立刻展示随机游戏的 5 秒实机演示与动态规则。',
-        tipEn: 'You can launch Host Room or Pocket Mode directly for that game from its preview modal.',
-        tipZh: '在预览弹窗右下角可直接指定该游戏启动大屏房间或掌机模式。',
+          `按人数或类型筛选全部 ${totalGamesCount} 款游戏，滑动精选展示列并点击任意卡片查看 5 秒实机演示、动态规则及「问平台助手」入口。`,
+        tipEn: 'You can launch Host Room, Pocket Mode, or Guide Bot directly from any game preview modal.',
+        tipZh: '在预览弹窗底部可直接针对该游戏启动大屏开玩、掌机模式或打开平台助手。',
         accent: '#10D98B',
         icon: Dices,
+      },
+      {
+        id: 'guide-bot-home',
+        screen: 'home',
+        nameEn: 'Guide Bot (Offline Assistant)',
+        nameZh: '平台助手（离线零流量）',
+        locationEn: 'Bottom-Right Button · Tutorial · Game Previews',
+        locationZh: '右下角悬浮按钮 / 教程区 / 游戏预览弹窗',
+        descEn:
+          `Opens the instant 100% offline assistant with clickable preset menus for tutorials, phone pads, party modes, troubleshooting, and rules for all ${totalGamesCount} games.`,
+        descZh:
+          `随时呼出 100% 离线秒答助手，通过点击预设分类与快捷卡片即可查平台教程、手柄用法、排错技巧与全部 ${totalGamesCount} 款游戏规则。`,
+        tipEn: 'Zero API calls—works instantly even mid-match inside Host Lobby, Pocket Lobby, and Phone Menu.',
+        tipZh: '零流量消耗，在房主大厅、掌机大厅与手机菜单内同样随时可用。',
+        accent: '#00C2FF',
+        icon: Bot,
       },
       // Room Setup
       {
@@ -1050,21 +1070,21 @@ export function TutorialView({
       {
         id: 'in-game-help',
         screen: 'phone',
-        nameEn: 'I’m Ready! & Auto-Matched Pad',
-        nameZh: '「我准备好了！」与智能适配提示',
-        locationEn: 'Pre-Match Phone Rules Screen',
-        locationZh: '每局赛前手机端规则页面',
+        nameEn: 'I’m Ready!, Card Pad & Guide Bot',
+        nameZh: '「我准备好了！」、手牌台与平台助手',
+        locationEn: 'Pre-Match Screen & Phone Top Menu',
+        locationZh: '赛前规则页与手机顶部菜单',
         descEn:
-          'Shows the current game’s 4 rules, Button A/B labels, and auto-matched pad type before the countdown starts. Tap I’m Ready! when set.',
+          `Shows the current game’s 4 rules, Button A/B labels, and auto-matched pad type (including Card Pad with a mini left-side Personal Status Chip). Open Guide Bot anytime from the top menu.`,
         descZh:
-          '开赛前在手机同步展示 4 条核心规则、A/B 键技能名称与自动匹配的手柄形态，看完点击大按钮即可准备就绪。',
-        tipEn: 'Even first-time guests master any of the 200 games in seconds.',
-        tipZh: '就算第一次玩的新朋友，也能在几秒内看懂 200 款游戏任意玩法。',
+          `开赛前同步展示 4 条核心规则、A/B 键功能与适配手柄（含带左侧紧凑状态芯片的手牌操控台）；局内随时可点顶部菜单打开「平台助手」。`,
+        tipEn: `Even first-time guests master any of the ${totalGamesCount} games in seconds.`,
+        tipZh: `就算第一次玩的新朋友，也能在几秒内看懂 ${totalGamesCount} 款游戏任意玩法。`,
         accent: '#10D98B',
         icon: HelpCircle,
       },
     ],
-    []
+    [totalGamesCount]
   );
 
   const filteredButtons = useMemo(() => {
@@ -1110,8 +1130,8 @@ export function TutorialView({
     };
     setSandboxBots((prev) => [...prev, nextBot]);
     setSandboxLog({
-      en: `Added ${nextBot.name}! Real AI bots automatically adapt to all 200 games and stay Always Ready.`,
-      zh: `已添加机器人 ${nextBot.name}！真实房间中的 AI 会自动适配全部 200 款游戏并默认就绪。`,
+      en: `Added ${nextBot.name}! Real AI bots automatically adapt to all ${totalGamesCount} games and stay Always Ready.`,
+      zh: `已添加机器人 ${nextBot.name}！真实房间中的 AI 会自动适配全部 ${totalGamesCount} 款游戏并默认就绪。`,
     });
   };
 
@@ -1393,8 +1413,8 @@ export function TutorialView({
 
               <p className="mt-5 text-base sm:text-lg text-[#9CA3AF] leading-relaxed">
                 {t(
-                  'Explore actual screenshots of every JoinStick Arcade screen—from Room Setup and AI Robots to the 200-Game Lobby, Phone Remote, Gamepad, and Pocket Mode—plus click real buttons live in our sandbox.',
-                  '全套真实平台界面高清截图，带你逐一认识创建房间、添加 AI 机器人、200 款游戏大厅、手机遥控器、横屏手柄与掌机模式的每一个按钮，还能在互动体验区亲手试按。'
+                  `Explore actual screenshots of every JoinStick Arcade screen—from Room Setup and AI Robots to the ${totalGamesCount}-Game Lobby, Phone Remote, Gamepad, and Pocket Mode—plus click real buttons live in our sandbox or ask Guide Bot anytime.`,
+                  `全套真实平台界面高清截图，带你逐一认识创建房间、添加 AI 机器人、${totalGamesCount} 款游戏大厅、手机遥控器、横屏手柄与掌机模式的每一个按钮，还能在互动体验区亲手试按或随时咨询「平台助手」。`
                 )}
               </p>
 
@@ -1413,6 +1433,14 @@ export function TutorialView({
                   <Gamepad2 className="w-4 h-4 text-[#00C2FF]" />
                   <span>{t('Try Button Sandbox', '亲手体验按钮')}</span>
                 </a>
+                <button
+                  type="button"
+                  onClick={onOpenGuideBot}
+                  className="inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-[#142033] hover:bg-[#1C2C46] border border-[#00C2FF]/45 text-[#00C2FF] font-semibold text-sm whitespace-nowrap cursor-pointer transition-colors"
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>{t('Ask Guide Bot', '问平台助手')}</span>
+                </button>
               </div>
 
               <div className="mt-8 pt-6 border-t border-[#1F2633] grid grid-cols-3 gap-4">
@@ -1434,7 +1462,7 @@ export function TutorialView({
                 </div>
                 <div>
                   <div className="font-display text-xl sm:text-2xl font-extrabold text-[#10D98B] tabular-nums">
-                    200
+                    {totalGamesCount}
                   </div>
                   <div className="text-xs text-[#9CA3AF] mt-0.5">
                     {t('Built-In Games', '内置派对游戏')}
@@ -1447,8 +1475,8 @@ export function TutorialView({
               <ScreenshotFrame
                 src={shotGameLobby}
                 alt={t(
-                  'Actual screenshot of the JoinStick Game Room lobby showing 200 games, Ready Check, 5-Game Cup, Chaos Wheel, and live preview',
-                  'JoinStick 游戏大厅真实截图，展示 200 款游戏列表、准备确认、5 局杯赛、混沌转盘与实机演示'
+                  `Actual screenshot of the JoinStick Game Room lobby showing ${totalGamesCount} games, Ready Check, 5-Game Cup, Chaos Wheel, and live preview`,
+                  `JoinStick 游戏大厅真实截图，展示 ${totalGamesCount} 款游戏列表、准备确认、5 局杯赛、混沌转盘与实机演示`
                 )}
                 caption={t(
                   'Actual Platform UI · JoinStick Game Room Lobby (Click image to zoom full screen)',
@@ -2265,16 +2293,26 @@ export function TutorialView({
                 <p className="text-sm font-bold text-white">
                   {t('No matching buttons found.', '没有找到匹配的按钮说明。')}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setButtonSearch('');
-                    setButtonFilter('all');
-                  }}
-                  className="mt-4 px-4 py-2 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs font-bold cursor-pointer"
-                >
-                  {t('Show All Buttons', '显示全部按钮')}
-                </button>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setButtonSearch('');
+                      setButtonFilter('all');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-xs font-bold cursor-pointer"
+                  >
+                    {t('Show All Buttons', '显示全部按钮')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOpenGuideBot}
+                    className="px-4 py-2 rounded-xl bg-[#142033] hover:bg-[#1C2C46] border border-[#00C2FF]/45 text-[#00C2FF] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>{t('Ask Guide Bot Instead', '直接问平台助手')}</span>
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

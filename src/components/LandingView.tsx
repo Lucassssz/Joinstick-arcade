@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowRight,
   BookOpen,
+  Bot,
   ChevronDown,
   Gamepad2,
   Lock,
@@ -9,7 +10,6 @@ import {
   QrCode,
   SlidersHorizontal,
   Smartphone,
-  Users,
   X,
   Zap,
 } from 'lucide-react';
@@ -50,6 +50,7 @@ interface LandingViewProps {
   onStartPocket: (preferredGameId?: GameId) => void;
   onJoinController: (initialCode?: string) => void;
   onOpenTutorial: () => void;
+  onOpenGuideBot: (preferredGameId?: GameId) => void;
 }
 
 export function LandingView({
@@ -57,6 +58,7 @@ export function LandingView({
   onStartPocket,
   onJoinController,
   onOpenTutorial,
+  onOpenGuideBot,
 }: LandingViewProps) {
   const { lang, t } = useLanguage();
   const [quickCode, setQuickCode] = useState('');
@@ -147,10 +149,6 @@ export function LandingView({
     }
   };
 
-  // Part 3 & 4 Scrollytelling State
-  const [scrollProgress, setScrollProgress] = useState(0);
-  const scrollyRef = useRef<HTMLDivElement>(null);
-
   // Intersection Observer for Stats Count-Up
   const [statsAnimated, setStatsAnimated] = useState(false);
   const statsRef = useRef<HTMLDivElement>(null);
@@ -171,27 +169,11 @@ export function LandingView({
     const timer = setInterval(() => {
       setIsFlipping(true);
       setTimeout(() => {
-        setActiveCardIndex((prev) => (prev + 1) % 3);
+        setActiveCardIndex((prev) => (prev + 1) % 4);
         setIsFlipping(false);
       }, 350);
     }, 4500);
     return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!scrollyRef.current) return;
-      const rect = scrollyRef.current.getBoundingClientRect();
-      const windowH = window.innerHeight;
-      const totalScrollable = rect.height - windowH;
-      if (totalScrollable <= 0) return;
-      const scrolled = windowH - rect.top;
-      const progress = Math.max(0, Math.min(1, scrolled / totalScrollable));
-      setScrollProgress(progress);
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   useEffect(() => {
@@ -608,44 +590,28 @@ export function LandingView({
         stepZh: '特性 03',
         titleEn: 'Game Library',
         titleZh: '丰富游戏库',
-        descEn: `Browse ${totalGamesCount} arcade, board, and card party games with instant search, category filters, and detailed rules.`,
-        descZh: `浏览包含 ${totalGamesCount} 款街机、桌游与纸牌的庞大游戏库，支持即时搜索、分类筛选与玩法详情。`,
+        descEn: `Browse ${totalGamesCount} arcade, board, and card party games with live 5-second video previews, player filters, and instant animated rules.`,
+        descZh: `浏览 ${totalGamesCount} 款街机、桌游与纸牌派对游戏，支持 5 秒实机预览、按人数筛选与动态规则讲解。`,
         badgeEn: `${totalGamesCount} TITLES • INSTANT PLAY`,
         badgeZh: `${totalGamesCount} 款正版游戏 · 即开即玩`,
         accentHex: '#10D98B',
         icon: Gamepad2,
       },
+      {
+        stepEn: 'FEATURE 04',
+        stepZh: '特性 04',
+        titleEn: 'Offline Guide Bot',
+        titleZh: '零流量平台助手',
+        descEn: `Built-in instant assistant with guided menus for platform tutorials, controls, troubleshooting, and rules for all ${totalGamesCount} games—zero API usage.`,
+        descZh: `内置秒答助手，通过快捷菜单手把手教你平台玩法、手柄操作、排错指南与全部 ${totalGamesCount} 款游戏规则，完全离线零流量。`,
+        badgeEn: 'INSTANT ANSWERS • ZERO API',
+        badgeZh: '内置菜单秒答 · 零 API 消耗',
+        accentHex: '#A855F7',
+        icon: Bot,
+      },
     ],
     [totalGamesCount]
   );
-
-  // Full Game catalog rows for Step 3 background sliding marquees
-  const catalogRows = useMemo(() => {
-    const third = Math.ceil(GAME_CATALOG.length / 3);
-    return [
-      GAME_CATALOG.slice(0, third),
-      GAME_CATALOG.slice(third, third * 2),
-      GAME_CATALOG.slice(third * 2),
-    ];
-  }, []);
-
-  // Scrolly calculations strictly mapped to 0-0.33, 0.33-0.66, and 0.66-1.0 progress percentages
-  const p = scrollProgress;
-  const step1Opacity = p < 0.33 ? 1 : Math.max(0, 1 - (p - 0.33) * 6);
-  const step2Opacity = p >= 0.28 && p < 0.68 ? 1 : 0;
-  const step3Opacity = p >= 0.63 && p < 0.90 ? 1 : 0;
-  const gameTypesOpacity = p >= 0.85 ? Math.min(1, (p - 0.85) * 6) : 0;
-  const step4Opacity = gameTypesOpacity;
-
-  // Active pad index for Step 2 strictly within 0.33 - 0.66, divided into 4 equal quarters for all 4 pads
-  const activePadIndex = p < 0.4125 ? 1 : p < 0.495 ? 2 : p < 0.5775 ? 3 : 4;
-
-  // Smooth sliding-to-left index (0 for step 1 [0-0.33], 1 for step 2 [0.33-0.66], 2 for step 3 [0.66-1.0])
-  const currentStepSlide = p < 0.33 ? 0 : p < 0.66 ? 1 : 2;
-  const stageTranslateX = currentStepSlide * -33.333;
-  
-  const stageScale = 1 + Math.max(0, Math.min(0.3, (p - 0.66) * 1.2));
-  const stageOpacity = p < 0.85 ? 1 : Math.max(0, 1 - (p - 0.85) * 6.6);
 
   return (
     <div
@@ -920,8 +886,8 @@ export function LandingView({
               </h2>
               <p className="mt-2 text-sm sm:text-base text-[#9CA3AF] max-w-2xl">
                 {t(
-                  'Explore our complete catalog of arcade, board, and card games. Filter by player count or search instantly.',
-                  '探索完整的街机、桌游和纸牌游戏库。按玩家人数筛选或直接搜索。'
+                  `Filter by player mode, tap any card for a live preview, or open Guide Bot to search all ${totalGamesCount} games instantly.`,
+                  `支持按人数筛选、点击卡片看实机演示，或打开「平台助手」秒搜全部 ${totalGamesCount} 款游戏规则。`
                 )}
               </p>
             </div>
@@ -1107,55 +1073,7 @@ export function LandingView({
           )}
         </section>
 
-        {/* How It Works Section */}
-        <section id="how-it-works" className="max-w-7xl mx-auto px-4 sm:px-6 py-16 border-t border-[#1A2230]">
-          <h2 className="font-display text-2xl sm:text-3xl font-extrabold text-white mb-8">
-            {t('From browser to 8-player match in three steps', '只需三步，开启 8 人同屏大乱斗')}
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
-              <div className="flex items-center gap-2.5 text-white font-display font-bold text-lg">
-                <QrCode className="w-5 h-5 text-[#FF4D2E]" />
-                <span>{t('01. Open the Monitor', '01. 打开大屏房间')}</span>
-              </div>
-              <p className="mt-3 text-sm text-[#9CA3AF] leading-relaxed">
-                {t(
-                  'Click Create Game Room on your computer or TV. Enter your Master PIN to instantly generate your 4-letter room code and QR code.',
-                  '在电脑或电视上点击创建房间，输入管理密码即可立刻生成专属 4 位房间码与二维码。'
-                )}
-              </p>
-            </div>
-
-            <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
-              <div className="flex items-center gap-2.5 text-white font-display font-bold text-lg">
-                <Smartphone className="w-5 h-5 text-[#00C2FF]" />
-                <span>{t('02. Scan & Connect', '02. 手机扫码加入')}</span>
-              </div>
-              <p className="mt-3 text-sm text-[#9CA3AF] leading-relaxed">
-                {t(
-                  'Players point their phone camera at the QR code or enter the code. No app downloads required—ready in 3 seconds.',
-                  '好友用手机相机扫码或输入代码即可加入，无需下载任何 App，3 秒钟直接连上。'
-                )}
-              </p>
-            </div>
-
-            <div className="p-6 rounded-2xl bg-[#141A26] border border-[#20293B]">
-              <div className="flex items-center gap-2.5 text-white font-display font-bold text-lg">
-                <Users className="w-5 h-5 text-[#10D98B]" />
-                <span>{t('03. Play & Test Solo', '03. 畅玩与单人测试')}</span>
-              </div>
-              <p className="mt-3 text-sm text-[#9CA3AF] leading-relaxed">
-                {t(
-                  `Switch between all ${totalGamesCount} games instantly. Need solo practice? Add AI bots or open the built-in Test Controller Dock.`,
-                  `${totalGamesCount} 款游戏任意秒切。一个人想练手？随时添加 AI 机器人或打开内置测试手柄。`
-                )}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Interactive Tutorial Section */}
+        {/* Interactive Tutorial & Guide Bot Section */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 border-t border-[#1A2230]">
           <div className="rounded-3xl bg-[#141A26] border border-[#243046] overflow-hidden">
             <div className="grid grid-cols-1 lg:grid-cols-12 items-stretch">
@@ -1165,20 +1083,20 @@ export function LandingView({
                   <span aria-hidden="true" className="text-[#3B4659]">·</span>
                   <span>{t('Interactive Sandbox', '互动按钮体验')}</span>
                   <span aria-hidden="true" className="text-[#3B4659]">·</span>
-                  <span>{t('All Button Functions', '全部按钮详解')}</span>
+                  <span>{t('Offline Guide Bot', '零流量平台助手')}</span>
                 </div>
 
                 <h2 className="mt-3 font-display text-2xl sm:text-4xl font-extrabold text-white tracking-tight text-balance">
                   {t(
-                    'Want to know more about JoinStick Arcade?',
-                    '想更深入了解 JoinStick 街机派对吗？'
+                    'New here? Learn every screen or ask Guide Bot.',
+                    '刚来想快速上手？看实景教程或直接问助手。'
                   )}
                 </h2>
 
                 <p className="mt-4 text-sm sm:text-base text-[#9CA3AF] leading-relaxed">
                   {t(
-                    'Watch on our tutorial to explore real UI screenshots of every screen—learn how to create rooms, add AI robots, spin the Chaos Wheel, use Pocket Mode, and test every button interactively.',
-                    '查看我们的互动教程，浏览全套实机界面高清截图与可点击体验区，轻松学会创建房间、添加 AI 机器人、玩转混沌转盘与掌机模式，掌握每一个按钮的用法。'
+                    `Explore real UI screenshots and our clickable button sandbox—or open Guide Bot anytime for quick tap-to-answer help on modes, controls, troubleshooting, and all ${totalGamesCount} games.`,
+                    `浏览全套实机界面截图与互动体验区，或随时打开「平台助手」，点击预设选项一秒获取模式教学、手柄操控、排错技巧与全部 ${totalGamesCount} 款游戏规则。`
                   )}
                 </p>
 
@@ -1191,6 +1109,14 @@ export function LandingView({
                     <BookOpen className="w-4 h-4" />
                     <span>{t('Watch on Our Tutorial', '查看完整互动教程')}</span>
                     <ArrowRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenGuideBot()}
+                    className="inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-[#1A2233] hover:bg-[#243047] border border-[#00C2FF]/45 text-[#00C2FF] font-display font-bold text-sm sm:text-base cursor-pointer transition-colors"
+                  >
+                    <Bot className="w-4 h-4" />
+                    <span>{t('Ask Guide Bot', '问平台助手')}</span>
                   </button>
                 </div>
               </div>
@@ -1279,6 +1205,14 @@ export function LandingView({
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span>{t('Tutorial', '使用教程')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenGuideBot()}
+              className="hover:text-[#00C2FF] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>{t('Guide Bot', '平台助手')}</span>
             </button>
             <button
               type="button"
@@ -1517,6 +1451,18 @@ export function LandingView({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetId = previewGame.id;
+                    setPreviewGameId(null);
+                    onOpenGuideBot(targetId);
+                  }}
+                  className="h-10 px-4 rounded-xl bg-[#182234] hover:bg-[#22304A] border border-[#00C2FF]/45 text-sm font-bold text-[#00C2FF] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>{t('Ask Guide Bot', '问平台助手')}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setPreviewGameId(null)}

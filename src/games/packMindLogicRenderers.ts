@@ -21,6 +21,7 @@ import {
   drawShadowOval,
   drawSphere3D,
   drawStudioBackdrop,
+  isTablePlayerHidden,
   shadeHex,
   tCanvas,
 } from './packRenderHelpers';
@@ -34,12 +35,14 @@ const FW_HEX: Record<'red' | 'blue' | 'gold' | 'green', string> = {
 
 function drawFooterBar(
   ctx: CanvasRenderingContext2D,
-  players: { name: string; colorHex: string; score: number; badge?: string }[]
+  players: { id?: string; name: string; colorHex: string; score: number; badge?: string }[]
 ) {
-  const count = Math.max(1, players.length);
+  const visible = players.filter((p) => !isTablePlayerHidden(p.id, p.name));
+  if (visible.length === 0) return;
+  const count = Math.max(1, visible.length);
   const w = Math.min(220, (ARENA_WIDTH - 80) / count - 10);
   const sx = (ARENA_WIDTH - (count * (w + 10) - 10)) / 2;
-  players.forEach((p, i) => {
+  visible.forEach((p, i) => {
     const x = sx + i * (w + 10);
     ctx.save();
     ctx.fillStyle = 'rgba(13,18,30,0.92)';

@@ -12,19 +12,22 @@ import {
   drawHudChip,
   drawStudioBackdrop,
   getActiveCanvasLang,
+  isTablePlayerHidden,
   shadeHex,
   tCanvas,
 } from './packRenderHelpers';
 
 function drawPlayerBar(
   ctx: CanvasRenderingContext2D,
-  players: { name: string; colorHex: string; score: number; badge?: string }[]
+  players: { id?: string; name: string; colorHex: string; score: number; badge?: string }[]
 ) {
-  const count = Math.max(1, players.length);
+  const visible = players.filter((p) => !isTablePlayerHidden(p.id, p.name));
+  if (visible.length === 0) return;
+  const count = Math.max(1, visible.length);
   const w = Math.min(220, (ARENA_WIDTH - 80) / count - 10);
   const totalW = count * (w + 10) - 10;
   const sx = (ARENA_WIDTH - totalW) / 2;
-  players.forEach((p, i) => {
+  visible.forEach((p, i) => {
     const x = sx + i * (w + 10);
     ctx.save();
     ctx.fillStyle = '#0F172A';

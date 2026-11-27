@@ -94,6 +94,7 @@ import { getStylizedGameThumbnail } from '../games/thumbnailGenerator';
 import { ChaosWheelModal } from './ChaosWheelModal';
 import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
 import { TestControllerDrawer } from './TestControllerDrawer';
+import { RuleChatbotDrawer } from './RuleChatbotDrawer';
 import {
   clearHostAuthSession,
   consumeGuestSingleUseTokenLocally,
@@ -152,6 +153,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [testDrawerOpen, setTestDrawerOpen] = useState(false);
+  const [ruleBotOpen, setRuleBotOpen] = useState(false);
   const [showInGameTutorial, setShowInGameTutorial] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<null | 'shared' | 'copied'>(null);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
@@ -1571,6 +1573,15 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
             <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
               {audioUnlockButton}
+              <button
+                type="button"
+                onClick={() => setRuleBotOpen(true)}
+                className="tactile-btn h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-xl bg-[#00C2FF]/15 hover:bg-[#00C2FF]/25 border border-[#00C2FF]/45 text-[#00C2FF] text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Bot className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">{t('Guide Bot', '平台助手')}</span>
+                <span className="sm:hidden">{t('Guide', '助手')}</span>
+              </button>
               <LanguageToggle compact className="h-9 sm:h-10 sm:px-3" />
 
               <button
@@ -2079,6 +2090,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           open={testDrawerOpen}
           onClose={() => setTestDrawerOpen(false)}
         />
+        <RuleChatbotDrawer
+          isOpen={ruleBotOpen}
+          onClose={() => setRuleBotOpen(false)}
+          activeGameId={room.selectedGameId}
+        />
       </div>
     );
   }
@@ -2187,6 +2203,16 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           {/* Passive Display Utilities Only (Audio Unlock, Language, Fullscreen, Audio, Test Pad) */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto sm:ml-0">
             {audioUnlockButton}
+            <button
+              type="button"
+              onClick={() => setRuleBotOpen(true)}
+              title={t('Guide Bot', '平台助手')}
+              className="h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg bg-[#00C2FF]/15 hover:bg-[#00C2FF]/25 border border-[#00C2FF]/45 text-[#00C2FF] text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            >
+              <Bot className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden xl:inline">{t('Guide Bot', '平台助手')}</span>
+              <span className="hidden sm:inline xl:hidden">{t('Guide', '助手')}</span>
+            </button>
             <LanguageToggle compact className="h-8 sm:h-9" />
 
             <button
@@ -3165,6 +3191,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           roomCode={room.code}
           open={testDrawerOpen}
           onClose={() => setTestDrawerOpen(false)}
+        />
+        <RuleChatbotDrawer
+          isOpen={ruleBotOpen}
+          onClose={() => setRuleBotOpen(false)}
+          activeGameId={room.selectedGameId}
         />
       </div>
     );

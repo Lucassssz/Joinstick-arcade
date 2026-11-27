@@ -25,6 +25,7 @@ interface PocketArenaCanvasProps {
   highlightPlayerId?: string;
   highlightColorHex?: string;
   showYouMarker?: boolean;
+  hidePlayerId?: string | null;
 }
 
 function drawYouBeacon(
@@ -211,10 +212,12 @@ export function PocketArenaCanvas({
   highlightPlayerId,
   highlightColorHex = '#10D98B',
   showYouMarker = false,
+  hidePlayerId = null,
 }: PocketArenaCanvasProps) {
   const { lang, t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const langRef = useRef(lang);
+  const hidePlayerIdRef = useRef<string | null>(hidePlayerId);
   const markerCfgRef = useRef({
     playerId: highlightPlayerId,
     colorHex: highlightColorHex,
@@ -225,6 +228,10 @@ export function PocketArenaCanvas({
   useEffect(() => {
     langRef.current = lang;
   }, [lang]);
+
+  useEffect(() => {
+    hidePlayerIdRef.current = hidePlayerId ?? null;
+  }, [hidePlayerId]);
 
   useEffect(() => {
     markerCfgRef.current = {
@@ -260,7 +267,8 @@ export function PocketArenaCanvas({
             snap,
             fxRef.current,
             langRef.current,
-            competitiveRef.current
+            competitiveRef.current,
+            hidePlayerIdRef.current
           );
           const marker = markerCfgRef.current;
           if (marker.show && marker.playerId) {

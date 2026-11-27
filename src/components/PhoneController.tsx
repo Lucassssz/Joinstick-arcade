@@ -68,6 +68,8 @@ import { EasyArrowsDeck, SwipeTrackpadDeck } from './GamePadDecks';
 import { FrenzyBannerOverlay } from './FrenzyBannerOverlay';
 import { PocketArenaCanvas } from './PocketArenaCanvas';
 import { PocketLobbyView } from './PocketLobbyView';
+import { PhoneMatchOutcomeOverlay } from './PhoneMatchOutcomeOverlay';
+import { RuleChatbotDrawer } from './RuleChatbotDrawer';
 import {
   ArcadePadMode,
   getGamePadProfile,
@@ -233,6 +235,9 @@ const TABLETOP_ZOOM_CARD_GAMES = new Set<GameId>([
   'firework-hints',
   'tunnel-saboteur',
   'word-tile-crossroads',
+  'undercover-word',
+  'midnight-werewolf',
+  'idiom-chain',
 ]);
 
 function buildPocketCardSituation(
@@ -323,7 +328,13 @@ function buildPocketCardSituation(
       } else if (typeof sp.handCount === 'number') {
         stat = `${sp.handCount}🃏`;
       } else if (typeof sp.chips === 'number') {
-        stat = `$${sp.chips}`;
+        const activeBet =
+          typeof sp.currentBet === 'number' && sp.currentBet > 0
+            ? sp.currentBet
+            : typeof sp.bet === 'number' && sp.bet > 0
+            ? sp.bet
+            : 0;
+        stat = activeBet > 0 ? `$${sp.chips} · B$${activeBet}` : `$${sp.chips}`;
       } else if (typeof sp.totalScore === 'number') {
         stat = `${sp.totalScore}pt`;
       } else if (typeof sp.score === 'number') {
@@ -338,7 +349,13 @@ function buildPocketCardSituation(
         statusTone = 'danger';
       }
 
-      if (sp.status === 'busted' || sp.busted === true) {
+      if (sp.folded === true) {
+        statusTag = lang === 'zh' ? '弃牌' : 'FOLD';
+        statusTone = 'danger';
+      } else if (sp.allIn === true) {
+        statusTag = 'ALL-IN';
+        statusTone = 'warn';
+      } else if (sp.status === 'busted' || sp.busted === true) {
         statusTag = lang === 'zh' ? '爆牌' : 'BUST';
         statusTone = 'danger';
       } else if (sp.status === 'stayed' || sp.standing === true) {
@@ -356,6 +373,9 @@ function buildPocketCardSituation(
       } else if (sp.pickedThisStep === true) {
         statusTag = lang === 'zh' ? '已选' : 'PICKED';
         statusTone = 'good';
+      } else if (sp.checked === true) {
+        statusTag = lang === 'zh' ? '过牌' : 'CHECK';
+        statusTone = 'neutral';
       }
 
       if (typeof s?.bankerId === 'string' && s.bankerId === rp.id && !statusTag) {
@@ -727,6 +747,7 @@ export function PhoneController({
     'auto' | 'show-hand' | 'show-table'
   >('auto');
   const [pocketRulesOpen, setPocketRulesOpen] = useState(false);
+  const [ruleBotOpen, setRuleBotOpen] = useState(false);
   const [pocketCoachDismissed, setPocketCoachDismissed] = useState(false);
   const [pocketCoachExpired, setPocketCoachExpired] = useState(false);
   const [pocketCardActed, setPocketCardActed] = useState(false);
@@ -757,6 +778,8 @@ export function PhoneController({
   const manualExitFsRef = useRef<boolean>(false);
   const wasFullscreenRef = useRef<boolean>(false);
   const prevRoomStatusRef = useRef<RoomSnapshot['status'] | null>(null);
+  const prevOutcomeStatusRef = useRef<RoomSnapshot['status'] | null>(null);
+  const [outcomeOverlayOpen, setOutcomeOverlayOpen] = useState(false);
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
     pointerId: number;
@@ -1025,6 +1048,21 @@ export function PhoneController({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.status, joinedPlayerId, embedded, closedReason]);
+
+  useEffect(() => {
+    const status = room?.status ?? null;
+    const prev = prevOutcomeStatusRef.current;
+    prevOutcomeStatusRef.current = status;
+    if (!joinedPlayerId || !status) {
+      setOutcomeOverlayOpen(false);
+      return;
+    }
+    if (status === 'RESULTS' && prev !== 'RESULTS') {
+      setOutcomeOverlayOpen(true);
+    } else if (status !== 'RESULTS') {
+      setOutcomeOverlayOpen(false);
+    }
+  }, [room?.status, joinedPlayerId]);
 
   const simSlot: 'P1' | 'P2' = useMemo(() => {
     const raw = (defaultName || 'Test P1').trim().toUpperCase();
@@ -2387,6 +2425,53 @@ export function PhoneController({
           recommendedPadMode={recommendedPadMode}
           connectedGamepadName={connectedGamepadName}
         />
+        {room && selfPlayer && (() => {
+          const outcomeRankEntry = room.rankings.find((r) => r.playerId === selfPlayer.id);
+          const outcomeTournament = room.tournament?.active ? room.tournament : null;
+          const outcomeStanding =
+            outcomeTournament?.standings.find((s) => s.playerId === selfPlayer.id) ?? null;
+          const outcomeTeamSpec = room.teamMode !== 'ffa' ? getTeamSpec(selfPlayer.teamId) : null;
+          const outcomeTeamStanding =
+            room.teamMode !== 'ffa'
+              ? (outcomeTournament?.teamStandings ?? room.teamRankings).find(
+                  (tr) => tr.teamId === selfPlayer.teamId
+                ) ?? null
+              : null;
+          const effectiveRank =
+            room.teamMode !== 'ffa' && outcomeTeamStanding
+              ? outcomeTeamStanding.rank
+              : outcomeTournament?.completed && outcomeStanding
+              ? outcomeStanding.rank
+              : outcomeRankEntry?.rank ?? null;
+          return (
+            <PhoneMatchOutcomeOverlay
+              open={outcomeOverlayOpen && room.status === 'RESULTS' && !isConnectionLost}
+              isVictory={effectiveRank === 1}
+              isTournamentFinal={Boolean(outcomeTournament?.completed)}
+              isTeamMode={room.teamMode !== 'ffa' && Boolean(outcomeTeamStanding)}
+              rank={
+                outcomeTournament?.completed && outcomeStanding
+                  ? outcomeStanding.rank
+                  : outcomeRankEntry?.rank ?? null
+              }
+              score={outcomeRankEntry?.score ?? selfPlayer.score}
+              playerName={selfPlayer.name}
+              playerColorHex={selfPlayer.color.hex}
+              playerTextOnColor={selfPlayer.color.textOnColor}
+              avatarId={selfPlayer.avatarId}
+              highlight={outcomeRankEntry?.highlight}
+              teamLabel={
+                outcomeTeamSpec && outcomeTeamStanding
+                  ? `${outcomeTeamSpec.emoji} ${
+                      lang === 'zh' ? outcomeTeamSpec.nameZh : outcomeTeamSpec.name
+                    } #${outcomeTeamStanding.rank}`
+                  : null
+              }
+              teamColorHex={outcomeTeamSpec?.colorHex ?? null}
+              onDismiss={() => setOutcomeOverlayOpen(false)}
+            />
+          );
+        })()}
       </>
     );
 
@@ -5877,13 +5962,26 @@ export function PhoneController({
                 )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setPocketRulesOpen(false)}
-              className="h-9 w-full rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-display font-black text-xs cursor-pointer shrink-0"
-            >
-              {t('Back to Game', '回到游戏')}
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setPocketRulesOpen(false);
+                  setRuleBotOpen(true);
+                }}
+                className="h-9 px-3.5 rounded-xl bg-[#182234] hover:bg-[#22304A] border border-[#00C2FF]/45 text-[#00C2FF] font-display font-black text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                <Bot className="w-3.5 h-3.5 shrink-0" />
+                <span>{t('Ask Guide Bot', '问平台助手')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPocketRulesOpen(false)}
+                className="h-9 flex-1 rounded-xl bg-[#00C2FF] hover:bg-[#29CEFF] text-[#0B1219] font-display font-black text-xs cursor-pointer"
+              >
+                {t('Back to Game', '回到游戏')}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -5928,6 +6026,17 @@ export function PhoneController({
           >
             {pocketMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
             <span>{pocketMuted ? t('Muted', '静音') : t('Sound', '音效')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPocketMenuOpen(false);
+              setRuleBotOpen(true);
+            }}
+            className="h-8 px-2.5 rounded-lg bg-[#00C2FF]/18 hover:bg-[#00C2FF]/28 border border-[#00C2FF]/45 text-[11px] font-bold text-[#00C2FF] inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Bot className="w-3.5 h-3.5" />
+            <span>{t('Guide Bot', '平台助手')}</span>
           </button>
           {!embedded && <LanguageToggle compact />}
           {!embedded && (
@@ -5977,6 +6086,7 @@ export function PhoneController({
                 competitiveRef={latestCompetitiveRef}
                 fxRef={fxRef}
                 tickVersion={pocketTickVersion}
+                hidePlayerId={isPocketCardHandShown ? me.id : null}
                 cameraFocus={
                   TABLETOP_ZOOM_CARD_GAMES.has(room.selectedGameId)
                     ? isPocketCardHandShown
@@ -6187,6 +6297,12 @@ export function PhoneController({
             : schema.controlTip}
         </div>
       )}
+
+      <RuleChatbotDrawer
+        isOpen={ruleBotOpen}
+        onClose={() => setRuleBotOpen(false)}
+        activeGameId={room.selectedGameId}
+      />
     </div>
   );
 }

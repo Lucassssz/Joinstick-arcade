@@ -5,6 +5,7 @@ import { LandingView } from './components/LandingView';
 import { HostMonitor } from './components/HostMonitor';
 import { PhoneController } from './components/PhoneController';
 import { TutorialView } from './components/TutorialView';
+import { RuleChatbotFloatingButton } from './components/RuleChatbotDrawer';
 import { LanguageProvider } from './lib/i18n';
 import { arcadeAudio } from './lib/audio';
 
@@ -53,6 +54,13 @@ export default function App() {
   const [mode, setMode] = useState<AppMode>(initial.mode);
   const [preferredGameId, setPreferredGameId] = useState<GameId>('bumper-brawl');
   const [initialRoomCode, setInitialRoomCode] = useState<string>(initial.roomCode);
+  const [guideBotOpen, setGuideBotOpen] = useState(false);
+  const [guideBotGameId, setGuideBotGameId] = useState<GameId | null>(null);
+
+  const openGuideBot = (gameId?: GameId) => {
+    setGuideBotGameId(gameId ?? null);
+    setGuideBotOpen(true);
+  };
 
   useEffect(() => {
     const onPopState = () => {
@@ -200,6 +208,7 @@ export default function App() {
                   onHostRoom={handleHostRoom}
                   onStartPocket={handleStartPocket}
                   onJoinController={handleJoinController}
+                  onOpenGuideBot={() => openGuideBot()}
                 />
               ) : (
                 <LandingView
@@ -207,10 +216,22 @@ export default function App() {
                   onStartPocket={handleStartPocket}
                   onJoinController={handleJoinController}
                   onOpenTutorial={handleOpenTutorial}
+                  onOpenGuideBot={openGuideBot}
                 />
               )}
             </motion.div>
           </AnimatePresence>
+          {(mode === 'landing' || mode === 'tutorial') && (
+            <RuleChatbotFloatingButton
+              activeGameId={guideBotGameId}
+              isOpen={guideBotOpen}
+              onOpen={() => openGuideBot()}
+              onClose={() => {
+                setGuideBotOpen(false);
+                setGuideBotGameId(null);
+              }}
+            />
+          )}
         </div>
       </MotionConfig>
     </LanguageProvider>

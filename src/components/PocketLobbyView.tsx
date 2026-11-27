@@ -53,6 +53,7 @@ import { getJoinUrl } from '../lib/ws';
 import { copyRoomInvite, shareRoomInvite } from '../lib/shareInvite';
 import { GameThumbnail } from './GameThumbnail';
 import { PlayerAvatar } from './PlayerAvatar';
+import { RuleChatbotDrawer } from './RuleChatbotDrawer';
 
 const DIFFICULTY_CYCLE: BotDifficulty[] = ['chill', 'arcade', 'spicy'];
 
@@ -124,6 +125,7 @@ export function PocketLobbyView({
   const [filterOpen, setFilterOpen] = useState(false);
   const [partyOpen, setPartyOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [ruleBotOpen, setRuleBotOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<null | 'shared' | 'copied'>(null);
@@ -604,6 +606,17 @@ export function PocketLobbyView({
             {pocketMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>
 
+          <button
+            type="button"
+            onClick={() => setRuleBotOpen(true)}
+            aria-label={t('Guide Bot', '平台助手')}
+            title={t('Guide Bot', '平台助手')}
+            className="h-7 px-2 rounded-lg bg-[#00C2FF]/18 hover:bg-[#00C2FF]/28 border border-[#00C2FF]/45 text-[#00C2FF] inline-flex items-center gap-1 text-[10px] font-extrabold cursor-pointer whitespace-nowrap"
+          >
+            <Bot className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">{t('Guide', '平台助手')}</span>
+          </button>
+
           <LanguageToggle compact className="h-7" />
 
           <button
@@ -1019,6 +1032,12 @@ export function PocketLobbyView({
           )}
         </div>
       </div>
+
+      <RuleChatbotDrawer
+        isOpen={ruleBotOpen}
+        onClose={() => setRuleBotOpen(false)}
+        activeGameId={room.selectedGameId}
+      />
     </div>
   );
 }

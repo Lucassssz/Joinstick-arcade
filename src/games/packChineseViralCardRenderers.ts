@@ -13,7 +13,7 @@ import {
   type SpeedMahjongSnapshot,
   type UndercoverWordSnapshot,
 } from '../shared/types';
-import { drawBoardBanner, drawHudChip, drawPopupTexts, getActiveCanvasLang, tCanvas } from './canvasHelpers';
+import { drawBoardBanner, drawHudChip, drawPopupTexts, getActiveCanvasLang, isTablePlayerHidden, tCanvas } from './canvasHelpers';
 import { drawStudioBackdrop, shadeHex } from './render25d';
 import { clamp01, easeOutCubic } from './arcadeMotion';
 
@@ -228,6 +228,7 @@ export function renderLandlordClash(ctx: CanvasRenderingContext2D, snap: Landlor
 
   const n = snap.players.length;
   snap.players.forEach((p, i) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(i, n);
     const badge = p.isLandlord
       ? { text: 'LANDLORD 地主', bg: '#DC2626', fg: '#FFFFFF' }
@@ -286,16 +287,18 @@ export function renderSpeedMahjong(ctx: CanvasRenderingContext2D, snap: SpeedMah
     p.discards.slice(-4).forEach((t, k) => {
       drawMahjongTile(ctx, pondX - 42 + k * 28, pondY, 26, 36, t);
     });
-    drawSeatBox(
-      ctx,
-      seat.x,
-      seat.y,
-      p.name,
-      p.colorHex,
-      `${p.tileCount} TILES · ${p.score}`,
-      p.id === snap.activePlayerId,
-      p.lastAction ? { text: p.lastAction, bg: '#10B981', fg: '#052E16' } : undefined
-    );
+    if (!isTablePlayerHidden(p.id)) {
+      drawSeatBox(
+        ctx,
+        seat.x,
+        seat.y,
+        p.name,
+        p.colorHex,
+        `${p.tileCount} TILES · ${p.score}`,
+        p.id === snap.activePlayerId,
+        p.lastAction ? { text: p.lastAction, bg: '#10B981', fg: '#052E16' } : undefined
+      );
+    }
   });
 
   drawFx(ctx, snap.flyingCards, snap.shockwaves);
@@ -374,16 +377,18 @@ export function renderLiarsDiceTavern(ctx: CanvasRenderingContext2D, snap: Liars
       ctx.fillText(`${p.diceCount}🎲`, cupX, cupY + 4);
     }
 
-    drawSeatBox(
-      ctx,
-      seat.x,
-      seat.y,
-      p.name,
-      p.colorHex,
-      p.alive ? `${p.diceCount} DICE · ${p.score}` : 'OUT',
-      p.id === snap.activePlayerId,
-      p.lastAction ? { text: p.lastAction, bg: '#F59E0B', fg: '#141008' } : undefined
-    );
+    if (!isTablePlayerHidden(p.id)) {
+      drawSeatBox(
+        ctx,
+        seat.x,
+        seat.y,
+        p.name,
+        p.colorHex,
+        p.alive ? `${p.diceCount} DICE · ${p.score}` : 'OUT',
+        p.id === snap.activePlayerId,
+        p.lastAction ? { text: p.lastAction, bg: '#F59E0B', fg: '#141008' } : undefined
+      );
+    }
   });
 
   drawFx(ctx, snap.flyingCards, snap.shockwaves);
@@ -427,6 +432,7 @@ export function renderUndercoverWord(ctx: CanvasRenderingContext2D, snap: Underc
 
   const n = snap.players.length;
   snap.players.forEach((p, i) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(i, n);
     const badge =
       p.revealedRole === 'spy'
@@ -489,6 +495,7 @@ export function renderMidnightWerewolf(ctx: CanvasRenderingContext2D, snap: Midn
 
   const n = snap.players.length;
   snap.players.forEach((p, i) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(i, n);
     const badge = p.revealedRole
       ? {
@@ -560,6 +567,7 @@ export function renderIdiomChain(ctx: CanvasRenderingContext2D, snap: IdiomChain
 
   const n = snap.players.length;
   snap.players.forEach((p, i) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(i, n);
     drawSeatBox(
       ctx,

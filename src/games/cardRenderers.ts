@@ -9,6 +9,7 @@ import {
   LiarsDeckSnapshot,
 } from '../shared/types';
 import { drawShadowOval, drawStudioBackdrop, shadeHex } from './render25d';
+import { isTablePlayerHidden } from './canvasHelpers';
 import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
 
 const CLASH_COLORS: Record<CardColor, { bg: string; dark: string; rim: string }> = {
@@ -703,6 +704,7 @@ function drawSeatPod(
   turnTimeLeft: number,
   turnTotal: number
 ): void {
+  if (isTablePlayerHidden(p.id)) return;
   const seat = getCardSeatPosition(seatIdx, total);
   const now = fx.orbitAngle * 2.8;
   const isDanger = isActiveTurn && turnTimeLeft <= 5;

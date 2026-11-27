@@ -11,7 +11,7 @@ import {
   type RoyalBluffSnapshot,
   type SushiDraftSnapshot,
 } from '../shared/types';
-import { drawBoardBanner, drawHudChip, drawPopupTexts, tCanvas } from './canvasHelpers';
+import { drawBoardBanner, drawHudChip, drawPopupTexts, isTablePlayerHidden, tCanvas } from './canvasHelpers';
 import { drawStudioBackdrop, shadeHex } from './render25d';
 import { clamp01, easeOutCubic, getMotionTime } from './arcadeMotion';
 
@@ -339,6 +339,7 @@ export function renderBoomKittens(ctx: CanvasRenderingContext2D, snap: BoomKitte
   // Player Seats
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
   snap.players.forEach((p, idx) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(idx, snap.players.length);
     const isAct = p.id === snap.activePlayerId && p.alive;
     drawSeatShell(
@@ -427,6 +428,7 @@ export function renderPropertyDeal(ctx: CanvasRenderingContext2D, snap: Property
 
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
   snap.players.forEach((p, idx) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(idx, snap.players.length);
     const isAct = p.id === snap.activePlayerId;
     drawSeatShell(
@@ -513,6 +515,7 @@ export function renderFlipSeven(ctx: CanvasRenderingContext2D, snap: FlipSevenSn
 
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
   snap.players.forEach((p, idx) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(idx, snap.players.length);
     const isAct = p.id === snap.activePlayerId && p.status === 'active';
     const badgeStr = `${p.totalScore} PTS (+${p.roundPoints})`;
@@ -635,6 +638,7 @@ export function renderRoyalBluff(ctx: CanvasRenderingContext2D, snap: RoyalBluff
 
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
   snap.players.forEach((p, idx) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(idx, snap.players.length);
     const isAct = p.id === snap.activePlayerId && p.alive;
     drawSeatShell(
@@ -772,6 +776,7 @@ export function renderDarkFlipClash(ctx: CanvasRenderingContext2D, snap: DarkFli
 
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
   snap.players.forEach((p, idx) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(idx, snap.players.length);
     const isAct = p.id === snap.activePlayerId;
     drawSeatShell(
@@ -876,6 +881,7 @@ export function renderSushiDraft(ctx: CanvasRenderingContext2D, snap: SushiDraft
 
   const turnFrac = snap.turnTotal > 0 ? snap.turnTimeLeft / snap.turnTotal : 0;
   snap.players.forEach((p, idx) => {
+    if (isTablePlayerHidden(p.id)) return;
     const seat = getCardSeatPosition(idx, snap.players.length);
     const needsPick = snap.phase === 'picking' && !p.pickedThisStep;
     drawSeatShell(

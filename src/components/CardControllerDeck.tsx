@@ -250,7 +250,8 @@ export function CardControllerDeck({
   const dragStartRef = useRef<{ cardId: string; startY: number; playable: boolean } | null>(null);
   const throwTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pocketHandContainerRef = useRef<HTMLDivElement | null>(null);
-  const [pocketHandWidth, setPocketHandWidth] = useState<number>(320);
+  const [pocketHandWidth, setPocketHandWidth] = useState<number>(260);
+  const [myStatusExpanded, setMyStatusExpanded] = useState(false);
 
   useEffect(() => {
     if (!pocketOverlay) return;
@@ -345,17 +346,18 @@ export function CardControllerDeck({
   // Dynamic fit-all layout for Pocket Mode so every card in hand is visible with zero horizontal scrolling
   const pocketCardLayout = useMemo(() => {
     const count = sortedEntries.length;
-    const availW = Math.max(150, pocketHandWidth - 8);
-    const isWide = availW >= 420;
+    const availW = Math.max(120, pocketHandWidth - 6);
+    const isWide = availW >= 380;
+    const isNarrow = availW < 220;
 
-    let cardW = isWide ? 66 : 56;
-    let cardH = isWide ? 94 : 82;
+    let cardW = isWide ? 64 : isNarrow ? 46 : 54;
+    let cardH = isWide ? 90 : isNarrow ? 68 : 78;
     if (count >= 13) {
-      cardW = isWide ? 54 : 44;
-      cardH = isWide ? 78 : 66;
+      cardW = isWide ? 52 : isNarrow ? 36 : 44;
+      cardH = isWide ? 74 : isNarrow ? 56 : 64;
     } else if (count >= 9) {
-      cardW = isWide ? 60 : 48;
-      cardH = isWide ? 86 : 72;
+      cardW = isWide ? 58 : isNarrow ? 40 : 48;
+      cardH = isWide ? 82 : isNarrow ? 62 : 70;
     }
     cardW = Math.min(cardW, availW);
 
@@ -367,8 +369,8 @@ export function CardControllerDeck({
       marginLeft = Math.floor(step - cardW);
     }
 
-    const maxDeg = count >= 12 ? 6 : count >= 7 ? 8 : 6;
-    const arcDrop = count >= 12 ? 4 : count >= 7 ? 5 : 3;
+    const maxDeg = count >= 12 ? 5 : count >= 7 ? 7 : 5;
+    const arcDrop = count >= 12 ? 3 : count >= 7 ? 4 : 2;
     const isCompactCard = cardW <= 48;
     return { cardW, cardH, marginLeft, maxDeg, arcDrop, isCompactCard };
   }, [sortedEntries.length, pocketHandWidth]);
@@ -1390,86 +1392,234 @@ export function CardControllerDeck({
           {renderUnoCenterTableControls()}
         </div>
 
-        {/* ZONE C: Bottom All-Visible Solid Hand + Bottom-Right Action Buttons (No green line, no sort/grid/utility buttons, no scroll) */}
+        {/* ZONE C: Bottom Card Pad — [Mini Personal Status Chip (Left)] + [All-Visible Solid Hand (Center)] + [Draw/Actions (Right)] */}
         <div className="relative z-10 w-full shrink-0 flex flex-col justify-end bg-transparent">
-          {/* Compact Turn Badge & Hint Row */}
-          <div className="flex items-center justify-start gap-1.5 px-2.5 pt-1 pb-0.5 shrink-0 pointer-events-none">
-            <span
-              className={`px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-black tabular-nums shrink-0 inline-flex items-center gap-1 ${
-                isDanger
-                  ? 'bg-[#FF3B30] text-white animate-pulse shadow-[0_0_12px_rgba(255,59,48,0.7)]'
-                  : isTurnActiveNow
-                  ? 'bg-[#10D98B] text-[#0A1913] shadow-[0_0_10px_rgba(16,217,139,0.45)]'
-                  : 'bg-[#1E2534] text-[#D1D5DB]'
-              }`}
-            >
-              {isTurnActiveNow
-                ? isDanger
-                  ? `${t('HURRY!', '快出!')} ${timeSecs}s`
-                  : `${t('YOUR TURN', '你的回合')} · ${timeSecs}s`
-                : `${situation?.activePlayerName ? `${situation.activePlayerName} · ` : ''}${timeSecs}s`}
-            </span>
+          {(() => {
+            const mePlayer = situation?.players.find((p) => p.isMe) ?? null;
+            const isOut = mePlayer?.alive === false;
+            const myHandCount = cardState.hand.length;
+            const isUno = myHandCount === 1 || mePlayer?.statusTag === 'UNO!';
+            const rawStat = mePlayer?.stat ? translateGameText(mePlayer.stat, lang) : `${myHandCount}🃏`;
+            const statHasCards = rawStat.includes('🃏');
+            const myTag = isUno
+              ? 'UNO!'
+              : mePlayer?.statusTag
+              ? translateGameText(mePlayer.statusTag, lang)
+              : cardState.badgeText
+              ? translateGameText(cardState.badgeText, lang)
+              : cardState.targetRank
+              ? `${t('Tgt', '目标')}:${cardState.targetRank}`
+              : null;
+            const myTagTone = isUno
+              ? 'danger'
+              : mePlayer?.statusTone ?? 'neutral';
+            const mySubText = mePlayer?.lastAction
+              ? translateGameText(mePlayer.lastAction, lang)
+              : hintText;
 
-            {cardState.hand.length === 1 && (
-              <span className="px-2 py-0.5 rounded-full bg-[#FF3B30] text-white font-display text-[10px] font-black tracking-wider animate-pulse shrink-0">
-                UNO!
-              </span>
-            )}
+            const tagColorCls =
+              myTagTone === 'danger'
+                ? 'bg-[#FF3B30] text-white'
+                : myTagTone === 'warn'
+                ? 'bg-[#FFB800] text-[#14120B]'
+                : myTagTone === 'good'
+                ? 'bg-[#10D98B] text-[#0A1913]'
+                : 'bg-white/15 text-[#E5E7EB]';
 
-            <span className="text-xs font-bold text-[#F3F4F6] truncate max-w-[65%] drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
-              {hintText}
-            </span>
-          </div>
+            return (
+              <div className="w-full flex items-end justify-between gap-1.5 px-1.5 pb-1.5 pt-0.5">
+                {/* Left-Bottom Minimized Personal Status Chip (All info at a glance + tap for full details) */}
+                <div className="relative shrink-0 z-40 pb-0.5">
+                  {myStatusExpanded && (
+                    <div className="absolute bottom-full left-0 mb-1.5 w-[210px] z-50 rounded-xl bg-[#0B0F19]/96 border border-white/20 p-2 shadow-2xl backdrop-blur-md text-left">
+                      <div className="flex items-center justify-between gap-1.5 pb-1 border-b border-white/10">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <PlayerAvatar
+                            avatarId={mePlayer?.avatarId || 'fox'}
+                            colorHex={mePlayer?.colorHex || playerColorHex}
+                            size="xs"
+                          />
+                          <span className="text-[11px] font-extrabold text-white truncate">
+                            {mePlayer?.name || t('You', '你')}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setMyStatusExpanded(false)}
+                          aria-label={t('Close status', '关闭状态')}
+                          className="text-[#9CA3AF] hover:text-white cursor-pointer shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="mt-1.5 space-y-1 text-[10px] leading-snug">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[#9CA3AF]">{t('Turn', '回合')}</span>
+                          <span
+                            className={`font-mono font-black ${
+                              isDanger
+                                ? 'text-[#FF4D4F]'
+                                : isTurnActiveNow
+                                ? 'text-[#10D98B]'
+                                : 'text-white'
+                            }`}
+                          >
+                            {isOut
+                              ? t('ELIMINATED', '已出局')
+                              : isTurnActiveNow
+                              ? `${t('YOUR TURN', '你的回合')} · ${timeSecs}s`
+                              : `${situation?.activePlayerName ? `${situation.activePlayerName} · ` : ''}${timeSecs}s`}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[#9CA3AF]">{t('Stats', '状态')}</span>
+                          <span className="font-mono font-black text-white">
+                            {rawStat}
+                            {!statHasCards ? ` · ${myHandCount}🃏` : ''}
+                          </span>
+                        </div>
+                        {myTag && (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[#9CA3AF]">{t('Tag', '标记')}</span>
+                            <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] font-black ${tagColorCls}`}>
+                              {myTag}
+                            </span>
+                          </div>
+                        )}
+                        {mePlayer?.lastAction && (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[#9CA3AF] shrink-0">{t('Last', '上步')}</span>
+                            <span className="font-bold text-[#E5E7EB] text-right">
+                              {translateGameText(mePlayer.lastAction, lang)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="pt-1 border-t border-white/10 text-[#CBD5E1] font-semibold">
+                          {hintText}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-          {/* Bottom Row: All Hand Cards Fit Without Scrolling + Draw/Action Buttons at Bottom-Right */}
-          <div className="w-full flex items-end justify-between gap-2 px-2 pb-1.5 pt-1">
-            {/* Fit-All Card Fan Container (Zero horizontal scroll) */}
-            <div
-              ref={pocketHandContainerRef}
-              className="flex-1 min-w-0 flex items-end justify-center overflow-visible pt-4 pb-0.5"
-              style={{ minHeight: `${pocketCardLayout.cardH + 22}px` }}
-            >
-              {renderHandCards()}
-            </div>
-
-            {/* Right-Bottom Action Stack (Draw / Pass / Play / Game Actions) */}
-            {!(isColorClash && cardState.awaitingColorPick) && (
-              <div className="shrink-0 relative z-40 flex flex-col-reverse items-stretch justify-end gap-1.5 pb-0.5">
-                {cardState.extraActions && cardState.extraActions.length > 0 ? (
-                  <div
-                    className={
-                      cardState.extraActions.length > 2
-                        ? 'grid grid-cols-2 gap-1.5'
-                        : 'flex flex-col-reverse items-stretch gap-1.5'
-                    }
+                  <button
+                    type="button"
+                    onClick={() => setMyStatusExpanded((prev) => !prev)}
+                    aria-label={t('Toggle personal status details', '查看个人状态详情')}
+                    className={`w-[86px] sm:w-[104px] rounded-xl px-1.5 py-1 border backdrop-blur-md text-left flex flex-col gap-0.5 cursor-pointer active:scale-95 transition-all ${
+                      isOut
+                        ? 'bg-[#171216]/92 border-[#FF3B30]/55 opacity-75'
+                        : isDanger
+                        ? 'bg-[#260D11]/94 border-[#FF3B30] shadow-[0_0_10px_rgba(255,59,48,0.55)]'
+                        : isTurnActiveNow
+                        ? 'bg-[#0C1D1A]/94 border-[#10D98B] shadow-[0_0_10px_rgba(16,217,139,0.4)]'
+                        : 'bg-[#0B0F18]/90 border-white/18'
+                    }`}
                   >
-                    {cardState.extraActions.map((btn, i) => (
-                      <button
-                        key={`${btn.label}_${i}`}
-                        type="button"
-                        disabled={btn.disabled}
-                        onClick={() => onAction(btn.action)}
-                        className="h-9 px-2.5 rounded-xl font-display font-black text-[11px] inline-flex items-center justify-center whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-transform"
-                        style={{
-                          backgroundColor: btn.colorHex,
-                          color: btn.textColor ?? '#FFFFFF',
-                          boxShadow: '0 3px 0 rgba(0,0,0,0.45)',
-                        }}
+                    {/* Row 1: Tiny Avatar + Turn/Timer Badge */}
+                    <div className="flex items-center justify-between gap-1 min-w-0">
+                      <PlayerAvatar
+                        avatarId={mePlayer?.avatarId || 'fox'}
+                        colorHex={mePlayer?.colorHex || playerColorHex}
+                        size="xs"
+                        className="!w-4 !h-4 !text-[10px] !rounded-[5px] !border"
+                      />
+                      <span
+                        className={`flex-1 text-center px-1 py-[1px] rounded font-mono text-[9px] font-black tabular-nums leading-none truncate ${
+                          isOut
+                            ? 'bg-[#FF3B30]/25 text-[#FF8A80]'
+                            : isDanger
+                            ? 'bg-[#FF3B30] text-white animate-pulse'
+                            : isTurnActiveNow
+                            ? 'bg-[#10D98B] text-[#0A1913]'
+                            : 'bg-white/10 text-[#CBD5E1]'
+                        }`}
                       >
-                        <span className="truncate max-w-[100px]">
-                          {lang === 'zh'
-                            ? translateGameText(btn.labelZh || btn.label, lang)
-                            : btn.label}
+                        {isOut
+                          ? t('OUT', '出局')
+                          : isTurnActiveNow
+                          ? isDanger
+                            ? `${timeSecs}s!`
+                            : `${t('YOU', '你')} ${timeSecs}s`
+                          : `${timeSecs}s`}
+                      </span>
+                    </div>
+
+                    {/* Row 2: Live Personal Stat + Tag / Card Count */}
+                    <div className="flex items-center justify-between gap-1 min-w-0">
+                      <span className="font-mono text-[10px] font-black text-white tabular-nums leading-tight truncate">
+                        {rawStat}
+                      </span>
+                      {myTag ? (
+                        <span
+                          className={`px-1 py-[1px] rounded font-mono text-[8px] font-black leading-none shrink-0 max-w-[44px] truncate ${tagColorCls} ${
+                            isUno ? 'animate-pulse' : ''
+                          }`}
+                        >
+                          {myTag}
                         </span>
-                      </button>
-                    ))}
+                      ) : !statHasCards ? (
+                        <span className="font-mono text-[9px] font-black text-[#FFD166] tabular-nums leading-none shrink-0">
+                          {myHandCount}🃏
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {/* Row 3: Compact State / Last Action / Active Hint */}
+                    <div className="text-[8.5px] font-bold text-[#CBD5E1] leading-tight truncate">
+                      {mySubText}
+                    </div>
+                  </button>
+                </div>
+
+                {/* Center: Fit-All Card Fan Container (Zero horizontal scroll) */}
+                <div
+                  ref={pocketHandContainerRef}
+                  className="flex-1 min-w-0 flex items-end justify-center overflow-visible pt-4 pb-0.5"
+                  style={{ minHeight: `${pocketCardLayout.cardH + 20}px` }}
+                >
+                  {renderHandCards()}
+                </div>
+
+                {/* Right-Bottom Action Stack (Draw / Pass / Play / Game Actions) */}
+                {!(isColorClash && cardState.awaitingColorPick) && (
+                  <div className="shrink-0 relative z-40 flex flex-col-reverse items-stretch justify-end gap-1.5 pb-0.5">
+                    {cardState.extraActions && cardState.extraActions.length > 0 ? (
+                      <div
+                        className={
+                          cardState.extraActions.length > 2
+                            ? 'grid grid-cols-2 gap-1.5'
+                            : 'flex flex-col-reverse items-stretch gap-1.5'
+                        }
+                      >
+                        {cardState.extraActions.map((btn, i) => (
+                          <button
+                            key={`${btn.label}_${i}`}
+                            type="button"
+                            disabled={btn.disabled}
+                            onClick={() => onAction(btn.action)}
+                            className="h-9 px-2.5 rounded-xl font-display font-black text-[11px] inline-flex items-center justify-center whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-transform"
+                            style={{
+                              backgroundColor: btn.colorHex,
+                              color: btn.textColor ?? '#FFFFFF',
+                              boxShadow: '0 3px 0 rgba(0,0,0,0.45)',
+                            }}
+                          >
+                            <span className="truncate max-w-[100px]">
+                              {lang === 'zh'
+                                ? translateGameText(btn.labelZh || btn.label, lang)
+                                : btn.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      renderActionButtons(true)
+                    )}
                   </div>
-                ) : (
-                  renderActionButtons(true)
                 )}
               </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
       </div>
     );

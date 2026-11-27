@@ -291,7 +291,8 @@ export async function getOrGenerateRuleClipsAsync(
         }
         players[i].input = botIn;
       }
-      const out = engine.step(state, players, stepDt, mode === 3);
+      const allowFrenzy = !isCard && genre !== 'board';
+      const out = engine.step(state, players, stepDt, allowFrenzy && mode === 3);
       if (out.finished) return true;
       currentSnap = out.snapshot;
       return false;
