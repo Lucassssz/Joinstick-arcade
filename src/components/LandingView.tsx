@@ -39,6 +39,7 @@ import { GameShowcaseCard } from './GameShowcaseCard';
 import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
 import {
   fetchHostAuthStatus,
+  getHostAuthSession,
   getHostAuthToken,
   usePublicAccessOpen,
 } from '../lib/hostAuth';
@@ -102,6 +103,19 @@ export function LandingView({
 
   const openHiddenOwnerSettings = useCallback(() => {
     setShowPlayModeModal(false);
+    setPendingHostGameId(undefined);
+    setPendingHostTarget('passes');
+    const existing = getHostAuthSession();
+    if (existing?.role === 'master') {
+      setShowPinModal(false);
+      setShowGuestPassModal(true);
+    } else {
+      setShowGuestPassModal(false);
+      setShowPinModal(true);
+    }
+  }, []);
+
+  const handleOwnerReauthRequest = useCallback(() => {
     setShowGuestPassModal(false);
     setPendingHostGameId(undefined);
     setPendingHostTarget('passes');
@@ -1397,10 +1411,11 @@ export function LandingView({
         onUnlocked={handleHostUnlocked}
       />
 
-      {/* Owner Guest Pass Generator & Revocation Manager */}
+      {/* Owner Settings: Active Rooms, Access & Share, Master PIN */}
       <GuestPassManagerModal
         open={showGuestPassModal}
         onClose={() => setShowGuestPassModal(false)}
+        onRequestReauth={handleOwnerReauthRequest}
       />
 
       {/* Unified Game Details, Live 5s Preview & Animated Rules Modal */}

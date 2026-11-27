@@ -119,6 +119,48 @@ export function setHostAuthSession(session: HostAuthSession | null): void {
   notifyListeners();
 }
 
+export class HostAuthApiError extends Error {
+  public readonly status: number;
+  public readonly isAuthError: boolean;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HostAuthApiError';
+    this.status = status;
+    this.isAuthError = status === 401 || status === 403;
+  }
+}
+
+async function parseJsonSafe<T>(res: Response): Promise<Partial<T>> {
+  try {
+    const parsed = (await res.json()) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Partial<T>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+export function clearHostAuthSessionLocally(): void {
+  if (currentSession !== null) {
+    currentSession = null;
+    notifyListeners();
+  }
+}
+
+function handleOwnerAuthFailure(res: Response, fallbackMsg: string, serverError?: string): never {
+  if (res.status === 401 || res.status === 403) {
+    clearHostAuthSessionLocally();
+    throw new HostAuthApiError(
+      serverError || 'Owner session expired. Please unlock with your Master PIN again.',
+      res.status
+    );
+  }
+  throw new HostAuthApiError(serverError || fallbackMsg, res.status);
+}
+
 export function clearHostAuthSession(): void {
   const token = currentSession?.token;
   currentSession = null;
@@ -165,9 +207,9 @@ export function usePublicAccessOpen(): boolean {
 export async function fetchHostAuthStatus(): Promise<HostAuthStatus> {
   const res = await fetch('/api/host-auth/status', { cache: 'no-store' });
   if (!res.ok) {
-    throw new Error('Failed to check host auth status');
+    throw new HostAuthApiError('Failed to check host auth status', res.status);
   }
-  const data = (await res.json()) as Partial<HostAuthStatus>;
+  const data = await parseJsonSafe<HostAuthStatus>(res);
   const status: HostAuthStatus = {
     masterConfigured: Boolean(data.masterConfigured),
     usingEnvPin: Boolean(data.usingEnvPin),
@@ -186,7 +228,7 @@ export async function verifyHostCode(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, requireMaster: Boolean(opts?.requireMaster) }),
   });
-  const data = (await res.json()) as {
+  const data = await parseJsonSafe<{
     ok?: boolean;
     token?: string;
     role?: HostAuthRole;
@@ -194,9 +236,9 @@ export async function verifyHostCode(
     passLabel?: string;
     singleUse?: boolean;
     error?: string;
-  };
-  if (!res.ok || !data.token || !data.role || !data.expiresAt) {
-    throw new Error(data.error || 'Invalid PIN or Guest Pass');
+  }>(res);
+  if (!res.ok || !data.token || !data.role || typeof data.expiresAt !== 'number') {
+    throw new HostAuthApiError(data.error || 'Invalid PIN or Guest Pass', res.status);
   }
   const session: HostAuthSession = {
     token: data.token,
@@ -215,19 +257,19 @@ export async function listGuestPasses(): Promise<{
   publicAccessOpen: boolean;
 }> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/passes', {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   });
-  const data = (await res.json()) as {
+  const data = await parseJsonSafe<{
     passes?: GuestPassSummary[];
     usingEnvPin?: boolean;
     publicAccessOpen?: boolean;
     error?: string;
-  };
+  }>(res);
   if (!res.ok || !Array.isArray(data.passes)) {
-    throw new Error(data.error || 'Failed to load guest passes');
+    handleOwnerAuthFailure(res, 'Failed to load guest passes', data.error);
   }
   const publicAccessOpen = Boolean(data.publicAccessOpen);
   setPublicAccessOpenLocally(publicAccessOpen);
@@ -236,7 +278,7 @@ export async function listGuestPasses(): Promise<{
 
 export async function setPlatformPublicAccess(open: boolean): Promise<boolean> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/public-access', {
     method: 'POST',
     headers: {
@@ -245,13 +287,13 @@ export async function setPlatformPublicAccess(open: boolean): Promise<boolean> {
     },
     body: JSON.stringify({ open: Boolean(open) }),
   });
-  const data = (await res.json().catch(() => ({}))) as {
+  const data = await parseJsonSafe<{
     ok?: boolean;
     publicAccessOpen?: boolean;
     error?: string;
-  };
+  }>(res);
   if (!res.ok || typeof data.publicAccessOpen !== 'boolean') {
-    throw new Error(data.error || 'Failed to update platform access');
+    handleOwnerAuthFailure(res, 'Failed to update platform access', data.error);
   }
   setPublicAccessOpenLocally(data.publicAccessOpen);
   return data.publicAccessOpen;
@@ -263,7 +305,7 @@ export async function createGuestPass(opts: {
   hours?: number;
 }): Promise<{ pass: GuestPassSummary; code: string }> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/passes', {
     method: 'POST',
     headers: {
@@ -272,33 +314,33 @@ export async function createGuestPass(opts: {
     },
     body: JSON.stringify(opts),
   });
-  const data = (await res.json()) as {
+  const data = await parseJsonSafe<{
     pass?: GuestPassSummary;
     code?: string;
     error?: string;
-  };
+  }>(res);
   if (!res.ok || !data.pass || !data.code) {
-    throw new Error(data.error || 'Failed to create guest pass');
+    handleOwnerAuthFailure(res, 'Failed to create guest pass', data.error);
   }
   return { pass: data.pass, code: data.code };
 }
 
 export async function revokeGuestPass(id: string): Promise<void> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch(`/api/host-auth/passes/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'Failed to revoke pass');
+    const data = await parseJsonSafe<{ error?: string }>(res);
+    handleOwnerAuthFailure(res, 'Failed to revoke pass', data.error);
   }
 }
 
 export async function changeMasterPin(newPin: string): Promise<void> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/change-pin', {
     method: 'POST',
     headers: {
@@ -308,40 +350,40 @@ export async function changeMasterPin(newPin: string): Promise<void> {
     body: JSON.stringify({ pin: newPin }),
   });
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'Failed to update PIN');
+    const data = await parseJsonSafe<{ error?: string }>(res);
+    handleOwnerAuthFailure(res, 'Failed to update PIN', data.error);
   }
 }
 
 export async function fetchOwnerRoomsDashboard(): Promise<OwnerRoomsDashboard> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/owner/rooms', {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   });
-  const data = (await res.json().catch(() => ({}))) as Partial<OwnerRoomsDashboard> & {
-    error?: string;
-  };
+  const data = await parseJsonSafe<Partial<OwnerRoomsDashboard> & { error?: string }>(res);
   if (!res.ok || !Array.isArray(data.rooms)) {
-    throw new Error(data.error || 'Failed to load active rooms');
+    handleOwnerAuthFailure(res, 'Failed to load active rooms', data.error);
   }
   return {
     rooms: data.rooms,
     recentActivity: Array.isArray(data.recentActivity) ? data.recentActivity : [],
-    serverTime: typeof data.serverTime === 'number' ? data.serverTime : Date.now(),
+    serverTime: typeof data.serverTime === 'number' && Number.isFinite(data.serverTime)
+      ? data.serverTime
+      : Date.now(),
   };
 }
 
 export async function closeActiveRoomByOwner(code: string): Promise<void> {
   const token = getHostAuthToken();
-  if (!token) throw new Error('Master session required');
+  if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch(`/api/owner/rooms/${encodeURIComponent(code.trim().toUpperCase())}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'Failed to close room');
+    const data = await parseJsonSafe<{ error?: string }>(res);
+    handleOwnerAuthFailure(res, 'Failed to close room', data.error);
   }
 }

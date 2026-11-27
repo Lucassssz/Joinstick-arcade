@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { BotDifficulty, GameId, GameMetadata, PlayerFilterMode } from '../shared/types';
 import { PACK_MALAYSIAN_GAME_CATALOG, PACK_MALAYSIAN_ZH } from '../shared/packMalaysianCatalog';
 import {
@@ -85,18 +85,26 @@ function readInitialLanguage(): Language {
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Language>(readInitialLanguage);
 
-  const setLang = (next: Language) => {
+  const setLang = useCallback((next: Language) => {
     setLangState(next);
     try {
       window.localStorage.setItem(LANG_STORAGE_KEY, next);
     } catch {
       // Ignore storage errors
     }
-  };
+  }, []);
 
-  const toggleLang = () => {
-    setLang(lang === 'en' ? 'zh' : 'en');
-  };
+  const toggleLang = useCallback(() => {
+    setLangState((prev) => {
+      const next: Language = prev === 'en' ? 'zh' : 'en';
+      try {
+        window.localStorage.setItem(LANG_STORAGE_KEY, next);
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -115,10 +123,15 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  const t = (en: string, zh: string) => (lang === 'zh' ? zh : en);
+  const t = useCallback((en: string, zh: string) => (lang === 'zh' ? zh : en), [lang]);
+
+  const value = useMemo<LanguageContextValue>(
+    () => ({ lang, isZh: lang === 'zh', setLang, toggleLang, t }),
+    [lang, setLang, toggleLang, t]
+  );
 
   return (
-    <LanguageContext.Provider value={{ lang, isZh: lang === 'zh', setLang, toggleLang, t }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );

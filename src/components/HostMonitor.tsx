@@ -1483,7 +1483,14 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
         }}
       />
 
-      <GuestPassManagerModal open={guestPassOpen} onClose={() => setGuestPassOpen(false)} />
+      <GuestPassManagerModal
+        open={guestPassOpen}
+        onClose={() => setGuestPassOpen(false)}
+        onRequestReauth={() => {
+          setGuestPassOpen(false);
+          setOwnerSettingsAuthOpen(true);
+        }}
+      />
     </>
   );
 
