@@ -1825,7 +1825,7 @@ export function PhoneController({
       prevCardTurnRef.current = null;
       return;
     }
-    if (prevCardTurnRef.current !== null && prevCardTurnRef.current !== isMyCardTurnNow) {
+    if (prevCardTurnRef.current === false && isMyCardTurnNow) {
       setPocketCardViewOverride('auto');
     }
     prevCardTurnRef.current = isMyCardTurnNow;
@@ -1834,11 +1834,7 @@ export function PhoneController({
   const isPocketCardHandShown = Boolean(
     room?.status !== 'COUNTDOWN' &&
       cardState &&
-      (pocketCardViewOverride === 'show-hand'
-        ? true
-        : pocketCardViewOverride === 'show-table'
-        ? false
-        : isMyCardTurnNow)
+      pocketCardViewOverride !== 'show-table'
   );
 
   const currentPadProfile = room ? getGamePadProfile(room.selectedGameId) : null;
@@ -5079,9 +5075,9 @@ export function PhoneController({
           </div>
 
           {room.frenzy.active && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-lg bg-[#FF4D2E]/85 border border-[#FFB800]/70 text-white font-mono text-[9px] font-black animate-pulse shrink-0">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FF4D2E]/90 border border-[#FFB800]/80 text-white font-mono text-[9px] font-black animate-pulse shrink-0 shadow-[0_0_12px_rgba(255,77,46,0.55)]">
               <Flame className="w-2.5 h-2.5 text-[#FFB800]" />
-              <span>2×</span>
+              <span>{t('FRENZY 2×', '狂热 2×')}</span>
             </span>
           )}
           {activeMutatorSpec.invertControls && (
@@ -5935,13 +5931,7 @@ export function PhoneController({
                   isPocketRoom
                     ? () =>
                         setPocketCardViewOverride(
-                          isPocketCardHandShown
-                            ? isMyCardTurnNow
-                              ? 'show-table'
-                              : 'auto'
-                            : isMyCardTurnNow
-                            ? 'auto'
-                            : 'show-hand'
+                          isPocketCardHandShown ? 'show-table' : 'show-hand'
                         )
                     : undefined
                 }
