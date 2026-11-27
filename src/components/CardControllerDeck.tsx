@@ -1148,7 +1148,7 @@ export function CardControllerDeck({
               }}
             />
 
-            <div className="pointer-events-auto relative z-10 flex items-center gap-4 sm:gap-6 px-4 py-2.5 rounded-3xl bg-[#090D16]/72 border border-white/15 backdrop-blur-md shadow-2xl">
+            <div className="pointer-events-auto relative z-10 flex items-center gap-4 sm:gap-6 px-4 py-2.5 rounded-3xl bg-transparent">
               {/* LEFT: Interactive 3D Draw Pile (Tap directly on the table to Draw!) */}
               {(typeof situation?.deckCount === 'number' || isColorClash) && (
                 <button
@@ -1418,35 +1418,35 @@ export function CardControllerDeck({
     // Full Unified UNO Mobile Card Table View
     return (
       <div
-        className="flex-1 flex flex-col justify-between min-h-0 relative z-10 rounded-2xl border border-white/15 overflow-hidden pointer-events-auto shadow-2xl"
-        style={{ background: tableFeltBg }}
+        className="flex-1 flex flex-col justify-between min-h-0 relative z-10 rounded-2xl overflow-hidden pointer-events-auto"
+        style={{ background: pocketTableSlot ? 'transparent' : tableFeltBg }}
       >
-        {/* ZONE A: Top Opponent Arc */}
-        {renderUnoOpponentArc()}
-
-        {/* ZONE B: Center Table Felt + Live Canvas + Interactive UNO Deck & Discard Overlay */}
-        <div className="relative flex-1 min-h-[110px] w-full overflow-hidden">
-          <div className="absolute inset-0 opacity-90 pointer-events-none">
+        {/* Full-bleed live table slot behind all zones so cards float directly on the table */}
+        {pocketTableSlot && (
+          <div className="absolute inset-0 z-0 pointer-events-none">
             {pocketTableSlot}
           </div>
+        )}
+
+        {/* ZONE A: Top Opponent Arc */}
+        <div className="relative z-10 shrink-0">
+          {renderUnoOpponentArc()}
+        </div>
+
+        {/* ZONE B: Center Table Felt + Interactive UNO Deck & Discard Overlay */}
+        <div className="relative z-10 flex-1 min-h-[110px] w-full overflow-hidden pointer-events-none">
           {renderUnoCenterTableControls()}
         </div>
 
-        {/* ZONE C: Bottom UNO-Style Curved Hand Fan + Corner Thumb Action Dock */}
+        {/* ZONE C: Bottom UNO-Style Curved Hand Fan + Corner Thumb Action Dock (Transparent behind cards) */}
         <div
-          className={`relative w-full shrink-0 flex flex-col justify-end border-t transition-colors ${
-            isDanger
-              ? 'border-[#FF3B30]/80 bg-gradient-to-t from-[#1A090B]/96 via-[#121622]/92 to-[#0D111A]/80'
-              : isTurnActiveNow
-              ? 'border-[#10D98B]/55 bg-gradient-to-t from-[#081512]/96 via-[#0E1520]/92 to-[#0D111A]/80'
-              : 'border-white/12 bg-gradient-to-t from-[#090C12]/96 via-[#0E121B]/90 to-[#0D111A]/75'
-          }`}
+          className="relative z-10 w-full shrink-0 flex flex-col justify-end bg-transparent"
           style={{
             opacity: Math.max(0.88, Math.min(1, hudOpacity + 0.2)),
           }}
         >
           {/* Live Shot-Clock Progress Line along Top Edge of Hand Dock */}
-          <div className="w-full h-1 bg-white/10 overflow-hidden shrink-0">
+          <div className="w-full h-1 bg-transparent overflow-hidden shrink-0">
             <div
               className={`h-full transition-all duration-200 ${
                 isDanger
@@ -1712,9 +1712,9 @@ export function CardControllerDeck({
             actionsSide === 'left' ? 'flex-row-reverse' : 'flex-row'
           }`}
         >
-          <div className="relative flex-1 flex flex-col rounded-2xl border bg-[#0F131A]/85 border-[#242B38] min-w-0 overflow-hidden">
+          <div className="relative flex-1 flex flex-col rounded-2xl bg-transparent min-w-0 overflow-hidden">
             {/* Compact Pad 4 Card Toolbar */}
-            <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 border-b border-[#1E2430] bg-[#131722] shrink-0">
+            <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 bg-transparent shrink-0">
               <div className="flex items-center gap-1">
                 {onChangeViewMode && (
                   <div className="inline-flex items-center p-0.5 rounded-md bg-[#0B0E14] border border-[#242934]">
