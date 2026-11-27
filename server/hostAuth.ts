@@ -27,11 +27,16 @@ interface MasterPinHashRecord {
   salt: string;
   hashHex: string;
   updatedAt?: number;
+  publicAccessOpen?: boolean;
+  lastLockedAt?: number;
 }
+
+export type HostSessionScope = 'owner-admin' | 'room-host';
 
 interface HostSessionPayload {
   jti: string;
   role: HostAuthRole;
+  scope?: HostSessionScope;
   passId?: string;
   label?: string;
   singleUse?: boolean;
@@ -83,11 +88,18 @@ class HostAuthService {
   private readonly revokedPassIds = new Set<string>();
   private readonly rateLimits = new Map<string, RateBucket>();
   private publicAccessOpen = false;
+  private lastLockedAt = Date.now();
 
   constructor() {
     this.signingSecret =
       (process.env.HOST_AUTH_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
-    this.activeMasterHash = this.loadPersistedMasterHash() ?? DEFAULT_MASTER_PIN_HASH;
+    const persisted = this.loadPersistedMasterHash();
+    this.activeMasterHash = persisted ?? DEFAULT_MASTER_PIN_HASH;
+    this.publicAccessOpen = Boolean(persisted?.publicAccessOpen);
+    this.lastLockedAt =
+      typeof persisted?.lastLockedAt === 'number' && Number.isFinite(persisted.lastLockedAt)
+        ? persisted.lastLockedAt
+        : Date.now();
   }
 
   private loadPersistedMasterHash(): MasterPinHashRecord | null {
@@ -100,6 +112,10 @@ class HostAuthService {
           salt: parsed.salt,
           hashHex: parsed.hashHex,
           updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined,
+          publicAccessOpen:
+            typeof parsed.publicAccessOpen === 'boolean' ? parsed.publicAccessOpen : false,
+          lastLockedAt:
+            typeof parsed.lastLockedAt === 'number' ? parsed.lastLockedAt : undefined,
         };
       }
       return null;
@@ -108,17 +124,26 @@ class HostAuthService {
     }
   }
 
-  private persistMasterHash(record: MasterPinHashRecord): void {
+  private persistMasterHash(record?: MasterPinHashRecord): void {
     try {
+      const base = record ?? this.activeMasterHash;
+      const toSave: MasterPinHashRecord = {
+        salt: base.salt,
+        hashHex: base.hashHex,
+        updatedAt: base.updatedAt ?? Date.now(),
+        publicAccessOpen: this.publicAccessOpen,
+        lastLockedAt: this.lastLockedAt,
+      };
+      this.activeMasterHash = toSave;
       fs.mkdirSync(OWNER_AUTH_DATA_DIR, { recursive: true, mode: 0o700 });
       const tmpFile = path.join(
         OWNER_AUTH_DATA_DIR,
         `.owner-auth-${crypto.randomBytes(6).toString('hex')}.tmp`
       );
-      fs.writeFileSync(tmpFile, JSON.stringify(record, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.writeFileSync(tmpFile, JSON.stringify(toSave, null, 2), { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tmpFile, OWNER_AUTH_FILE);
     } catch (err) {
-      console.warn('[HostAuth] Could not persist updated Master PIN hash to disk:', err);
+      console.warn('[HostAuth] Could not persist updated Owner Auth state to disk:', err);
     }
   }
 
@@ -134,10 +159,16 @@ class HostAuthService {
     return this.publicAccessOpen;
   }
 
+  public getLastLockedAt(): number {
+    return this.lastLockedAt;
+  }
+
   public setPublicAccess(
     token: string | null | undefined,
     open: boolean
-  ): { ok: true; publicAccessOpen: boolean } | { ok: false; status: number; error: string } {
+  ):
+    | { ok: true; publicAccessOpen: boolean; lastLockedAt: number }
+    | { ok: false; status: number; error: string } {
     const session = this.verifyToken(token);
     if (!session || session.role !== 'master') {
       return { ok: false, status: 403, error: 'Master authorization required.' };
@@ -146,7 +177,15 @@ class HostAuthService {
       return { ok: false, status: 400, error: 'Invalid public access state.' };
     }
     this.publicAccessOpen = open;
-    return { ok: true, publicAccessOpen: this.publicAccessOpen };
+    if (!open) {
+      this.lastLockedAt = Date.now();
+    }
+    this.persistMasterHash();
+    return {
+      ok: true,
+      publicAccessOpen: this.publicAccessOpen,
+      lastLockedAt: this.lastLockedAt,
+    };
   }
 
   private normalizeCode(raw: string): string {
@@ -297,12 +336,15 @@ class HostAuthService {
         ok: true;
         token: string;
         role: HostAuthRole;
+        scope: HostSessionScope;
+        issuedAt: number;
         expiresAt: number;
         passLabel?: string;
         singleUse?: boolean;
       }
     | { ok: false; status: number; error: string } {
     const requireMaster = Boolean(opts?.requireMaster);
+    const scope: HostSessionScope = requireMaster ? 'owner-admin' : 'room-host';
     const rate = this.checkRateLimit(clientKey);
     if (!rate.allowed) {
       return {
@@ -339,10 +381,11 @@ class HostAuthService {
       const token = this.signToken({
         jti: crypto.randomUUID(),
         role: 'master',
+        scope,
         iat: now,
         exp,
       });
-      return { ok: true, token, role: 'master', expiresAt: exp };
+      return { ok: true, token, role: 'master', scope, issuedAt: now, expiresAt: exp };
     }
 
     if (requireMaster) {
@@ -386,6 +429,7 @@ class HostAuthService {
         const token = this.signToken({
           jti: crypto.randomUUID(),
           role: 'guest',
+          scope: 'room-host',
           passId: pass.id,
           label: pass.label,
           singleUse: pass.mode === 'single-use',
@@ -396,6 +440,8 @@ class HostAuthService {
           ok: true,
           token,
           role: 'guest',
+          scope: 'room-host',
+          issuedAt: now,
           expiresAt: exp,
           passLabel: pass.label,
           singleUse: pass.mode === 'single-use',
@@ -412,23 +458,23 @@ class HostAuthService {
   }
 
   public consumeRoomCreation(token?: string | null): { ok: true; session: HostSessionPayload } | { ok: false; error: string } {
-    const session = this.verifyToken(token);
-    if (session && session.role === 'master') {
-      return { ok: true, session };
-    }
     if (this.publicAccessOpen) {
+      const existingSession = this.verifyToken(token);
       const now = Date.now();
       return {
         ok: true,
-        session: session ?? {
+        session: existingSession ?? {
           jti: 'public-open',
           role: 'guest',
+          scope: 'room-host',
           iat: now,
           exp: now + SESSION_TTL_MS,
         },
       };
     }
-    if (!session) {
+
+    const session = this.verifyToken(token);
+    if (!session || session.scope === 'owner-admin' || session.iat < this.lastLockedAt) {
       return { ok: false, error: 'Host unlock required. Enter Master PIN or a Guest Pass.' };
     }
     if (session.singleUse) {
@@ -509,7 +555,13 @@ class HostAuthService {
   public listGuestPasses(
     token: string | null | undefined
   ):
-    | { ok: true; passes: GuestPassSummary[]; usingEnvPin: boolean; publicAccessOpen: boolean }
+    | {
+        ok: true;
+        passes: GuestPassSummary[];
+        usingEnvPin: boolean;
+        publicAccessOpen: boolean;
+        lastLockedAt: number;
+      }
     | { ok: false; status: number; error: string } {
     const session = this.verifyToken(token);
     if (!session || session.role !== 'master') {
@@ -524,6 +576,7 @@ class HostAuthService {
       passes,
       usingEnvPin: this.isUsingEnvPin(),
       publicAccessOpen: this.publicAccessOpen,
+      lastLockedAt: this.lastLockedAt,
     };
   }
 

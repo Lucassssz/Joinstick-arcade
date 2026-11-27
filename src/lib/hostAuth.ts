@@ -3,10 +3,13 @@ import type { GameId, RoomMode, RoomStatus } from '../shared/types';
 
 export type HostAuthRole = 'master' | 'guest';
 export type GuestPassMode = 'single-use' | 'timed';
+export type HostSessionScope = 'owner-admin' | 'room-host';
 
 export interface HostAuthSession {
   token: string;
   role: HostAuthRole;
+  scope?: HostSessionScope;
+  issuedAt: number;
   expiresAt: number;
   passLabel?: string;
   singleUse?: boolean;
@@ -16,6 +19,7 @@ export interface HostAuthStatus {
   masterConfigured: boolean;
   usingEnvPin: boolean;
   publicAccessOpen: boolean;
+  lastLockedAt: number;
 }
 
 export interface GuestPassSummary {
@@ -83,9 +87,16 @@ export interface OwnerRoomsDashboard {
 }
 
 // Held strictly in JS/React memory (never written to localStorage/sessionStorage).
-let currentSession: HostAuthSession | null = null;
+// Separated so opening Owner Settings does not leave a device bypassing a locked platform.
+let currentRoomSession: HostAuthSession | null = null;
+let currentOwnerAdminSession: HostAuthSession | null = null;
 let currentPublicAccessOpen = false;
+let currentLastLockedAt = 0;
 const listeners = new Set<() => void>();
+
+let statusSubscribersCount = 0;
+let statusPollIntervalId: number | null = null;
+let inFlightStatusPromise: Promise<HostAuthStatus> | null = null;
 
 function notifyListeners() {
   for (const fn of listeners) fn();
@@ -95,19 +106,49 @@ export function getPublicAccessOpen(): boolean {
   return currentPublicAccessOpen;
 }
 
-export function setPublicAccessOpenLocally(open: boolean): void {
+export function setPublicAccessOpenLocally(open: boolean, lastLockedAt?: number): void {
   const next = Boolean(open);
+  let changed = false;
+
+  if (typeof lastLockedAt === 'number' && Number.isFinite(lastLockedAt) && lastLockedAt > currentLastLockedAt) {
+    currentLastLockedAt = lastLockedAt;
+  }
+
+  if (!next) {
+    // When platform is locked, invalidate any room session issued prior to the latest lock timestamp
+    if (
+      currentRoomSession &&
+      (currentPublicAccessOpen === true ||
+        (currentLastLockedAt > 0 && currentRoomSession.issuedAt < currentLastLockedAt))
+    ) {
+      currentRoomSession = null;
+      changed = true;
+    }
+  }
+
   if (currentPublicAccessOpen !== next) {
     currentPublicAccessOpen = next;
+    changed = true;
+  }
+
+  if (changed) {
     notifyListeners();
   }
 }
 
 export function getHostAuthSession(): HostAuthSession | null {
-  if (currentSession && Date.now() > currentSession.expiresAt) {
-    currentSession = null;
+  if (currentRoomSession && Date.now() > currentRoomSession.expiresAt) {
+    currentRoomSession = null;
   }
-  return currentSession;
+  if (
+    currentRoomSession &&
+    !currentPublicAccessOpen &&
+    currentLastLockedAt > 0 &&
+    currentRoomSession.issuedAt < currentLastLockedAt
+  ) {
+    currentRoomSession = null;
+  }
+  return currentRoomSession;
 }
 
 export function getHostAuthToken(): string | null {
@@ -115,7 +156,23 @@ export function getHostAuthToken(): string | null {
 }
 
 export function setHostAuthSession(session: HostAuthSession | null): void {
-  currentSession = session;
+  currentRoomSession = session;
+  notifyListeners();
+}
+
+export function getOwnerAdminSession(): HostAuthSession | null {
+  if (currentOwnerAdminSession && Date.now() > currentOwnerAdminSession.expiresAt) {
+    currentOwnerAdminSession = null;
+  }
+  return currentOwnerAdminSession;
+}
+
+export function getOwnerAdminToken(): string | null {
+  return getOwnerAdminSession()?.token ?? null;
+}
+
+export function setOwnerAdminSession(session: HostAuthSession | null): void {
+  currentOwnerAdminSession = session;
   notifyListeners();
 }
 
@@ -144,15 +201,22 @@ async function parseJsonSafe<T>(res: Response): Promise<Partial<T>> {
 }
 
 export function clearHostAuthSessionLocally(): void {
-  if (currentSession !== null) {
-    currentSession = null;
+  if (currentRoomSession !== null) {
+    currentRoomSession = null;
+    notifyListeners();
+  }
+}
+
+export function clearOwnerAdminSessionLocally(): void {
+  if (currentOwnerAdminSession !== null) {
+    currentOwnerAdminSession = null;
     notifyListeners();
   }
 }
 
 function handleOwnerAuthFailure(res: Response, fallbackMsg: string, serverError?: string): never {
   if (res.status === 401 || res.status === 403) {
-    clearHostAuthSessionLocally();
+    clearOwnerAdminSessionLocally();
     throw new HostAuthApiError(
       serverError || 'Owner session expired. Please unlock with your Master PIN again.',
       res.status
@@ -162,8 +226,20 @@ function handleOwnerAuthFailure(res: Response, fallbackMsg: string, serverError?
 }
 
 export function clearHostAuthSession(): void {
-  const token = currentSession?.token;
-  currentSession = null;
+  const token = currentRoomSession?.token;
+  currentRoomSession = null;
+  notifyListeners();
+  if (token) {
+    void fetch('/api/host-auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  }
+}
+
+export function clearOwnerAdminSession(): void {
+  const token = currentOwnerAdminSession?.token;
+  currentOwnerAdminSession = null;
   notifyListeners();
   if (token) {
     void fetch('/api/host-auth/logout', {
@@ -174,8 +250,8 @@ export function clearHostAuthSession(): void {
 }
 
 export function consumeGuestSingleUseTokenLocally(): void {
-  if (currentSession?.singleUse) {
-    currentSession = null;
+  if (currentRoomSession?.singleUse) {
+    currentRoomSession = null;
     notifyListeners();
   }
 }
@@ -192,46 +268,113 @@ export function useHostAuthSession(): HostAuthSession | null {
   return session;
 }
 
+export function useOwnerAdminSession(): HostAuthSession | null {
+  const [session, setSession] = useState<HostAuthSession | null>(() => getOwnerAdminSession());
+  useEffect(() => {
+    const sync = () => setSession(getOwnerAdminSession());
+    listeners.add(sync);
+    return () => {
+      listeners.delete(sync);
+    };
+  }, []);
+  return session;
+}
+
+function handleGlobalWindowFocusOrVisibility() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  void fetchHostAuthStatus().catch(() => {});
+}
+
+function startGlobalStatusPolling() {
+  if (typeof window === 'undefined') return;
+  void fetchHostAuthStatus().catch(() => {});
+  if (statusPollIntervalId === null) {
+    statusPollIntervalId = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void fetchHostAuthStatus().catch(() => {});
+    }, 2500);
+  }
+  window.addEventListener('focus', handleGlobalWindowFocusOrVisibility);
+  window.addEventListener('pageshow', handleGlobalWindowFocusOrVisibility);
+  document.addEventListener('visibilitychange', handleGlobalWindowFocusOrVisibility);
+}
+
+function stopGlobalStatusPolling() {
+  if (typeof window === 'undefined') return;
+  if (statusPollIntervalId !== null) {
+    window.clearInterval(statusPollIntervalId);
+    statusPollIntervalId = null;
+  }
+  window.removeEventListener('focus', handleGlobalWindowFocusOrVisibility);
+  window.removeEventListener('pageshow', handleGlobalWindowFocusOrVisibility);
+  document.removeEventListener('visibilitychange', handleGlobalWindowFocusOrVisibility);
+}
+
 export function usePublicAccessOpen(): boolean {
   const [open, setOpen] = useState<boolean>(() => getPublicAccessOpen());
   useEffect(() => {
     const sync = () => setOpen(getPublicAccessOpen());
     listeners.add(sync);
+    statusSubscribersCount += 1;
+    if (statusSubscribersCount === 1) {
+      startGlobalStatusPolling();
+    } else {
+      void fetchHostAuthStatus().catch(() => {});
+    }
     return () => {
       listeners.delete(sync);
+      statusSubscribersCount = Math.max(0, statusSubscribersCount - 1);
+      if (statusSubscribersCount === 0) {
+        stopGlobalStatusPolling();
+      }
     };
   }, []);
   return open;
 }
 
 export async function fetchHostAuthStatus(): Promise<HostAuthStatus> {
-  const res = await fetch('/api/host-auth/status', { cache: 'no-store' });
-  if (!res.ok) {
-    throw new HostAuthApiError('Failed to check host auth status', res.status);
+  if (inFlightStatusPromise) {
+    return inFlightStatusPromise;
   }
-  const data = await parseJsonSafe<HostAuthStatus>(res);
-  const status: HostAuthStatus = {
-    masterConfigured: Boolean(data.masterConfigured),
-    usingEnvPin: Boolean(data.usingEnvPin),
-    publicAccessOpen: Boolean(data.publicAccessOpen),
-  };
-  setPublicAccessOpenLocally(status.publicAccessOpen);
-  return status;
+  inFlightStatusPromise = (async () => {
+    const res = await fetch('/api/host-auth/status', { cache: 'no-store' });
+    if (!res.ok) {
+      throw new HostAuthApiError('Failed to check host auth status', res.status);
+    }
+    const data = await parseJsonSafe<HostAuthStatus>(res);
+    const status: HostAuthStatus = {
+      masterConfigured: Boolean(data.masterConfigured),
+      usingEnvPin: Boolean(data.usingEnvPin),
+      publicAccessOpen: Boolean(data.publicAccessOpen),
+      lastLockedAt:
+        typeof data.lastLockedAt === 'number' && Number.isFinite(data.lastLockedAt)
+          ? data.lastLockedAt
+          : currentLastLockedAt,
+    };
+    setPublicAccessOpenLocally(status.publicAccessOpen, status.lastLockedAt);
+    return status;
+  })().finally(() => {
+    inFlightStatusPromise = null;
+  });
+  return inFlightStatusPromise;
 }
 
 export async function verifyHostCode(
   code: string,
   opts?: { requireMaster?: boolean }
 ): Promise<HostAuthSession> {
+  const requireMaster = Boolean(opts?.requireMaster);
   const res = await fetch('/api/host-auth/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, requireMaster: Boolean(opts?.requireMaster) }),
+    body: JSON.stringify({ code, requireMaster }),
   });
   const data = await parseJsonSafe<{
     ok?: boolean;
     token?: string;
     role?: HostAuthRole;
+    scope?: HostSessionScope;
+    issuedAt?: number;
     expiresAt?: number;
     passLabel?: string;
     singleUse?: boolean;
@@ -243,11 +386,20 @@ export async function verifyHostCode(
   const session: HostAuthSession = {
     token: data.token,
     role: data.role,
+    scope: data.scope ?? (requireMaster ? 'owner-admin' : 'room-host'),
+    issuedAt:
+      typeof data.issuedAt === 'number' && Number.isFinite(data.issuedAt)
+        ? data.issuedAt
+        : Date.now(),
     expiresAt: data.expiresAt,
     passLabel: data.passLabel,
     singleUse: data.singleUse,
   };
-  setHostAuthSession(session);
+  if (requireMaster) {
+    setOwnerAdminSession(session);
+  } else {
+    setHostAuthSession(session);
+  }
   return session;
 }
 
@@ -256,7 +408,7 @@ export async function listGuestPasses(): Promise<{
   usingEnvPin: boolean;
   publicAccessOpen: boolean;
 }> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/passes', {
     headers: { Authorization: `Bearer ${token}` },
@@ -266,18 +418,19 @@ export async function listGuestPasses(): Promise<{
     passes?: GuestPassSummary[];
     usingEnvPin?: boolean;
     publicAccessOpen?: boolean;
+    lastLockedAt?: number;
     error?: string;
   }>(res);
   if (!res.ok || !Array.isArray(data.passes)) {
     handleOwnerAuthFailure(res, 'Failed to load guest passes', data.error);
   }
   const publicAccessOpen = Boolean(data.publicAccessOpen);
-  setPublicAccessOpenLocally(publicAccessOpen);
+  setPublicAccessOpenLocally(publicAccessOpen, data.lastLockedAt);
   return { passes: data.passes, usingEnvPin: Boolean(data.usingEnvPin), publicAccessOpen };
 }
 
 export async function setPlatformPublicAccess(open: boolean): Promise<boolean> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/public-access', {
     method: 'POST',
@@ -290,12 +443,17 @@ export async function setPlatformPublicAccess(open: boolean): Promise<boolean> {
   const data = await parseJsonSafe<{
     ok?: boolean;
     publicAccessOpen?: boolean;
+    lastLockedAt?: number;
     error?: string;
   }>(res);
   if (!res.ok || typeof data.publicAccessOpen !== 'boolean') {
     handleOwnerAuthFailure(res, 'Failed to update platform access', data.error);
   }
-  setPublicAccessOpenLocally(data.publicAccessOpen);
+  if (!data.publicAccessOpen) {
+    // Immediately clear any local room-creation unlock session so this device locks too
+    currentRoomSession = null;
+  }
+  setPublicAccessOpenLocally(data.publicAccessOpen, data.lastLockedAt);
   return data.publicAccessOpen;
 }
 
@@ -304,7 +462,7 @@ export async function createGuestPass(opts: {
   mode: GuestPassMode;
   hours?: number;
 }): Promise<{ pass: GuestPassSummary; code: string }> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/passes', {
     method: 'POST',
@@ -326,7 +484,7 @@ export async function createGuestPass(opts: {
 }
 
 export async function revokeGuestPass(id: string): Promise<void> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch(`/api/host-auth/passes/${encodeURIComponent(id)}`, {
     method: 'DELETE',
@@ -339,7 +497,7 @@ export async function revokeGuestPass(id: string): Promise<void> {
 }
 
 export async function changeMasterPin(newPin: string): Promise<void> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/host-auth/change-pin', {
     method: 'POST',
@@ -356,7 +514,7 @@ export async function changeMasterPin(newPin: string): Promise<void> {
 }
 
 export async function fetchOwnerRoomsDashboard(): Promise<OwnerRoomsDashboard> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch('/api/owner/rooms', {
     headers: { Authorization: `Bearer ${token}` },
@@ -376,7 +534,7 @@ export async function fetchOwnerRoomsDashboard(): Promise<OwnerRoomsDashboard> {
 }
 
 export async function closeActiveRoomByOwner(code: string): Promise<void> {
-  const token = getHostAuthToken();
+  const token = getOwnerAdminToken();
   if (!token) throw new HostAuthApiError('Master session required', 401);
   const res = await fetch(`/api/owner/rooms/${encodeURIComponent(code.trim().toUpperCase())}`, {
     method: 'DELETE',

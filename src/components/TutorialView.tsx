@@ -294,17 +294,33 @@ export function TutorialView({
   }, [lightboxData]);
 
   const requestLaunch = (target: 'host' | 'pocket') => {
-    const token = getHostAuthToken();
-    if (token || publicAccessOpen) {
+    const launchNow = () => {
       if (target === 'pocket') {
         onStartPocket();
       } else {
         onHostRoom();
       }
-      return;
-    }
-    setPendingTarget(target);
-    setShowPinModal(true);
+    };
+    const promptUnlock = () => {
+      setPendingTarget(target);
+      setShowPinModal(true);
+    };
+
+    void fetchHostAuthStatus()
+      .then((status) => {
+        if (status.publicAccessOpen || getHostAuthToken()) {
+          launchNow();
+        } else {
+          promptUnlock();
+        }
+      })
+      .catch(() => {
+        if (publicAccessOpen || getHostAuthToken()) {
+          launchNow();
+        } else {
+          promptUnlock();
+        }
+      });
   };
 
   const handleUnlocked = () => {

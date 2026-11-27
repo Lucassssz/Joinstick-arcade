@@ -39,8 +39,8 @@ import { GameShowcaseCard } from './GameShowcaseCard';
 import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
 import {
   fetchHostAuthStatus,
-  getHostAuthSession,
   getHostAuthToken,
+  getOwnerAdminSession,
   usePublicAccessOpen,
 } from '../lib/hostAuth';
 import tutorialPreviewImg from '../assets/images/ui_shot_03_game_lobby.png';
@@ -105,7 +105,7 @@ export function LandingView({
     setShowPlayModeModal(false);
     setPendingHostGameId(undefined);
     setPendingHostTarget('passes');
-    const existing = getHostAuthSession();
+    const existing = getOwnerAdminSession();
     if (existing?.role === 'master') {
       setShowPinModal(false);
       setShowGuestPassModal(true);
@@ -322,18 +322,35 @@ export function LandingView({
       return;
     }
 
-    const token = getHostAuthToken();
-    if (token || publicAccessOpen) {
+    const launchTarget = () => {
       if (target === 'pocket') {
         onStartPocket(gameId);
       } else {
         onHostRoom(gameId);
       }
-    } else {
+    };
+
+    const promptUnlock = () => {
       setPendingHostGameId(gameId);
       setPendingHostTarget(target);
       setShowPinModal(true);
-    }
+    };
+
+    void fetchHostAuthStatus()
+      .then((status) => {
+        if (status.publicAccessOpen || getHostAuthToken()) {
+          launchTarget();
+        } else {
+          promptUnlock();
+        }
+      })
+      .catch(() => {
+        if (publicAccessOpen || getHostAuthToken()) {
+          launchTarget();
+        } else {
+          promptUnlock();
+        }
+      });
   };
 
   const handleHostUnlocked = useCallback(() => {

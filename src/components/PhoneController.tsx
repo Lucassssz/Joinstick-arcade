@@ -256,8 +256,25 @@ function buildPocketCardSituation(
     let statusTag: string | null = null;
     let statusTone: 'danger' | 'warn' | 'good' | 'neutral' = 'neutral';
     const lastAction = typeof sp?.lastAction === 'string' && sp.lastAction ? sp.lastAction : null;
+    let cardCount: number | null = null;
 
     if (sp) {
+      if (typeof sp.cardCount === 'number') {
+        cardCount = sp.cardCount;
+      } else if (typeof sp.handCount === 'number') {
+        cardCount = sp.handCount;
+      } else if (typeof sp.tileCount === 'number') {
+        cardCount = sp.tileCount;
+      } else if (typeof sp.cardsLeft === 'number') {
+        cardCount = sp.cardsLeft;
+      } else if (typeof sp.influenceLeft === 'number') {
+        cardCount = sp.influenceLeft;
+      } else if (typeof sp.diceCount === 'number') {
+        cardCount = sp.diceCount;
+      } else if (Array.isArray(sp.numberCards)) {
+        cardCount = sp.numberCards.length;
+      }
+
       if (typeof sp.bankCash === 'number' && typeof sp.setsCompleted === 'number') {
         stat = `${sp.setsCompleted}★ $${sp.bankCash}M`;
         if (typeof sp.cardCount === 'number') {
@@ -317,7 +334,7 @@ function buildPocketCardSituation(
         statusTag = `${sp.bustedCount}/6 🔫`;
         statusTone = sp.bustedCount >= 4 ? 'danger' : 'warn';
       } else if (sp.cardCount === 1 || sp.handCount === 1) {
-        statusTag = lang === 'zh' ? '仅剩1张!' : '1 LEFT!';
+        statusTag = 'UNO!';
         statusTone = 'danger';
       }
 
@@ -359,8 +376,10 @@ function buildPocketCardSituation(
     return {
       id: rp.id,
       name: rp.name,
+      avatarId: rp.avatarId,
       colorHex: rp.color.hex,
       stat,
+      cardCount,
       lastAction,
       statusTag,
       statusTone,
@@ -377,17 +396,58 @@ function buildPocketCardSituation(
   let tableBadge: PocketCardSituation['tableBadge'] = null;
   const summaryParts: string[] = [];
   let lastMoveText: string | null = null;
+  let direction: 1 | -1 = 1;
+  let deckCount: number | null = null;
+  let activeColorKey: 'red' | 'blue' | 'gold' | 'green' | 'wild' | null =
+    cardState?.activeColor ?? null;
+  let centerPileCard: PocketCardSituation['centerPileCard'] = null;
 
   if (s) {
+    if (s.direction === -1 || s.direction === 1) {
+      direction = s.direction;
+    }
+    if (typeof s.deckCount === 'number') {
+      deckCount = s.deckCount;
+    } else if (typeof s.wallRemaining === 'number') {
+      deckCount = s.wallRemaining;
+    } else if (typeof s.cardsRemaining === 'number') {
+      deckCount = s.cardsRemaining;
+    }
+
     if ((gameId === 'color-clash' || gameId === 'dark-flip-clash') && s.topCard && typeof s.topCard === 'object') {
       const topCard = s.topCard as { color?: string; value?: string };
-      const activeColKey = typeof s.activeColor === 'string' ? s.activeColor : topCard.color ?? 'red';
-      const colStyle = SITUATION_COLOR_BADGE[activeColKey] ?? SITUATION_COLOR_BADGE.red;
+      const rawCol = (typeof s.activeColor === 'string' ? s.activeColor : topCard.color ?? 'red') as
+        | 'red'
+        | 'blue'
+        | 'gold'
+        | 'green'
+        | 'wild';
+      activeColorKey = rawCol;
+      const colStyle = SITUATION_COLOR_BADGE[rawCol] ?? SITUATION_COLOR_BADGE.red;
       const topVal = topCard.value ?? '';
       tableBadge = {
         text: `${lang === 'zh' ? colStyle.zh : colStyle.en} ${topVal}`.trim(),
         bg: colStyle.bg,
         fg: colStyle.fg,
+      };
+      centerPileCard = {
+        kind: 'clash',
+        colorKey: (topCard.color as 'red' | 'blue' | 'gold' | 'green' | 'wild') ?? rawCol,
+        activeColorKey: rawCol,
+        mainText: topVal || '?',
+        subText:
+          gameId === 'dark-flip-clash'
+            ? s.side === 'dark'
+              ? lang === 'zh'
+                ? '暗面模式'
+                : 'DARK SIDE'
+              : lang === 'zh'
+              ? '亮面模式'
+              : 'LIGHT SIDE'
+            : lang === 'zh'
+            ? `当前色: ${colStyle.zh}`
+            : `COLOR: ${colStyle.en}`,
+        accentHex: colStyle.bg,
       };
       if (s.direction === 1 || s.direction === -1) {
         summaryParts.push(s.direction === 1 ? '↻' : '↺');
@@ -400,6 +460,7 @@ function buildPocketCardSituation(
       }
     } else if (gameId === 'liars-deck') {
       const target = typeof s.targetRank === 'string' ? s.targetRank : cardState?.targetRank ?? 'A';
+      const pileCount = typeof s.pileCount === 'number' ? s.pileCount : 0;
       tableBadge = {
         text: lang === 'zh' ? `目标 ${target}` : `TARGET ${target}`,
         bg: '#FFB800',
@@ -411,6 +472,16 @@ function buildPocketCardSituation(
       if (typeof s.lastClaimPlayerName === 'string' && typeof s.lastClaimCount === 'number') {
         lastMoveText = `${s.lastClaimPlayerName}: ${s.lastClaimCount}×${target}`;
       }
+      centerPileCard = {
+        kind: 'bluff',
+        mainText: target,
+        subText:
+          lastMoveText ||
+          (lang === 'zh' ? `桌面暗牌 ${pileCount} 张` : `${pileCount} Face-Down`),
+        badgeText: lang === 'zh' ? '目标牌' : 'TABLE RANK',
+        accentHex: '#FFB800',
+        pileCount,
+      };
     } else if (gameId === 'boom-kittens') {
       const bombs = typeof s.bombsInDeck === 'number' ? s.bombsInDeck : 1;
       const deck = typeof s.deckCount === 'number' ? s.deckCount : 0;
@@ -420,8 +491,15 @@ function buildPocketCardSituation(
         fg: '#FFFFFF',
       };
       if (s.topDiscard && typeof s.topDiscard === 'object') {
-        const td = s.topDiscard as { label?: string };
+        const td = s.topDiscard as { label?: string; badge?: string; accentHex?: string };
         if (td.label) lastMoveText = td.label;
+        centerPileCard = {
+          kind: 'party',
+          mainText: td.label ?? 'BOOM',
+          subText: lang === 'zh' ? `炸弹 ${bombs} · 剩 ${deck} 张` : `${bombs} Bombs · ${deck} Left`,
+          badgeText: td.badge ?? 'ACTION',
+          accentHex: td.accentHex ?? '#FF4D2E',
+        };
       }
     } else if (gameId === 'royal-bluff' && s.pendingClaim && typeof s.pendingClaim === 'object') {
       const pc = s.pendingClaim as { actorName?: string; actionName?: string; claimedRole?: string };
@@ -433,8 +511,20 @@ function buildPocketCardSituation(
       if (pc.actorName && pc.actionName) {
         lastMoveText = `${pc.actorName}: ${pc.actionName}`;
       }
+      centerPileCard = {
+        kind: 'party',
+        mainText: pc.claimedRole ?? 'COURT',
+        subText: lastMoveText ?? '',
+        badgeText: lang === 'zh' ? '宣称身份' : 'CLAIMED ROLE',
+        accentHex: '#FFB800',
+      };
     } else if (gameId === 'property-deal' && s.lastPlayedCard && typeof s.lastPlayedCard === 'object') {
-      const lpc = s.lastPlayedCard as { title?: string; badge?: string };
+      const lpc = s.lastPlayedCard as {
+        title?: string;
+        subtitle?: string;
+        badge?: string;
+        accentHex?: string;
+      };
       if (lpc.title) lastMoveText = `${lpc.badge ? `${lpc.badge} · ` : ''}${lpc.title}`;
       if (typeof s.deckCount === 'number') {
         tableBadge = {
@@ -443,8 +533,15 @@ function buildPocketCardSituation(
           fg: '#0A1913',
         };
       }
+      centerPileCard = {
+        kind: 'party',
+        mainText: lpc.title ?? 'DEAL',
+        subText: lpc.subtitle ?? '',
+        badgeText: lpc.badge ?? 'PLAYED',
+        accentHex: lpc.accentHex ?? '#10D98B',
+      };
     } else if (gameId === 'flip-seven' && s.lastFlipped && typeof s.lastFlipped === 'object') {
-      const lf = s.lastFlipped as { label?: string };
+      const lf = s.lastFlipped as { label?: string; subtitle?: string; accentHex?: string };
       if (lf.label) lastMoveText = lf.label;
       if (typeof s.targetScore === 'number') {
         tableBadge = {
@@ -453,6 +550,13 @@ function buildPocketCardSituation(
           fg: '#0B1219',
         };
       }
+      centerPileCard = {
+        kind: 'party',
+        mainText: lf.label ?? '7',
+        subText: lf.subtitle ?? '',
+        badgeText: 'FLIP 7',
+        accentHex: lf.accentHex ?? '#00C2FF',
+      };
     } else if (typeof s.tableComboName === 'string' && s.tableComboName) {
       tableBadge = {
         text: s.tableComboName,
@@ -519,10 +623,25 @@ function buildPocketCardSituation(
     );
   }
 
+  const canDrawDeck = Boolean(
+    cardState?.isMyTurn &&
+      (gameId === 'color-clash' ||
+        gameId === 'dark-flip-clash' ||
+        gameId === 'boom-kittens' ||
+        cardState.secondaryBtn?.action.type === 'draw-or-pass' ||
+        cardState.primaryBtn?.action.type === 'draw-or-pass')
+  );
+
   return {
+    gameId,
     activePlayerId,
     activePlayerName: activePlayer?.name,
     activePlayerColor: activePlayer?.colorHex,
+    direction,
+    deckCount,
+    activeColorKey,
+    centerPileCard,
+    canDrawDeck,
     tableBadge,
     tableSummary: summaryParts.join(' · '),
     lastMoveText,
@@ -1683,37 +1802,36 @@ export function PhoneController({
     e.preventDefault();
     if (entryMode === 'pocket') {
       if (pocketPinSubmitting || joiningRoom) return;
+      setPocketPinSubmitting(true);
+      setPocketPinError(null);
+      setErrorMsg(null);
       let authToken = getHostAuthToken();
       let isPublicOpen = getPublicAccessOpen();
-      if (!authToken && !isPublicOpen) {
-        setPocketPinSubmitting(true);
-        setPocketPinError(null);
-        setErrorMsg(null);
-        try {
-          const status = await fetchHostAuthStatus();
-          isPublicOpen = status.publicAccessOpen;
-          if (!isPublicOpen) {
-            const cleanedPin = pocketPinInput.trim();
-            if (!cleanedPin) {
-              setPocketPinError(
-                t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
-              );
-              return;
-            }
-            const sess = await verifyHostCode(cleanedPin);
-            authToken = sess.token;
-            setPocketPinInput('');
+      try {
+        const status = await fetchHostAuthStatus();
+        isPublicOpen = status.publicAccessOpen;
+        authToken = getHostAuthToken();
+        if (!isPublicOpen && !authToken) {
+          const cleanedPin = pocketPinInput.trim();
+          if (!cleanedPin) {
+            setPocketPinError(
+              t('Enter your Master PIN or a Friend Guest Pass.', '请输入房主密码或访客临时口令。')
+            );
+            return;
           }
-        } catch (err) {
-          setPocketPinError(
-            err instanceof Error
-              ? err.message
-              : t('Invalid Master PIN or Guest Pass.', '密码或访客口令无效。')
-          );
-          return;
-        } finally {
-          setPocketPinSubmitting(false);
+          const sess = await verifyHostCode(cleanedPin);
+          authToken = sess.token;
+          setPocketPinInput('');
         }
+      } catch (err) {
+        setPocketPinError(
+          err instanceof Error
+            ? err.message
+            : t('Invalid Master PIN or Guest Pass.', '密码或访客口令无效。')
+        );
+        return;
+      } finally {
+        setPocketPinSubmitting(false);
       }
 
       if (!authToken && !isPublicOpen) return;

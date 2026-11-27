@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import {
@@ -99,6 +99,7 @@ import {
   consumeGuestSingleUseTokenLocally,
   fetchHostAuthStatus,
   getHostAuthToken,
+  getOwnerAdminSession,
   getPublicAccessOpen,
   setPublicAccessOpenLocally,
 } from '../lib/hostAuth';
@@ -165,17 +166,27 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [guestPassOpen, setGuestPassOpen] = useState(false);
   const secretTitleTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
 
+  const openOwnerSettingsModal = useCallback(() => {
+    const existing = getOwnerAdminSession();
+    if (existing?.role === 'master') {
+      setOwnerSettingsAuthOpen(false);
+      setGuestPassOpen(true);
+    } else {
+      setGuestPassOpen(false);
+      setOwnerSettingsAuthOpen(true);
+    }
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
         e.preventDefault();
-        setGuestPassOpen(false);
-        setOwnerSettingsAuthOpen(true);
+        openOwnerSettingsModal();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [openOwnerSettingsModal]);
 
   const handleSecretTitleTap = () => {
     const now = Date.now();
@@ -184,8 +195,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     secretTitleTapRef.current = { count: nextCount, lastAt: now };
     if (nextCount >= 5) {
       secretTitleTapRef.current = { count: 0, lastAt: 0 };
-      setGuestPassOpen(false);
-      setOwnerSettingsAuthOpen(true);
+      openOwnerSettingsModal();
     }
   };
   const [rankShifts, setRankShifts] = useState<Record<string, number>>({});
@@ -387,30 +397,35 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           hostToken: saved.hostToken,
         });
       } else {
-        const authToken = getHostAuthToken();
-        if (!authToken && !getPublicAccessOpen()) {
-          clearReattachRetry();
-          void fetchHostAuthStatus()
-            .then((status) => {
-              if (wsRef.current !== sock || !sock.isConnected() || roomRef.current) return;
-              if (status.publicAccessOpen) {
-                sock.send({ type: 'room:create', preferredGameId: initialGameId });
-              } else {
-                setHostUnlockNeeded(true);
-              }
-            })
-            .catch(() => {
-              if (wsRef.current === sock && !roomRef.current) {
-                setHostUnlockNeeded(true);
-              }
-            });
-          return;
-        }
-        sock.send({
-          type: 'room:create',
-          preferredGameId: initialGameId,
-          ...(authToken ? { authToken } : {}),
-        });
+        clearReattachRetry();
+        void fetchHostAuthStatus()
+          .then((status) => {
+            if (wsRef.current !== sock || !sock.isConnected() || roomRef.current) return;
+            const authToken = getHostAuthToken();
+            if (status.publicAccessOpen || authToken) {
+              sock.send({
+                type: 'room:create',
+                preferredGameId: initialGameId,
+                ...(authToken ? { authToken } : {}),
+              });
+            } else {
+              setHostUnlockNeeded(true);
+            }
+          })
+          .catch(() => {
+            if (wsRef.current !== sock || !sock.isConnected() || roomRef.current) return;
+            const authToken = getHostAuthToken();
+            if (getPublicAccessOpen() || authToken) {
+              sock.send({
+                type: 'room:create',
+                preferredGameId: initialGameId,
+                ...(authToken ? { authToken } : {}),
+              });
+            } else {
+              setHostUnlockNeeded(true);
+            }
+          });
+        return;
       }
       // Safety net: if the attach/create confirmation doesn't arrive within 3s while socket is open, retry automatically
       clearReattachRetry();

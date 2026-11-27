@@ -47,6 +47,7 @@ async function startServer() {
       masterConfigured: hostAuth.isMasterConfigured(),
       usingEnvPin: hostAuth.isUsingEnvPin(),
       publicAccessOpen: hostAuth.isPublicAccessOpen(),
+      lastLockedAt: hostAuth.getLastLockedAt(),
     });
   });
 

@@ -33,6 +33,7 @@ import {
 import {
   changeMasterPin,
   clearHostAuthSession,
+  clearOwnerAdminSession,
   closeActiveRoomByOwner,
   createGuestPass,
   fetchHostAuthStatus,
@@ -41,7 +42,7 @@ import {
   listGuestPasses,
   revokeGuestPass,
   setPlatformPublicAccess,
-  useHostAuthSession,
+  useOwnerAdminSession,
   usePublicAccessOpen,
   verifyHostCode,
   type GuestPassMode,
@@ -131,6 +132,7 @@ interface HostUnlockModalProps {
 
 export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnlockModalProps) {
   const { t } = useLanguage();
+  const publicAccessOpen = usePublicAccessOpen();
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [codeInput, setCodeInput] = useState('');
   const [showPin, setShowPin] = useState(false);
@@ -140,6 +142,14 @@ export function HostUnlockModal({ open, target, onClose, onUnlocked }: HostUnloc
   onUnlockedRef.current = onUnlocked;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+
+  // If the Owner unlocks the platform on another device while this modal is open, unlock immediately
+  useEffect(() => {
+    if (!open || target === 'passes') return;
+    if (publicAccessOpen) {
+      onUnlockedRef.current();
+    }
+  }, [open, target, publicAccessOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -403,7 +413,7 @@ export function GuestPassManagerModal({
   onRequestReauth,
 }: GuestPassManagerModalProps) {
   const { lang, t } = useLanguage();
-  const session = useHostAuthSession();
+  const session = useOwnerAdminSession();
   const publicAccessOpen = usePublicAccessOpen();
 
   const [activeTab, setActiveTab] = useState<OwnerTab>('rooms');
@@ -841,6 +851,7 @@ export function GuestPassManagerModal({
   };
 
   const handleSignOut = () => {
+    clearOwnerAdminSession();
     clearHostAuthSession();
     onClose();
   };
@@ -1009,6 +1020,69 @@ export function GuestPassManagerModal({
                 </button>
               </div>
             </div>
+
+            {/* Always-Visible Global Platform Lock / Unlock Bar (Applies to All Devices) */}
+            {isMasterAuthenticated && (
+              <div
+                className={`rounded-2xl border px-3.5 py-2.5 flex items-center justify-between gap-3 transition-colors ${
+                  publicAccessOpen
+                    ? 'bg-[#10D98B]/12 border-[#10D98B]/45'
+                    : 'bg-[#0D1119] border-[#2A354A]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                      publicAccessOpen
+                        ? 'bg-[#10D98B]/20 border-[#10D98B]/50 text-[#10D98B]'
+                        : 'bg-[#FF4D2E]/15 border-[#FF4D2E]/40 text-[#FF4D2E]'
+                    }`}
+                  >
+                    {publicAccessOpen ? (
+                      <Unlock className="w-4 h-4" />
+                    ) : (
+                      <Lock className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-extrabold text-white truncate">
+                      {publicAccessOpen
+                        ? t('Unlocked on All Devices', '全设备已免密开放')
+                        : t('Locked on All Devices (PIN Required)', '全设备已锁定（开房需密码）')}
+                    </div>
+                    <div className="text-[11px] text-[#9CA3AF] truncate">
+                      {publicAccessOpen
+                        ? t('Any phone or computer can host rooms freely', '任何手机或电脑均可直接创建房间')
+                        : t('Every device must enter Master PIN or Guest Pass', '所有设备创建房间均需输入主密码或访客口令')}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={togglingPublicAccess}
+                  onClick={() => void handleTogglePublicAccess()}
+                  className={`tactile-btn h-9 px-3.5 rounded-xl text-xs font-extrabold inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 ${
+                    publicAccessOpen
+                      ? 'bg-[#FF4D2E] hover:bg-[#FF6145] text-white shadow-[0_2px_0_#B82E17]'
+                      : 'bg-[#10D98B] hover:bg-[#22E89B] text-[#071A12] shadow-[0_2px_0_#0A915D]'
+                  }`}
+                >
+                  {publicAccessOpen ? (
+                    <Lock className="w-3.5 h-3.5" />
+                  ) : (
+                    <Unlock className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {togglingPublicAccess
+                      ? t('Syncing...', '同步中...')
+                      : publicAccessOpen
+                      ? t('Lock Platform', '锁定全平台')
+                      : t('Unlock Platform', '解锁全平台')}
+                  </span>
+                </button>
+              </div>
+            )}
 
             {/* 3-Tab Navigation Bar */}
             {isMasterAuthenticated && (
