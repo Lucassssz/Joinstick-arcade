@@ -218,7 +218,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['double', 'multiplayer'],
     playerModeLabel: '2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_hotpot_rush_1795857789093.jpg',
     accentHex: '#EF4444',
     rules: [
       'Aim your chopstick tips across the bubbling split hotpot with the joystick.',
@@ -252,7 +252,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_claw_mania_1795857789835.jpg',
     accentHex: '#E879F9',
     rules: [
       'Position your overhead claw with the joystick above moving arcade prizes.',
@@ -286,7 +286,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['double', 'multiplayer'],
     playerModeLabel: '2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_truth_bomb_1795857790460.jpg',
     accentHex: '#FF4D2E',
     rules: [
       'When holding the ticking bomb, press PASS (A) to launch it to another player.',
@@ -320,7 +320,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['double', 'multiplayer'],
     playerModeLabel: '2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_draw_guess_relay_1795857789411.jpg',
     accentHex: '#38BDF8',
     rules: [
       'Artist: steer the brush with your joystick, hold DRAW (A) to paint, and tap COLOR (B) to switch ink.',
@@ -354,7 +354,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 4,
     suitableFor: ['multiplayer'],
     playerModeLabel: '3–4P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_landlord_clash_1795857792030.jpg',
     accentHex: '#DC2626',
     rules: [
       'Bid 1×, 2×, or 3× on your phone to become Landlord and claim the 3 Kitty cards.',
@@ -388,7 +388,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 4,
     suitableFor: ['double', 'multiplayer'],
     playerModeLabel: '2P · 3–4P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_speed_mahjong_1795857792666.jpg',
     accentHex: '#10B981',
     rules: [
       'Your private 7-tile hand stays secret on your phone—draw 1 tile and discard 1 each turn.',
