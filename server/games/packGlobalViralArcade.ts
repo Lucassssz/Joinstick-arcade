@@ -1171,7 +1171,7 @@ export const glassBridgeModule: CompactGameModule<GlassBridgeState, GlassBridgeS
           target.finished = true;
           state.finishOrder.push(target.id);
           const bonus = Math.max(120, 420 - (state.finishOrder.length - 1) * 70);
-          target.score += bonus * mult;
+          target.score += bonus;
           state.banner = `${target.name} CROSSED THE GLASS BRIDGE!`;
           sounds.push({ type: 'win', playerId: target.id });
           return;
@@ -1242,9 +1242,19 @@ export const glassBridgeModule: CompactGameModule<GlassBridgeState, GlassBridgeS
     };
   },
   buildResults(state) {
-    return rankByScore(state.players, (p) =>
-      p.finished ? 'BRIDGE FINISHER' : `Step ${Math.max(0, p.step + 1)}/${state.totalSteps}`
-    );
+    const sorted = [...state.players].sort((a, b) => {
+      const aFin = a.finished ? state.finishOrder.indexOf(a.id) : 999;
+      const bFin = b.finished ? state.finishOrder.indexOf(b.id) : 999;
+      if (aFin !== bFin) return aFin - bFin;
+      if (b.step !== a.step) return b.step - a.step;
+      return b.score - a.score;
+    });
+    return sorted.map((p, i) => ({
+      playerId: p.id,
+      rank: i + 1,
+      score: Math.round(p.score),
+      statLabel: p.finished ? `FINISHED #${state.finishOrder.indexOf(p.id) + 1}` : `Step ${Math.max(0, p.step + 1)}/${state.totalSteps}`,
+    }));
   },
 };
 

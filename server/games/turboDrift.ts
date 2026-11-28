@@ -229,12 +229,20 @@ function toSnapshot(state: TurboInternalState): TurboDriftSnapshot {
   };
 }
 
+function compareRaceOrder(a: InternalCar, b: InternalCar): number {
+  if (a.finished && b.finished) return (a.finishTimeMs ?? 0) - (b.finishTimeMs ?? 0);
+  if (a.finished) return -1;
+  if (b.finished) return 1;
+  if (a.lap !== b.lap) return b.lap - a.lap;
+  return b.progress - a.progress;
+}
+
 function buildRankings(
   state: TurboInternalState,
   inputPlayers: ServerPlayerInputState[]
 ): RankingEntry[] {
   const colorById = new Map(inputPlayers.map((p) => [p.id, p.color]));
-  const sorted = [...state.players].sort((a, b) => a.position - b.position);
+  const sorted = [...state.players].sort(compareRaceOrder);
 
   return sorted.map((p, idx) => ({
     playerId: p.id,
@@ -248,7 +256,11 @@ function buildRankings(
       textOnColor: '#FFFFFF',
     },
     rank: idx + 1,
-    score: Math.max(100, (sorted.length - idx) * 100 + p.lap * 25 + p.coins * 15),
+    score:
+      (sorted.length - idx) * 1000 +
+      (p.finished
+        ? Math.max(100, 450 - Math.min(350, Math.round((p.finishTimeMs ?? 0) / 1000)))
+        : Math.min(90, p.lap * 20 + Math.round((p.progress % 1000) / 50))),
     highlight:
       p.finishTimeMs !== null
         ? `Finished ${formatMs(p.finishTimeMs)}`
@@ -674,12 +686,7 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
       }
     }
 
-    const ordered = [...state.players].sort((a, b) => {
-      if (a.finished && b.finished) return (a.finishTimeMs ?? 0) - (b.finishTimeMs ?? 0);
-      if (a.finished) return -1;
-      if (b.finished) return 1;
-      return b.progress - a.progress;
-    });
+    const ordered = [...state.players].sort(compareRaceOrder);
     ordered.forEach((c, idx) => {
       c.position = idx + 1;
     });
@@ -694,7 +701,9 @@ export const turboDriftModule: ServerGameModule<TurboInternalState> = {
     const hudUpdates: Record<string, PlayerHudUpdate> = {};
     for (const p of state.players) {
       hudUpdates[p.id] = {
-        score: Math.round(p.progress + p.coins * 15),
+        score: p.finished
+          ? 100000 + Math.max(0, 50000 - Math.round(p.finishTimeMs ?? 0))
+          : Math.max(0, Math.round(p.progress)),
         alive: !p.falling,
         statText: p.falling
           ? 'OFF TRACK · Respawning'

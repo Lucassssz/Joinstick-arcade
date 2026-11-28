@@ -3,6 +3,8 @@ import {
   ARENA_WIDTH,
   type BlockHopPlatform,
   type BlockHopSnapshot,
+  type CardGameId,
+  type CardPrivateState,
   type ClawManiaSnapshot,
   type ClawPrizeItem,
   type DrawGuessRelaySnapshot,
@@ -1345,7 +1347,7 @@ export const eggRushModule: ServerGameModule<EggRushState, EggRushSnapshot> = {
         sp.finished = true;
         state.finishCount++;
         sp.finishRank = state.finishCount;
-        const finishBonus = Math.max(150, 700 - (state.finishCount - 1) * 120) * (frenzyActive ? 2 : 1);
+        const finishBonus = Math.max(150, 700 - (state.finishCount - 1) * 120);
         sp.score += finishBonus;
         state.banner = `${sp.name} FINISHED #${sp.finishRank}!`;
         state.bannerTimer = 2.0;
@@ -1414,13 +1416,19 @@ export const eggRushModule: ServerGameModule<EggRushState, EggRushSnapshot> = {
     };
   },
   buildResults(state) {
-    return buildRankings(
-      state.players.map((p) => ({
-        id: p.id,
-        score: p.score,
-        stat: p.finished ? `Finished #${p.finishRank}` : `${Math.round((p.x / state.trackLength) * 100)}% Track`,
-      }))
-    );
+    const sorted = [...state.players].sort((a, b) => {
+      const aRank = a.finished ? a.finishRank : 999;
+      const bRank = b.finished ? b.finishRank : 999;
+      if (aRank !== bRank) return aRank - bRank;
+      if (b.x !== a.x) return b.x - a.x;
+      return b.score - a.score;
+    });
+    return sorted.map((p, i) => ({
+      playerId: p.id,
+      rank: i + 1,
+      score: Math.round(p.score),
+      statLabel: p.finished ? `Finished #${p.finishRank}` : `${Math.round((p.x / state.trackLength) * 100)}% Track`,
+    }));
   },
 };
 
@@ -2468,6 +2476,94 @@ const SKETCH_PROMPTS: { en: string; zh: string }[] = [
 ];
 const BRUSH_COLORS = ['#111827', '#EF4444', '#2563EB', '#10B981', '#F59E0B', '#9333EA'];
 
+interface BotSketchStroke {
+  colorIdx: number;
+  pts: [number, number][];
+}
+
+// Normalized [0..1, 0..1] recognizable multi-stroke drawings for Bot Artists
+const SKETCH_ARTWORK: Record<string, BotSketchStroke[]> = {
+  Watermelon: [
+    { colorIdx: 3, pts: [[0.18, 0.56], [0.28, 0.72], [0.5, 0.78], [0.72, 0.72], [0.82, 0.56]] },
+    { colorIdx: 1, pts: [[0.21, 0.54], [0.5, 0.54], [0.79, 0.54], [0.68, 0.68], [0.5, 0.72], [0.32, 0.68], [0.21, 0.54]] },
+    { colorIdx: 0, pts: [[0.38, 0.61], [0.39, 0.63]] },
+    { colorIdx: 0, pts: [[0.5, 0.63], [0.51, 0.65]] },
+    { colorIdx: 0, pts: [[0.62, 0.61], [0.61, 0.63]] },
+  ],
+  Hotpot: [
+    { colorIdx: 0, pts: [[0.24, 0.55], [0.24, 0.72], [0.5, 0.78], [0.76, 0.72], [0.76, 0.55]] },
+    { colorIdx: 4, pts: [[0.24, 0.54], [0.35, 0.46], [0.65, 0.46], [0.76, 0.54], [0.65, 0.62], [0.35, 0.62], [0.24, 0.54]] },
+    { colorIdx: 1, pts: [[0.5, 0.46], [0.46, 0.54], [0.54, 0.62]] },
+    { colorIdx: 2, pts: [[0.36, 0.38], [0.33, 0.31], [0.38, 0.24]] },
+    { colorIdx: 2, pts: [[0.62, 0.38], [0.65, 0.31], [0.6, 0.24]] },
+  ],
+  Rocket: [
+    { colorIdx: 2, pts: [[0.5, 0.16], [0.6, 0.34], [0.6, 0.64], [0.4, 0.64], [0.4, 0.34], [0.5, 0.16]] },
+    { colorIdx: 1, pts: [[0.4, 0.52], [0.29, 0.68], [0.4, 0.64]] },
+    { colorIdx: 1, pts: [[0.6, 0.52], [0.71, 0.68], [0.6, 0.64]] },
+    { colorIdx: 2, pts: [[0.46, 0.38], [0.54, 0.38], [0.54, 0.46], [0.46, 0.46], [0.46, 0.38]] },
+    { colorIdx: 4, pts: [[0.43, 0.66], [0.5, 0.84], [0.57, 0.66]] },
+  ],
+  Cat: [
+    { colorIdx: 0, pts: [[0.34, 0.4], [0.32, 0.22], [0.44, 0.34], [0.56, 0.34], [0.68, 0.22], [0.66, 0.4], [0.7, 0.56], [0.58, 0.68], [0.42, 0.68], [0.3, 0.56], [0.34, 0.4]] },
+    { colorIdx: 2, pts: [[0.42, 0.48], [0.43, 0.5]] },
+    { colorIdx: 2, pts: [[0.58, 0.48], [0.57, 0.5]] },
+    { colorIdx: 1, pts: [[0.48, 0.55], [0.52, 0.55], [0.5, 0.58], [0.48, 0.55]] },
+    { colorIdx: 0, pts: [[0.22, 0.52], [0.35, 0.54]] },
+    { colorIdx: 0, pts: [[0.78, 0.52], [0.65, 0.54]] },
+  ],
+  'Bubble Tea': [
+    { colorIdx: 4, pts: [[0.36, 0.34], [0.4, 0.76], [0.6, 0.76], [0.64, 0.34], [0.36, 0.34]] },
+    { colorIdx: 5, pts: [[0.56, 0.16], [0.5, 0.55]] },
+    { colorIdx: 0, pts: [[0.44, 0.68], [0.45, 0.69]] },
+    { colorIdx: 0, pts: [[0.51, 0.66], [0.52, 0.67]] },
+    { colorIdx: 0, pts: [[0.56, 0.7], [0.57, 0.71]] },
+  ],
+  Dragon: [
+    { colorIdx: 1, pts: [[0.2, 0.58], [0.3, 0.44], [0.42, 0.6], [0.56, 0.42], [0.68, 0.58], [0.8, 0.45]] },
+    { colorIdx: 4, pts: [[0.72, 0.36], [0.84, 0.38], [0.82, 0.48], [0.7, 0.46], [0.72, 0.36]] },
+    { colorIdx: 4, pts: [[0.72, 0.35], [0.68, 0.25]] },
+    { colorIdx: 1, pts: [[0.85, 0.43], [0.92, 0.4], [0.9, 0.46]] },
+  ],
+  Pizza: [
+    { colorIdx: 4, pts: [[0.5, 0.2], [0.26, 0.74], [0.74, 0.74], [0.5, 0.2]] },
+    { colorIdx: 4, pts: [[0.24, 0.74], [0.5, 0.8], [0.76, 0.74]] },
+    { colorIdx: 1, pts: [[0.49, 0.46], [0.51, 0.48]] },
+    { colorIdx: 1, pts: [[0.42, 0.62], [0.44, 0.64]] },
+    { colorIdx: 1, pts: [[0.58, 0.61], [0.6, 0.63]] },
+  ],
+  Snowman: [
+    { colorIdx: 2, pts: [[0.5, 0.46], [0.66, 0.58], [0.62, 0.78], [0.38, 0.78], [0.34, 0.58], [0.5, 0.46]] },
+    { colorIdx: 2, pts: [[0.5, 0.26], [0.6, 0.34], [0.56, 0.46], [0.44, 0.46], [0.4, 0.34], [0.5, 0.26]] },
+    { colorIdx: 0, pts: [[0.38, 0.26], [0.62, 0.26], [0.57, 0.16], [0.43, 0.16], [0.43, 0.26]] },
+    { colorIdx: 4, pts: [[0.5, 0.36], [0.58, 0.38]] },
+  ],
+  Crown: [
+    { colorIdx: 4, pts: [[0.24, 0.68], [0.2, 0.32], [0.38, 0.5], [0.5, 0.24], [0.62, 0.5], [0.8, 0.32], [0.76, 0.68], [0.24, 0.68]] },
+    { colorIdx: 1, pts: [[0.49, 0.56], [0.51, 0.58]] },
+    { colorIdx: 2, pts: [[0.35, 0.58], [0.36, 0.6]] },
+    { colorIdx: 3, pts: [[0.64, 0.58], [0.65, 0.6]] },
+  ],
+  Umbrella: [
+    { colorIdx: 5, pts: [[0.2, 0.5], [0.3, 0.3], [0.5, 0.22], [0.7, 0.3], [0.8, 0.5], [0.65, 0.46], [0.5, 0.5], [0.35, 0.46], [0.2, 0.5]] },
+    { colorIdx: 0, pts: [[0.5, 0.22], [0.5, 0.74], [0.44, 0.8], [0.38, 0.74]] },
+  ],
+  Guitar: [
+    { colorIdx: 4, pts: [[0.38, 0.48], [0.26, 0.56], [0.26, 0.74], [0.42, 0.8], [0.56, 0.72], [0.54, 0.56], [0.38, 0.48]] },
+    { colorIdx: 0, pts: [[0.48, 0.52], [0.72, 0.24]] },
+    { colorIdx: 0, pts: [[0.68, 0.2], [0.78, 0.28]] },
+    { colorIdx: 1, pts: [[0.39, 0.62], [0.42, 0.65]] },
+  ],
+  Panda: [
+    { colorIdx: 0, pts: [[0.34, 0.32], [0.28, 0.22], [0.38, 0.26]] },
+    { colorIdx: 0, pts: [[0.66, 0.32], [0.72, 0.22], [0.62, 0.26]] },
+    { colorIdx: 0, pts: [[0.5, 0.28], [0.68, 0.4], [0.66, 0.64], [0.5, 0.72], [0.34, 0.64], [0.32, 0.4], [0.5, 0.28]] },
+    { colorIdx: 0, pts: [[0.39, 0.44], [0.44, 0.48]] },
+    { colorIdx: 0, pts: [[0.56, 0.48], [0.61, 0.44]] },
+    { colorIdx: 0, pts: [[0.48, 0.56], [0.52, 0.56], [0.5, 0.59]] },
+  ],
+};
+
 interface DrawGuessPlayerSim {
   id: string;
   slotIndex: number;
@@ -2482,6 +2578,7 @@ interface DrawGuessPlayerSim {
   navCooldown: number;
   prevA: boolean;
   prevB: boolean;
+  lastShootRelease: number;
 }
 
 interface DrawGuessState {
@@ -2498,6 +2595,10 @@ interface DrawGuessState {
   phase: 'drawing' | 'reveal';
   timeLeft: number;
   banner: string | null;
+  botStrokeIdx: number;
+  botSegmentIdx: number;
+  botSegmentT: number;
+  botBreakPending: boolean;
   popups: { x: number; y: number; text: string; colorHex: string; alpha: number }[];
   players: DrawGuessPlayerSim[];
 }
@@ -2509,16 +2610,38 @@ function setupSketchRound(state: DrawGuessState) {
   state.strokes = [];
   state.brushX = 420;
   state.brushY = 340;
+  state.colorIdx = 0;
   state.isDrawing = false;
   state.phase = 'drawing';
   state.timeLeft = 22;
+  state.botStrokeIdx = 0;
+  state.botSegmentIdx = 0;
+  state.botSegmentT = 0;
+  state.botBreakPending = true;
   for (const p of state.players) {
     p.guessedCorrect = false;
     p.lockedGuess = false;
     p.cursorOption = 0;
+    p.prevA = false;
+    p.prevB = false;
   }
   const artist = state.players[state.artistIdx];
-  state.banner = `${artist.name} IS DRAWING: ${pool[state.correctIndex].en.toUpperCase()} (${pool[state.correctIndex].zh})`;
+  state.banner = `${artist.name} IS SKETCHING — GUESS FAST!`;
+}
+
+function pushStrokePoint(state: DrawGuessState, x: number, y: number, colorHex: string, forceNewStroke = false) {
+  if (state.strokes.length >= 900) return;
+  const last = state.strokes[state.strokes.length - 1];
+  const startsFresh = forceNewStroke || !state.isDrawing || !last;
+  if (startsFresh || dist(last.x, last.y, x, y) > 4.5) {
+    state.strokes.push({
+      x: Math.round(x * 10) / 10,
+      y: Math.round(y * 10) / 10,
+      colorHex,
+      newStroke: startsFresh,
+    });
+  }
+  state.isDrawing = true;
 }
 
 export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRelaySnapshot> = {
@@ -2539,6 +2662,10 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
       phase: 'drawing',
       timeLeft: 22,
       banner: null,
+      botStrokeIdx: 0,
+      botSegmentIdx: 0,
+      botSegmentT: 0,
+      botBreakPending: true,
       popups: [],
       players: ctx.players.map((p) => ({
         id: p.id,
@@ -2554,10 +2681,43 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
         navCooldown: 0,
         prevA: false,
         prevB: false,
+        lastShootRelease: 0,
       })),
     };
     setupSketchRound(st);
     return st;
+  },
+  getPrivateStates(state) {
+    const artist = state.players[state.artistIdx];
+    const ans = state.options[state.correctIndex];
+    const out: Record<string, CardPrivateState> = {};
+    for (const p of state.players) {
+      const isArtist = p.id === artist.id;
+      out[p.id] = {
+        gameId: 'draw-guess-relay' as unknown as CardGameId,
+        playerId: p.id,
+        hand: [],
+        cursorIndex: p.cursorOption,
+        isMyTurn: isArtist && state.phase === 'drawing',
+        isActionRequired: isArtist && state.phase === 'drawing',
+        turnTimeLeft: state.timeLeft,
+        turnTotal: 22,
+        phase: state.phase === 'reveal' ? 'reveal' : 'selecting',
+        badgeText: isArtist ? `${ans.en} · ${ans.zh}` : `${artist.name} sketching`,
+        badgeColorHex: isArtist ? BRUSH_COLORS[state.colorIdx] : '#38BDF8',
+        statusHint: isArtist
+          ? `Draw: ${ans.en} (${ans.zh}) — drag on board!`
+          : p.lockedGuess
+          ? 'Guess locked! Waiting for reveal...'
+          : 'Pick the matching answer on the right!',
+        statusHintZh: isArtist
+          ? `请画出：${ans.zh}（${ans.en}）— 直接拖动即可绘线！`
+          : p.lockedGuess
+          ? '已锁定答案，等待揭晓...'
+          : '点击或上下选择右侧正确答案！',
+      };
+    }
+    return out;
   },
   step(state, players, dt, frenzyActive) {
     const sounds: SoundEvent[] = [];
@@ -2567,8 +2727,8 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
     const artist = state.players[state.artistIdx];
 
     if (state.phase === 'drawing') {
-      // Artist paints on left/center canvas board (x: 110..740, y: 125..565)
       const aInp = inputMap.get(artist.id);
+      const ans = state.options[state.correctIndex];
       const amx = aInp?.input.moveX ?? 0;
       const amy = aInp?.input.moveY ?? 0;
       const aHold = Boolean(aInp?.input.actionA);
@@ -2576,31 +2736,97 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
       const bPressed = bNow && !artist.prevB;
       artist.prevB = bNow;
 
-      state.brushX = clamp(state.brushX + amx * 340 * dt, 118, 732);
-      state.brushY = clamp(state.brushY + amy * 340 * dt, 132, 558);
+      const sr = aInp?.input.shootRelease;
+      if (typeof sr === 'number' && sr !== artist.lastShootRelease) {
+        artist.lastShootRelease = sr;
+        const spPower = aInp?.input.shootPower ?? 0;
+        if (spPower >= 0.9) {
+          state.strokes = [];
+          state.isDrawing = false;
+          sounds.push({ type: 'tick', playerId: artist.id });
+        } else {
+          state.colorIdx = clamp(Math.floor(spPower * BRUSH_COLORS.length), 0, BRUSH_COLORS.length - 1);
+          sounds.push({ type: 'tick', playerId: artist.id });
+        }
+      }
 
       if (bPressed) {
         state.colorIdx = (state.colorIdx + 1) % BRUSH_COLORS.length;
         sounds.push({ type: 'tick', playerId: artist.id });
       }
-      if (aHold) {
-        const last = state.strokes[state.strokes.length - 1];
-        if (!state.isDrawing || !last || dist(last.x, last.y, state.brushX, state.brushY) > 7) {
-          if (state.strokes.length < 340) {
-            state.strokes.push({
-              x: state.brushX,
-              y: state.brushY,
-              colorHex: BRUSH_COLORS[state.colorIdx],
-              newStroke: !state.isDrawing,
-            });
+
+      if (aInp?.isBot) {
+        // AI Artist traces recognizable multi-stroke vector artwork of the prompt
+        const artwork = SKETCH_ARTWORK[ans.en] ?? SKETCH_ARTWORK.Cat;
+        if (state.botStrokeIdx < artwork.length) {
+          const strokeSpec = artwork[state.botStrokeIdx];
+          state.colorIdx = strokeSpec.colorIdx % BRUSH_COLORS.length;
+          const pts = strokeSpec.pts;
+          if (pts.length >= 2 && state.botSegmentIdx < pts.length - 1) {
+            const toBoardX = (nx: number) => 150 + nx * 550;
+            const toBoardY = (ny: number) => 155 + ny * 380;
+            const p0 = pts[state.botSegmentIdx];
+            const p1 = pts[state.botSegmentIdx + 1];
+            const x0 = toBoardX(p0[0]);
+            const y0 = toBoardY(p0[1]);
+            const x1 = toBoardX(p1[0]);
+            const y1 = toBoardY(p1[1]);
+            const segLen = Math.max(8, dist(x0, y0, x1, y1));
+
+            if (state.botBreakPending) {
+              state.brushX = x0;
+              state.brushY = y0;
+              state.isDrawing = false;
+              pushStrokePoint(state, x0, y0, BRUSH_COLORS[state.colorIdx], true);
+              state.botBreakPending = false;
+            } else {
+              const stepPx = 190 * dt;
+              state.botSegmentT += stepPx / segLen;
+              const tClamped = Math.min(1, state.botSegmentT);
+              state.brushX = x0 + (x1 - x0) * tClamped;
+              state.brushY = y0 + (y1 - y0) * tClamped;
+              pushStrokePoint(state, state.brushX, state.brushY, BRUSH_COLORS[state.colorIdx], false);
+
+              if (state.botSegmentT >= 1) {
+                state.botSegmentT = 0;
+                state.botSegmentIdx += 1;
+                if (state.botSegmentIdx >= pts.length - 1) {
+                  state.botStrokeIdx += 1;
+                  state.botSegmentIdx = 0;
+                  state.botBreakPending = true;
+                  state.isDrawing = false;
+                }
+              }
+            }
+          } else {
+            state.botStrokeIdx += 1;
+            state.botSegmentIdx = 0;
+            state.botSegmentT = 0;
+            state.botBreakPending = true;
+            state.isDrawing = false;
           }
+        } else {
+          state.isDrawing = false;
         }
-        state.isDrawing = true;
       } else {
-        state.isDrawing = false;
+        const hasDirectTarget =
+          typeof aInp?.input.targetX === 'number' && typeof aInp?.input.targetY === 'number';
+        if (hasDirectTarget) {
+          state.brushX = clamp(aInp!.input.targetX!, 114, 738);
+          state.brushY = clamp(aInp!.input.targetY!, 128, 562);
+        } else {
+          state.brushX = clamp(state.brushX + amx * 360 * dt, 114, 738);
+          state.brushY = clamp(state.brushY + amy * 360 * dt, 128, 562);
+        }
+
+        if (aHold) {
+          pushStrokePoint(state, state.brushX, state.brushY, BRUSH_COLORS[state.colorIdx]);
+        } else {
+          state.isDrawing = false;
+        }
       }
 
-      // Guessers select among 4 options
+      // Guessers select among 4 options (via joystick/arrows OR direct tap on option cards)
       let allGuessed = state.players.length > 1;
       for (const sp of state.players) {
         if (sp.id === artist.id) continue;
@@ -2613,7 +2839,13 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
 
         if (!sp.lockedGuess) {
           allGuessed = false;
-          if (sp.navCooldown <= 0 && Math.abs(my) > 0.35) {
+          const hasDirectOpt =
+            typeof inp?.input.targetX === 'number' &&
+            typeof inp?.input.targetY === 'number' &&
+            inp.input.targetX >= 760;
+          if (hasDirectOpt) {
+            sp.cursorOption = clamp(Math.floor((inp!.input.targetY! - 108) / 112), 0, 3);
+          } else if (sp.navCooldown <= 0 && Math.abs(my) > 0.35) {
             sp.cursorOption = (sp.cursorOption + (my > 0 ? 1 : -1) + 4) % 4;
             sp.navCooldown = 0.18;
           }
@@ -2628,6 +2860,7 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
               state.popups.push({ x: 960, y: 260, text: `${sp.name} +${speedPts}!`, colorHex: '#10D98B', alpha: 1 });
             } else {
               sounds.push({ type: 'hit', playerId: sp.id });
+              state.popups.push({ x: 960, y: 310, text: `${sp.name} LOCKED`, colorHex: '#94A3B8', alpha: 0.9 });
             }
           }
         }
@@ -2635,14 +2868,14 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
 
       if (state.timeLeft <= 0 || allGuessed) {
         state.phase = 'reveal';
+        state.isDrawing = false;
         state.timeLeft = 2.8;
-        const ans = state.options[state.correctIndex];
         state.banner = `ANSWER: ${ans.en.toUpperCase()} (${ans.zh})!`;
       }
     } else {
       if (state.timeLeft <= 0) {
         if (state.round >= state.totalRounds) {
-          return { finished: true, sounds };
+          return { finished: true, sounds, privateStates: this.getPrivateStates!(state, players) };
         }
         state.round++;
         state.artistIdx = (state.artistIdx + 1) % state.players.length;
@@ -2650,7 +2883,7 @@ export const drawGuessRelayModule: ServerGameModule<DrawGuessState, DrawGuessRel
       }
     }
 
-    return { finished: false, sounds };
+    return { finished: false, sounds, privateStates: this.getPrivateStates!(state, players) };
   },
   snapshot(state): DrawGuessRelaySnapshot {
     const artist = state.players[state.artistIdx];

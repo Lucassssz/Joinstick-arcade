@@ -248,6 +248,11 @@ export interface ControllerInput {
   dy: number; // -1 to 1
   a: boolean;
   b: boolean;
+  targetX?: number;
+  targetY?: number;
+  aimAngle?: number;
+  shootPower?: number;
+  shootRelease?: number;
 }
 
 export interface PlayerMatchStats {

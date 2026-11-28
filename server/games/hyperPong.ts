@@ -199,20 +199,44 @@ export const hyperPongModule: ServerGameModule<HyperPongState> = {
         }
       }
 
-      const speed = 540;
-      const targetVx = dx * speed;
-      const targetVy = dy * speed;
-      pad.vx += (targetVx - pad.vx) * Math.min(1, 18 * dt);
-      pad.vy += (targetVy - pad.vy) * Math.min(1, 18 * dt);
-
-      pad.x += pad.vx * dt;
-      pad.y += pad.vy * dt;
-
-      // Clamp to player's half of the court
       const minX = pad.side === 'left' ? COURT_LEFT + pad.radius : ARENA_WIDTH / 2 + pad.radius + 8;
       const maxX = pad.side === 'left' ? ARENA_WIDTH / 2 - pad.radius - 8 : COURT_RIGHT - pad.radius;
+      const minY = COURT_TOP + pad.radius;
+      const maxY = COURT_BOTTOM - pad.radius;
+
+      if (
+        inp &&
+        typeof inp.input.targetX === 'number' &&
+        Number.isFinite(inp.input.targetX) &&
+        typeof inp.input.targetY === 'number' &&
+        Number.isFinite(inp.input.targetY)
+      ) {
+        const clampedX = Math.max(minX, Math.min(maxX, inp.input.targetX));
+        const clampedY = Math.max(minY, Math.min(maxY, inp.input.targetY));
+        const prevX = pad.x;
+        const prevY = pad.y;
+        const follow = Math.min(1, 44 * dt);
+        pad.x += (clampedX - pad.x) * follow;
+        pad.y += (clampedY - pad.y) * follow;
+        const safeDt = Math.max(0.001, dt);
+        const rawVx = (pad.x - prevX) / safeDt;
+        const rawVy = (pad.y - prevY) / safeDt;
+        pad.vx = Math.max(-1100, Math.min(1100, rawVx));
+        pad.vy = Math.max(-1100, Math.min(1100, rawVy));
+      } else {
+        const speed = 540;
+        const targetVx = dx * speed;
+        const targetVy = dy * speed;
+        pad.vx += (targetVx - pad.vx) * Math.min(1, 18 * dt);
+        pad.vy += (targetVy - pad.vy) * Math.min(1, 18 * dt);
+
+        pad.x += pad.vx * dt;
+        pad.y += pad.vy * dt;
+      }
+
+      // Clamp to player's half of the court
       pad.x = Math.max(minX, Math.min(maxX, pad.x));
-      pad.y = Math.max(COURT_TOP + pad.radius, Math.min(COURT_BOTTOM - pad.radius, pad.y));
+      pad.y = Math.max(minY, Math.min(maxY, pad.y));
 
       pad.cooldownA = pad.smashCd / SMASH_CD;
       pad.cooldownB = pad.magnetCd / MAGNET_CD;

@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import type { WebSocket } from 'ws';
 import {
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
   MAX_PLAYERS_PER_ROOM,
   PLAYER_PALETTE,
   type BotDifficulty,
@@ -48,6 +50,7 @@ import {
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
 } from '../src/shared/games.ts';
+import { getGamePadProfile } from '../src/shared/padProfiles.ts';
 import {
   CHAOS_WHEEL_MUTATORS,
   computeTournamentMarks,
@@ -780,8 +783,12 @@ export class RoomManager {
       room: this.buildRoomSnapshot(room),
     });
 
+    const needsPhoneTick =
+      room.roomMode === 'pocket' ||
+      Boolean(getGamePadProfile(room.selectedGameId).pocketDirectTouch);
+
     if (
-      (binding?.role === 'host' || room.roomMode === 'pocket') &&
+      (binding?.role === 'host' || needsPhoneTick) &&
       room.lastSnapshot &&
       (knownTickSeq === undefined || knownTickSeq < room.tickSeq)
     ) {
@@ -805,16 +812,16 @@ export class RoomManager {
     }
 
     if (playerId) {
+      const engine = SERVER_GAMES[room.selectedGameId];
       if (
         room.gameState &&
-        CARD_GAME_IDS.has(room.selectedGameId) &&
+        engine?.getPrivateStates &&
         (room.status === 'BRIEFING' ||
           room.status === 'COUNTDOWN' ||
           room.status === 'PLAYING' ||
           room.status === 'PAUSED')
       ) {
-        const engine = SERVER_GAMES[room.selectedGameId];
-        const states = engine.getPrivateStates?.(room.gameState, this.toInputPlayers(room));
+        const states = engine.getPrivateStates(room.gameState, this.toInputPlayers(room));
         this.send(ws, {
           type: 'player:card-state',
           cardState: states?.[playerId] ?? null,
@@ -832,7 +839,10 @@ export class RoomManager {
 
   private sendToScreenListeners(room: RoomRecord, msg: ServerMessage): void {
     this.send(room.hostWs, msg);
-    if (room.roomMode === 'pocket') {
+    const needsPhoneTick =
+      room.roomMode === 'pocket' ||
+      Boolean(getGamePadProfile(room.selectedGameId).pocketDirectTouch);
+    if (needsPhoneTick) {
       for (const p of room.players.values()) {
         if (p.connected && !p.isBot && p.ws) {
           this.send(p.ws, msg);
@@ -1434,7 +1444,11 @@ export class RoomManager {
               });
             }
           }
-          if (room.roomMode === 'pocket' && room.lastSnapshot) {
+          if (
+            (room.roomMode === 'pocket' ||
+              Boolean(getGamePadProfile(room.selectedGameId).pocketDirectTouch)) &&
+            room.lastSnapshot
+          ) {
             this.send(
               ws,
               room.lastCompetitiveSnapshot
@@ -1546,7 +1560,11 @@ export class RoomManager {
           playerId,
           room: this.buildRoomSnapshot(room),
         });
-        if (room.roomMode === 'pocket' && room.lastSnapshot) {
+        if (
+          (room.roomMode === 'pocket' ||
+            Boolean(getGamePadProfile(room.selectedGameId).pocketDirectTouch)) &&
+          room.lastSnapshot
+        ) {
           this.send(
             ws,
             room.lastCompetitiveSnapshot
@@ -2208,12 +2226,28 @@ export class RoomManager {
 
         const dx = Number.isFinite(msg.input.dx) ? Math.max(-1, Math.min(1, msg.input.dx)) : 0;
         const dy = Number.isFinite(msg.input.dy) ? Math.max(-1, Math.min(1, msg.input.dy)) : 0;
-        player.input = {
+        const nextInput: ControllerInput = {
           dx,
           dy,
           a: Boolean(msg.input.a),
           b: Boolean(msg.input.b),
         };
+        if (typeof msg.input.targetX === 'number' && Number.isFinite(msg.input.targetX)) {
+          nextInput.targetX = Math.max(0, Math.min(ARENA_WIDTH, msg.input.targetX));
+        }
+        if (typeof msg.input.targetY === 'number' && Number.isFinite(msg.input.targetY)) {
+          nextInput.targetY = Math.max(0, Math.min(ARENA_HEIGHT, msg.input.targetY));
+        }
+        if (typeof msg.input.aimAngle === 'number' && Number.isFinite(msg.input.aimAngle)) {
+          nextInput.aimAngle = Math.max(-Math.PI * 2, Math.min(Math.PI * 2, msg.input.aimAngle));
+        }
+        if (typeof msg.input.shootPower === 'number' && Number.isFinite(msg.input.shootPower)) {
+          nextInput.shootPower = Math.max(0, Math.min(1, msg.input.shootPower));
+        }
+        if (typeof msg.input.shootRelease === 'number' && Number.isFinite(msg.input.shootRelease)) {
+          nextInput.shootRelease = Math.max(0, Math.floor(msg.input.shootRelease));
+        }
+        player.input = nextInput;
         room.lastActivityAt = Date.now();
         return;
       }
@@ -3565,7 +3599,16 @@ export class RoomManager {
 
       const currentInputs = this.toInputPlayers(room).map((ip) =>
         mutator.invertControls
-          ? { ...ip, input: { ...ip.input, dx: -ip.input.dx, dy: -ip.input.dy } }
+          ? {
+              ...ip,
+              input: {
+                ...ip.input,
+                dx: -ip.input.dx,
+                dy: -ip.input.dy,
+                targetY: ip.input.targetY !== undefined ? ARENA_HEIGHT - ip.input.targetY : undefined,
+                aimAngle: ip.input.aimAngle !== undefined ? ip.input.aimAngle + Math.PI : undefined,
+              },
+            }
           : ip
       );
 
@@ -3608,9 +3651,17 @@ export class RoomManager {
         room.selectedGameId === 'wavelength-sync' ||
         room.selectedGameId === 'tangram-silhouette' ||
         CARD_GAME_IDS.has(room.selectedGameId);
+      const isRaceFinishGame =
+        room.selectedGameId === 'turbo-drift' ||
+        room.selectedGameId === 'glass-bridge' ||
+        room.selectedGameId === 'canoe-sprint' ||
+        room.selectedGameId === 'egg-rush';
       const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);
-      const scoreMult = mutator.scoreMult * (room.frenzy.active && !engine.handlesOwnFrenzyMultiplier ? 2 : 1);
+      const scoreMult =
+        isRaceFinishGame
+          ? 1
+          : mutator.scoreMult * (room.frenzy.active && !engine.handlesOwnFrenzyMultiplier ? 2 : 1);
 
       const prevSnapshot = room.lastSnapshot;
       const result = engine.step(room.gameState, currentInputs, simDt, room.frenzy.active);
@@ -3639,15 +3690,15 @@ export class RoomManager {
           const prevScore = p.score;
           const prevAlive = p.alive;
           const rawScore = hud.score;
-          if (rawScore > p.rawGameScore && scoreMult > 1) {
+          if (!isRaceFinishGame && rawScore > p.rawGameScore && scoreMult > 1) {
             const gain = rawScore - p.rawGameScore;
             p.bonusScore += Math.round(gain * (scoreMult - 1));
           }
           p.rawGameScore = rawScore;
-          p.score = rawScore + p.bonusScore;
+          p.score = rawScore + (isRaceFinishGame ? 0 : p.bonusScore);
           p.alive = hud.alive;
           p.statText =
-            p.bonusScore > 0 && hud.statText.includes(`${rawScore}`)
+            !isRaceFinishGame && p.bonusScore > 0 && hud.statText.includes(`${rawScore}`)
               ? hud.statText.replace(`${rawScore}`, `${p.score}`)
               : hud.statText;
           p.cooldownA = hud.cooldownA;
@@ -3666,7 +3717,7 @@ export class RoomManager {
       let compSnap: CompetitiveSnapshot | null = room.lastCompetitiveSnapshot;
       const tickSounds: SoundEvent[] = [...result.sounds];
       const tickHaptics = [...result.haptics];
-      if (room.competitiveState && !result.finished) {
+      if (room.competitiveState && !result.finished && !isRaceFinishGame) {
         const feed = [...room.players.values()].map((p) => ({
           id: p.id,
           name: p.name,
@@ -3805,11 +3856,23 @@ export class RoomManager {
           'color-clash',
           'property-deal',
           'dark-flip-clash',
-          'ludo-royale',
-          'jungle-ladders',
-          'red-light-dash',
-          'fuse-pass',
-          'bomb-grid',
+          'sushi-draft',
+          'flip-seven',
+          'lucky-21',
+          'ten-pair-showdown',
+          'rummy-royale',
+          'sequence-jack',
+          'hearts-breaker',
+          'spades-bidding',
+          'poker-showdown',
+          'tarot-arcana',
+          'baccarat-club',
+          'memory-pairs',
+          'codenames-grid',
+          'fib-party',
+          'word-pulse',
+          'trivia-blitz',
+          'lucky-auction',
           'big-two-royale',
           'landlord-clash',
           'speed-mahjong',
@@ -3817,25 +3880,61 @@ export class RoomManager {
           'undercover-word',
           'midnight-werewolf',
           'idiom-chain',
+          'camel-stack-derby',
+          'route-express',
+          'gem-engine-guild',
+          'secret-rank-flags',
+          'row-six-bust',
+          'silent-sync',
+          'one-card-court',
+          'firework-hints',
+          'tunnel-saboteur',
+          'word-tile-crossroads',
+          'rich-street',
+          'ludo-royale',
+          'jungle-ladders',
+          'star-party-board',
+          'reversi-clash',
+          'four-in-a-row',
+          'neon-checkers',
+          'naval-salvo',
+          'carrom-arena',
+          'dungeon-crawl-board',
+          'pit-harvest',
+          'gomoku-blitz',
+          'chess-blitz',
+          'domino-chain',
+          'hexagon-conquest',
+          'backgammon-sprint',
+          'mancala-jewels',
+          'curling-masters',
+          'mosaic-tile-draft',
+          'maze-wall-duel',
+          'corner-polyomino',
+          'pillar-ascent-3d',
+          'hex-island-settlers',
+          'hex-insect-chess',
+          'deep-sea-oxygen',
+          'picross-nonogram',
+          'speed-sudoku-duel',
+          'xiangqi-river-clash',
+          'hyper-pong',
+          'pinball-clash',
+          'blade-duel',
+          'volley-smash',
+          'red-light-dash',
+          'fuse-pass',
+          'bomb-grid',
           'goose-alert',
           'truth-bomb',
           'bomb-tag-arena',
           'musical-thrones',
           'laser-jump-rope',
           'paint-rush',
-          'four-in-a-row',
-          'ludo-royale',
-          'star-party-board',
-          'reversi-clash',
-          'neon-checkers',
-          'pit-harvest',
-          'gomoku-blitz',
-          'chess-blitz',
-          'domino-chain',
-          'backgammon-sprint',
-          'mancala-jewels',
-          'rummy-royale',
-          'sequence-jack',
+          'turbo-drift',
+          'glass-bridge',
+          'canoe-sprint',
+          'egg-rush',
         ]);
         const preserveOrder = RANK_PRIORITY_GAMES.has(room.selectedGameId);
         const enriched = baseRankings.map((r) => {
@@ -3844,7 +3943,7 @@ export class RoomManager {
             ...r,
             avatarId: pObj?.avatarId,
             teamId: pObj?.teamId ?? null,
-            score: anyBonus ? r.score + (pObj?.bonusScore ?? 0) : r.score,
+            score: preserveOrder || !anyBonus ? r.score : r.score + (pObj?.bonusScore ?? 0),
           };
         });
         if (anyBonus && !preserveOrder) {

@@ -841,29 +841,83 @@ export function renderDrawGuessRelay(ctx: CanvasRenderingContext2D, snap: DrawGu
   // Left Whiteboard Sketchpad
   drawArenaSlab(ctx, 96, 110, 660, 470, 18, 12, '#F8FAFC', '#94A3B8', '#38BDF8', 3);
 
-  // Painted strokes
+  // Painted strokes (clipped neatly inside whiteboard interior)
   ctx.save();
-  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.roundRect(102, 116, 648, 458, 14);
+  ctx.clip();
+
+  // Subtle drawing paper guide grid
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let gx = 156; gx < 740; gx += 60) {
+    ctx.moveTo(gx, 120);
+    ctx.lineTo(gx, 570);
+  }
+  for (let gy = 170; gy < 570; gy += 60) {
+    ctx.moveTo(106, gy);
+    ctx.lineTo(746, gy);
+  }
+  ctx.stroke();
+
+  const strokeWidth = 8;
+  ctx.lineWidth = strokeWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  for (let i = 1; i < snap.strokes.length; i++) {
-    const prev = snap.strokes[i - 1];
+  for (let i = 0; i < snap.strokes.length; i++) {
     const cur = snap.strokes[i];
-    if (cur.newStroke) continue;
-    ctx.strokeStyle = cur.colorHex;
+    const prev = i > 0 ? snap.strokes[i - 1] : null;
+    if (cur.newStroke || !prev) {
+      ctx.fillStyle = cur.colorHex;
+      ctx.beginPath();
+      ctx.arc(cur.x, cur.y, strokeWidth * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = cur.colorHex;
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(cur.x, cur.y);
+      ctx.stroke();
+    }
+  }
+
+  // Ink palette indicator row at bottom-left of whiteboard
+  const inkPalette = ['#111827', '#EF4444', '#2563EB', '#10B981', '#F59E0B', '#9333EA'];
+  inkPalette.forEach((hex, idx) => {
+    const sx = 128 + idx * 24;
+    const sy = 556;
+    const active = hex.toLowerCase() === snap.brushColor.toLowerCase();
+    ctx.fillStyle = hex;
     ctx.beginPath();
-    ctx.moveTo(prev.x, prev.y);
-    ctx.lineTo(cur.x, cur.y);
+    ctx.arc(sx, sy, active ? 8.5 : 6, 0, Math.PI * 2);
+    ctx.fill();
+    if (active) {
+      ctx.strokeStyle = '#0F172A';
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+    }
+  });
+
+  // Live brush cursor
+  if (snap.phase === 'drawing') {
+    if (snap.isDrawing) {
+      ctx.strokeStyle = snap.brushColor;
+      ctx.globalAlpha = 0.28;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(snap.brushX, snap.brushY, 15, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = snap.brushColor;
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(snap.brushX, snap.brushY, snap.isDrawing ? 9 : 7, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
   }
-  // Live brush cursor
-  ctx.fillStyle = snap.brushColor;
-  ctx.strokeStyle = '#111827';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(snap.brushX, snap.brushY, snap.isDrawing ? 10 : 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
   ctx.restore();
 
   // Right 4 Bilingual Guess Option Cards
@@ -889,12 +943,19 @@ export function renderDrawGuessRelay(ctx: CanvasRenderingContext2D, snap: DrawGu
     ctx.font = '700 15px "Plus Jakarta Sans", sans-serif';
     ctx.fillText(isZh ? opt.en : opt.zh, 806, oy + 64);
 
-    // Picker color dots
+    // Picker color dots + lock checkmark
     pickers.forEach((pk, k) => {
+      const px = 1090 - k * 22;
+      const py = oy + 26;
       ctx.fillStyle = pk.colorHex;
       ctx.beginPath();
-      ctx.arc(1090 - k * 20, oy + 26, 7, 0, Math.PI * 2);
+      ctx.arc(px, py, 8, 0, Math.PI * 2);
       ctx.fill();
+      if (pk.lockedGuess) {
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     });
     ctx.restore();
   });

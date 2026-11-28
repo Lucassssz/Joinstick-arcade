@@ -288,12 +288,30 @@ export const airHockeyNeoModule: CompactGameModule<AirHockeyState, AirHockeyNeoS
       p.smashTimer = Math.max(0, p.smashTimer - dt);
       p.guardTimer = Math.max(0, p.guardTimer - dt);
       const inp = players.find((x) => x.id === p.id)?.input;
-      p.vx = (inp?.moveX ?? 0) * 540;
-      p.vy = (inp?.moveY ?? 0) * 540;
       const minX = p.side === 'left' ? 92 : ARENA_WIDTH / 2 + 34;
       const maxX = p.side === 'left' ? ARENA_WIDTH / 2 - 34 : ARENA_WIDTH - 92;
-      p.x = clamp(p.x + p.vx * dt, minX, maxX);
-      p.y = clamp(p.y + p.vy * dt, 98, ARENA_HEIGHT - 98);
+      if (
+        typeof inp?.targetX === 'number' &&
+        Number.isFinite(inp.targetX) &&
+        typeof inp?.targetY === 'number' &&
+        Number.isFinite(inp.targetY)
+      ) {
+        const clampedX = clamp(inp.targetX, minX, maxX);
+        const clampedY = clamp(inp.targetY, 98, ARENA_HEIGHT - 98);
+        const prevX = p.x;
+        const prevY = p.y;
+        const follow = Math.min(1, 44 * dt);
+        p.x = clamp(p.x + (clampedX - p.x) * follow, minX, maxX);
+        p.y = clamp(p.y + (clampedY - p.y) * follow, 98, ARENA_HEIGHT - 98);
+        const safeDt = Math.max(0.001, dt);
+        p.vx = clamp((p.x - prevX) / safeDt, -1100, 1100);
+        p.vy = clamp((p.y - prevY) / safeDt, -1100, 1100);
+      } else {
+        p.vx = (inp?.moveX ?? 0) * 540;
+        p.vy = (inp?.moveY ?? 0) * 540;
+        p.x = clamp(p.x + p.vx * dt, minX, maxX);
+        p.y = clamp(p.y + p.vy * dt, 98, ARENA_HEIGHT - 98);
+      }
 
       const aDown = !!inp?.actionA;
       const bDown = !!inp?.actionB;
@@ -435,7 +453,7 @@ const SKEE_RINGS = [
 interface SkeeRollState {
   timeLeft: number;
   totalTime: number;
-  balls: { x: number; y: number; vx: number; vy: number; ownerId: string; ownerSlot: number; colorHex: string; life: number }[];
+  balls: { x: number; y: number; vx: number; vy: number; bestPts: number; ownerId: string; ownerSlot: number; colorHex: string; life: number }[];
   players: {
     id: string;
     slotIndex: number;
@@ -494,17 +512,19 @@ export const skeeRollModule: CompactGameModule<SkeeRollState, SkeeRollSnapshot> 
         p.charging = true;
         p.charge = Math.min(1, p.charge + dt * 1.1);
       } else if (p.charging && !aDown) {
-        const power = 520 + p.charge * 560;
-        const aimAngle = (p.aimX - 600) / 380;
+        // Calibrated for ramp deceleration 460 px/s^2 from y=635:
+        // charge 0 -> ~520 (reaches y=341), charge 0.65 -> ~645 (reaches y=182), charge 1 -> ~705 (reaches y=95)
+        const power = 520 + p.charge * 185;
         state.balls.push({
           x: p.aimX,
           y: 635,
-          vx: aimAngle * 150,
+          vx: 0,
           vy: -power,
+          bestPts: 0,
           ownerId: p.id,
           ownerSlot: p.slotIndex,
           colorHex: p.colorHex,
-          life: 1.4,
+          life: 2.0,
         });
         p.charging = false;
         p.charge = 0;
@@ -515,12 +535,13 @@ export const skeeRollModule: CompactGameModule<SkeeRollState, SkeeRollSnapshot> 
         state.balls.push({
           x: p.aimX,
           y: 635,
-          vx: ((600 - p.aimX) * 0.25),
-          vy: -860,
+          vx: (600 - p.aimX) * 0.12,
+          vy: -640,
+          bestPts: 0,
           ownerId: p.id,
           ownerSlot: p.slotIndex,
           colorHex: p.colorHex,
-          life: 1.3,
+          life: 1.8,
         });
         p.cdA = 0.55;
         sounds.push({ type: 'tick', playerId: p.id });
@@ -535,11 +556,21 @@ export const skeeRollModule: CompactGameModule<SkeeRollState, SkeeRollSnapshot> 
       b.y += b.vy * dt;
       b.vy += 460 * dt; // ramp friction
       b.life -= dt;
-      if (b.vy >= -40 || b.y < 120 || b.life <= 0) {
-        // Score closest pocket
-        let pts = 0;
+
+      // Record highest-value ring entered near peak/slowdown so slight overshoots still drop into top rings
+      if (b.vy >= -220) {
+        const hitPad = frenzy ? 18 : 10;
         for (const ring of SKEE_RINGS) {
-          if (dist(b.x, b.y, ring.x, ring.y) < ring.r + (frenzy ? 16 : 8)) {
+          if (dist(b.x, b.y, ring.x, ring.y) <= ring.r + hitPad) {
+            b.bestPts = Math.max(b.bestPts, ring.points);
+          }
+        }
+      }
+
+      if (b.vy >= -20 || b.y < 110 || b.life <= 0) {
+        let pts = b.bestPts;
+        for (const ring of SKEE_RINGS) {
+          if (dist(b.x, b.y, ring.x, ring.y) <= ring.r + (frenzy ? 18 : 10)) {
             pts = Math.max(pts, ring.points);
           }
         }

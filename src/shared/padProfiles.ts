@@ -6,12 +6,15 @@ export type TrackpadMode = 'glide' | 'flick';
 export type CardViewMode = 'auto' | 'fan' | 'grid';
 export type CardSortMode = 'server' | 'playable' | 'rank';
 
+export type PocketDirectTouchMode = 'golf-slingshot' | 'paddle-drag' | 'sketch-canvas';
+
 export interface GamePadProfile {
   pad: PadMode;
   arrowsStrictFourWay?: boolean;
   preferAutoTap?: boolean;
   trackpadMode?: TrackpadMode;
   trackpadTapForA?: boolean;
+  pocketDirectTouch?: PocketDirectTouchMode;
   cardDefaultView?: 'fan' | 'grid';
   reasonEn: string;
   reasonZh: string;
@@ -40,12 +43,13 @@ const TRACKPAD = (
   trackpadMode: TrackpadMode,
   reasonEn: string,
   reasonZh: string,
-  opts?: { tapForA?: boolean; preferAutoTap?: boolean }
+  opts?: { tapForA?: boolean; preferAutoTap?: boolean; pocketDirectTouch?: PocketDirectTouchMode }
 ): GamePadProfile => ({
   pad: 'trackpad',
   trackpadMode,
   trackpadTapForA: opts?.tapForA ?? false,
   preferAutoTap: opts?.preferAutoTap ?? false,
+  pocketDirectTouch: opts?.pocketDirectTouch,
   reasonEn,
   reasonZh,
 });
@@ -114,8 +118,9 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'hyper-pong': TRACKPAD(
     'glide',
-    'Direct thumb glide for instant paddle defense',
-    '滑控板精准跟手移动挡板'
+    'Drag directly on your paddle to block and smash the puck',
+    '直接手指拖动挡板击打冰球，零遮挡跟手操作',
+    { pocketDirectTouch: 'paddle-drag' }
   ),
   'blade-duel': ANALOG_360(
     '360° spacing & parry dashes',
@@ -385,8 +390,9 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'draw-guess-relay': TRACKPAD(
     'glide',
-    'Natural finger canvas glides just like drawing',
-    '滑控板就像手绘画板一样顺滑画画'
+    'Draw directly on the board or tap a word to guess',
+    '直接在画板手绘涂鸦或点击选项抢答',
+    { pocketDirectTouch: 'sketch-canvas' }
   ),
   'landlord-clash': CARD_PAD(
     'grid',
@@ -547,8 +553,9 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'air-hockey-neo': TRACKPAD(
     'glide',
-    'Natural air-hockey mallet glide & bank slapshot',
-    '桌球气垫滑控击打冰球最具手感'
+    'Drag directly on your mallet to block & slam shots',
+    '直接拖动球槌击打冰球，畅快反弹射门',
+    { pocketDirectTouch: 'paddle-drag' }
   ),
   'skee-roll': TRACKPAD(
     'glide',
@@ -595,8 +602,9 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'mini-golf-pro': TRACKPAD(
     'glide',
-    'Precision 360° putter aiming & power charge',
-    '滑控微调推杆角度与蓄力击球'
+    'Pull back directly from your ball to aim & release to putt',
+    '直接按住拉杆瞄准、松手推杆进洞',
+    { pocketDirectTouch: 'golf-slingshot' }
   ),
   'archery-wind': TRACKPAD(
     'glide',
@@ -610,8 +618,9 @@ export const GAME_PAD_PROFILES: Record<GameId, GamePadProfile> = {
   ),
   'ping-pong-pro': TRACKPAD(
     'glide',
-    '1:1 paddle glide across the table edge + SMASH trigger',
-    '跟手横向滑控接球 + 扣杀大扳机'
+    'Drag directly on your paddle to rally & return spin shots',
+    '直接手指拖动球拍接球反击',
+    { pocketDirectTouch: 'paddle-drag' }
   ),
   'home-run-derby': ARROWS_4WAY(
     'Quick batter-box adjustment + crisp timing SWING button',

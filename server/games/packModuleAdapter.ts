@@ -50,6 +50,11 @@ export interface CompactPlayerInput {
     moveY: number;
     actionA: boolean;
     actionB: boolean;
+    targetX?: number;
+    targetY?: number;
+    aimAngle?: number;
+    shootPower?: number;
+    shootRelease?: number;
   };
 }
 
@@ -115,6 +120,11 @@ function toCompactPlayers(players: ServerPlayerInputState[]): CompactPlayerInput
       moveY: p.input.dy,
       actionA: p.input.a,
       actionB: p.input.b,
+      targetX: p.input.targetX,
+      targetY: p.input.targetY,
+      aimAngle: p.input.aimAngle,
+      shootPower: p.input.shootPower,
+      shootRelease: p.input.shootRelease,
     },
   }));
 }

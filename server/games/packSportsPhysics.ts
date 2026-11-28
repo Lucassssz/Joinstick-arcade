@@ -514,6 +514,7 @@ interface MiniGolfState {
     cdB: number;
     prevA: boolean;
     prevB: boolean;
+    lastShootRelease: number;
   }[];
   banner: string | null;
 }
@@ -582,6 +583,7 @@ export const miniGolfProModule: CompactGameModule<MiniGolfState, MiniGolfProSnap
         cdB: 0,
         prevA: false,
         prevB: false,
+        lastShootRelease: 0,
       })),
       banner: 'HOLE 1 — BANK OFF WALLS TO SINK THE CUP!',
     };
@@ -601,14 +603,46 @@ export const miniGolfProModule: CompactGameModule<MiniGolfState, MiniGolfProSnap
       const my = inp?.moveY ?? 0;
       const aDown = !!inp?.actionA;
       const bDown = !!inp?.actionB;
+      const hasDirectAim = typeof inp?.aimAngle === 'number' && Number.isFinite(inp.aimAngle);
+      const hasDirectPower = typeof inp?.shootPower === 'number' && Number.isFinite(inp.shootPower);
+      const releaseSeq =
+        typeof inp?.shootRelease === 'number' && Number.isFinite(inp.shootRelease)
+          ? inp.shootRelease
+          : 0;
 
-      if (Math.hypot(mx, my) > 0.2) {
-        p.aimAngle = Math.atan2(my, mx);
+      if (hasDirectAim) {
+        p.aimAngle = inp!.aimAngle!;
+      } else {
+        const mag = Math.hypot(mx, my);
+        if (mag > 0.34) {
+          const targetAngle = Math.atan2(my, mx);
+          const diff = Math.atan2(
+            Math.sin(targetAngle - p.aimAngle),
+            Math.cos(targetAngle - p.aimAngle)
+          );
+          const push = clamp((mag - 0.34) / 0.66, 0, 1);
+          const maxStep = (1.6 + push * 5.2) * dt;
+          p.aimAngle += clamp(diff, -maxStep, maxStep);
+        }
       }
 
       const moving = Math.hypot(p.vx, p.vy) > 28;
       if (!moving) {
-        if (aDown && p.cdA <= 0) {
+        if (releaseSeq > p.lastShootRelease && p.cdA <= 0) {
+          p.lastShootRelease = releaseSeq;
+          p.charging = false;
+          const pwr = clamp(hasDirectPower ? inp!.shootPower! : p.power, 0.08, 1);
+          p.power = pwr;
+          const spd = 200 + pwr * 720;
+          p.vx = Math.cos(p.aimAngle) * spd;
+          p.vy = Math.sin(p.aimAngle) * spd;
+          p.strokes += 1;
+          p.cdA = 0.4;
+          sounds.push({ type: 'hit', playerId: p.id });
+        } else if (hasDirectPower && inp!.shootPower! > 0.02 && !aDown) {
+          p.power = clamp(inp!.shootPower!, 0.08, 1);
+          p.charging = true;
+        } else if (aDown && p.cdA <= 0) {
           p.charging = true;
           p.power += p.powerDir * dt * 1.2;
           if (p.power >= 1) {
@@ -618,7 +652,7 @@ export const miniGolfProModule: CompactGameModule<MiniGolfState, MiniGolfProSnap
             p.power = 0.15;
             p.powerDir = 1;
           }
-        } else if (!aDown && p.charging) {
+        } else if (!aDown && p.charging && !hasDirectPower) {
           p.charging = false;
           const spd = 280 + p.power * 640;
           p.vx = Math.cos(p.aimAngle) * spd;
@@ -632,6 +666,13 @@ export const miniGolfProModule: CompactGameModule<MiniGolfState, MiniGolfProSnap
           p.strokes += 1;
           p.cdB = 0.5;
           sounds.push({ type: 'hit', playerId: p.id });
+        } else if (!hasDirectPower && !aDown) {
+          p.charging = false;
+        }
+      } else {
+        p.charging = false;
+        if (releaseSeq > p.lastShootRelease) {
+          p.lastShootRelease = releaseSeq;
         }
       }
       p.prevA = aDown;
@@ -1218,7 +1259,21 @@ export const pingPongProModule: CompactGameModule<PingPongState, PingPongProSnap
       const aDown = !!inp?.actionA;
       const bDown = !!inp?.actionB;
 
-      if (p.side === 'left' || p.side === 'right') {
+      if (
+        typeof inp?.targetX === 'number' &&
+        Number.isFinite(inp.targetX) &&
+        typeof inp?.targetY === 'number' &&
+        Number.isFinite(inp.targetY)
+      ) {
+        const follow = Math.min(1, 42 * dt);
+        if (p.side === 'left' || p.side === 'right') {
+          const ty = clamp(inp.targetY, minY + 45, maxY - 45);
+          p.y = clamp(p.y + (ty - p.y) * follow, minY + 45, maxY - 45);
+        } else {
+          const tx = clamp(inp.targetX, minX + 60, maxX - 60);
+          p.x = clamp(p.x + (tx - p.x) * follow, minX + 60, maxX - 60);
+        }
+      } else if (p.side === 'left' || p.side === 'right') {
         p.y = clamp(p.y + my * 480 * dt, minY + 45, maxY - 45);
       } else {
         p.x = clamp(p.x + mx * 540 * dt, minX + 60, maxX - 60);
@@ -2130,7 +2185,8 @@ export const canoeSprintModule: CompactGameModule<CanoeState, CanoeSprintSnapsho
 
     const winner = state.players.find((p) => p.dist >= state.finishDist);
     if (winner) {
-      winner.score += 300;
+      const topOther = state.players.reduce((m, pl) => (pl.id !== winner.id ? Math.max(m, pl.score) : m), 0);
+      winner.score = Math.max(winner.score + 300, topOther + 150);
       state.banner = `${winner.name} CROSSED THE FINISH!`;
       return { finished: true, sounds: [{ type: 'win', playerId: winner.id }] };
     }
@@ -2164,7 +2220,13 @@ export const canoeSprintModule: CompactGameModule<CanoeState, CanoeSprintSnapsho
     };
   },
   buildResults(state) {
-    return rankByScore(state.players, (p) => `${Math.round(p.dist)}m · ${p.gatesCleared} gates`);
+    const sorted = [...state.players].sort((a, b) => b.dist - a.dist || b.score - a.score);
+    return sorted.map((p, i) => ({
+      playerId: p.id,
+      rank: i + 1,
+      score: Math.round(p.score),
+      statLabel: `${Math.round(p.dist)}m · ${p.gatesCleared} gates`,
+    }));
   },
 };
 

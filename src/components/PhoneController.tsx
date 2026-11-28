@@ -65,6 +65,7 @@ import {
   saveControllerPrefs,
 } from './ControllerSettingsOverlay';
 import { EasyArrowsDeck, SwipeTrackpadDeck } from './GamePadDecks';
+import { DirectArenaTouchDeck, SketchNormalDeck } from './DirectArenaTouchDeck';
 import { FrenzyBannerOverlay } from './FrenzyBannerOverlay';
 import { PocketArenaCanvas } from './PocketArenaCanvas';
 import { PocketLobbyView } from './PocketLobbyView';
@@ -1171,15 +1172,36 @@ export function PhoneController({
     const ws = wsRef.current;
     if (!ws || !joinedPlayerIdRef.current) return;
     const inp = inputRef.current;
-    const rounded = {
+    const rounded: ControllerInput = {
       dx: Math.round(inp.dx * 100) / 100,
       dy: Math.round(inp.dy * 100) / 100,
       a: Boolean(inp.a || autoTapPulseRef.current),
       b: inp.b,
     };
-    const key = `${rounded.dx}|${rounded.dy}|${rounded.a ? 1 : 0}|${rounded.b ? 1 : 0}`;
+    if (typeof inp.targetX === 'number' && Number.isFinite(inp.targetX)) {
+      rounded.targetX = Math.round(inp.targetX * 10) / 10;
+    }
+    if (typeof inp.targetY === 'number' && Number.isFinite(inp.targetY)) {
+      rounded.targetY = Math.round(inp.targetY * 10) / 10;
+    }
+    if (typeof inp.aimAngle === 'number' && Number.isFinite(inp.aimAngle)) {
+      rounded.aimAngle = Math.round(inp.aimAngle * 1000) / 1000;
+    }
+    if (typeof inp.shootPower === 'number' && Number.isFinite(inp.shootPower)) {
+      rounded.shootPower = Math.round(inp.shootPower * 100) / 100;
+    }
+    if (typeof inp.shootRelease === 'number' && Number.isFinite(inp.shootRelease)) {
+      rounded.shootRelease = Math.floor(inp.shootRelease);
+    }
+    const key = `${rounded.dx}|${rounded.dy}|${rounded.a ? 1 : 0}|${rounded.b ? 1 : 0}|${rounded.targetX ?? ''}|${rounded.targetY ?? ''}|${rounded.aimAngle ?? ''}|${rounded.shootPower ?? ''}|${rounded.shootRelease ?? ''}`;
     const now = Date.now();
-    const isActive = rounded.dx !== 0 || rounded.dy !== 0 || rounded.a || rounded.b;
+    const isActive =
+      rounded.dx !== 0 ||
+      rounded.dy !== 0 ||
+      rounded.a ||
+      rounded.b ||
+      rounded.targetX !== undefined ||
+      rounded.shootPower !== undefined;
 
     // Resend immediately on any change, or heartbeat every 120ms while actively holding controls
     if (!force && key === lastSentRef.current && (!isActive || now - lastSentAtRef.current < 120)) {
@@ -1541,7 +1563,8 @@ export function PhoneController({
                 setPocketTickVersion((v) => v + 1);
               } else if (
                 roomRef.current?.roomMode === 'pocket' &&
-                CARD_GAME_IDS.has(roomRef.current.selectedGameId) &&
+                (CARD_GAME_IDS.has(roomRef.current.selectedGameId) ||
+                  roomRef.current.selectedGameId === 'draw-guess-relay') &&
                 nowMs - lastPocketHudBumpRef.current >= 200
               ) {
                 lastPocketHudBumpRef.current = nowMs;
@@ -2041,6 +2064,11 @@ export function PhoneController({
     inputRef.current.dx = dx;
     inputRef.current.dy = dy;
     sendCurrentInput(true);
+  };
+
+  const handleSendDirectInput = (patch: Partial<ControllerInput>, force = false) => {
+    Object.assign(inputRef.current, patch);
+    sendCurrentInput(force);
   };
 
   const handlePulseActionA = () => {
@@ -5313,7 +5341,11 @@ export function PhoneController({
                 [
                   { id: 'analog', en: 'Stick', zh: '摇杆' },
                   { id: 'arrows', en: 'Arrows', zh: '箭头' },
-                  { id: 'trackpad', en: 'Swipe', zh: '滑控' },
+                  {
+                    id: 'trackpad',
+                    en: currentPadProfile?.pocketDirectTouch ? 'Touch' : 'Swipe',
+                    zh: currentPadProfile?.pocketDirectTouch ? '直拖' : '滑控',
+                  },
                 ] as const
               ).map((opt, idx) => {
                 const active = activeArcadePad === opt.id;
@@ -5815,15 +5847,27 @@ export function PhoneController({
                     />
                     {t('Spot ▼ YOU', '先看 ▼ 你在哪里')}
                   </span>
-                  <span className="text-[#D1D5DB] font-semibold">
-                    {schema.joystickLabel}
-                  </span>
-                  <span className="font-extrabold" style={{ color: schema.actionA.colorHex }}>
-                    A·{schema.actionA.label}
-                  </span>
-                  <span className="font-extrabold" style={{ color: schema.actionB.colorHex }}>
-                    B·{schema.actionB.label}
-                  </span>
+                  {currentPadProfile?.pocketDirectTouch && activeArcadePad === 'trackpad' ? (
+                    <span className="font-extrabold text-[#10D98B]">
+                      {currentPadProfile.pocketDirectTouch === 'golf-slingshot'
+                        ? t('Drag back to aim · Release to putt', '按住后拉瞄准 · 松手推杆进洞')
+                        : currentPadProfile.pocketDirectTouch === 'sketch-canvas'
+                        ? t('Draw on board or tap a word card', '直接在白板画画或点击词卡抢答')
+                        : t('Drag directly on court to move & hit', '直接在球场上拖动挡板击球')}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-[#D1D5DB] font-semibold">
+                        {schema.joystickLabel}
+                      </span>
+                      <span className="font-extrabold" style={{ color: schema.actionA.colorHex }}>
+                        A·{schema.actionA.label}
+                      </span>
+                      <span className="font-extrabold" style={{ color: schema.actionB.colorHex }}>
+                        B·{schema.actionB.label}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -5852,11 +5896,21 @@ export function PhoneController({
               style={{ backgroundColor: me.color.hex }}
             />
             <span className="font-bold text-white truncate">
-              {gameMeta.rules[0] || gameMeta.tagline}
+              {currentPadProfile?.pocketDirectTouch && activeArcadePad === 'trackpad'
+                ? currentPadProfile.pocketDirectTouch === 'golf-slingshot'
+                  ? t('Drag back anywhere to aim & release to putt!', '按住后拉瞄准，松手推杆进洞！')
+                  : currentPadProfile.pocketDirectTouch === 'sketch-canvas'
+                  ? cardState?.isMyTurn && cardState.badgeText
+                    ? `${t('Draw:', '请画出：')} ${cardState.badgeText}`
+                    : t('Draw directly on board or tap a word card!', '直接在白板画画或点击词卡猜词！')
+                  : t('Drag your paddle directly on screen to hit!', '直接在画面上拖动球拍击球！')
+                : gameMeta.rules[0] || gameMeta.tagline}
             </span>
-            <span className="hidden sm:inline font-mono text-[10px] font-black shrink-0" style={{ color: schema.actionA.colorHex }}>
-              A·{schema.actionA.label}
-            </span>
+            {!(currentPadProfile?.pocketDirectTouch && activeArcadePad === 'trackpad') && (
+              <span className="hidden sm:inline font-mono text-[10px] font-black shrink-0" style={{ color: schema.actionA.colorHex }}>
+                A·{schema.actionA.label}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => setPocketCoachDismissed(true)}
@@ -6189,89 +6243,162 @@ export function PhoneController({
           );
         })()
       ) : (
-        <div
-          className={`flex-1 min-h-0 flex flex-col justify-end ${
-            useIntegratedHud ? 'relative z-10 pointer-events-none' : ''
-          }`}
-        >
-          {activeArcadePad === 'arrows' ? (
-            /* PAD 2: Beginner-Friendly Easy Tap Arrows + Verb-Labeled A/B + Auto-Tap */
-            <EasyArrowsDeck
-              schema={schema}
-              accentHex={me.color.hex}
-              cooldownA={cdA}
-              cooldownB={cdB}
-              pressedA={pressedA}
-              pressedB={pressedB}
-              strictFourWay={effectiveArrowsStrictFourWay}
-              autoTapActive={autoTapPinned}
-              preferAutoTap={Boolean(currentPadProfile?.preferAutoTap)}
-              swapAB={!embedded && controllerPrefs.swapAB}
-              embedded={embedded}
-              pocketOverlay={useIntegratedHud}
-              hudOpacity={hudOpacity}
-              disabled={settingsOpen}
-              isTurboDrift={room.selectedGameId === 'turbo-drift'}
-              onVectorChange={handleSetVector}
-              onActionDown={onActionDown}
-              onActionUp={onActionUp}
-              onToggleAutoTap={() => setAutoTapPinned((v) => !v)}
-              onToggleStrictFourWay={() =>
-                updateControllerPrefs({
-                  ...controllerPrefs,
-                  arrowsStrictFourWay: !effectiveArrowsStrictFourWay,
-                })
-              }
-            />
-          ) : activeArcadePad === 'trackpad' ? (
-            /* PAD 3: Swipe Trackpad + Reversible Ergonomic Side Triggers */
-            <SwipeTrackpadDeck
-              schema={schema}
-              accentHex={me.color.hex}
-              cooldownA={cdA}
-              cooldownB={cdB}
-              pressedA={pressedA}
-              pressedB={pressedB}
-              trackpadMode={effectiveTrackpadMode}
-              handedness={controllerPrefs.trackpadHandedness}
-              tapForA={effectiveTrackpadTapForA}
-              sensitivity={controllerPrefs.trackpadSensitivity}
-              swapAB={!embedded && controllerPrefs.swapAB}
-              isCssRotated={isCssRotated}
-              embedded={embedded}
-              pocketOverlay={useIntegratedHud}
-              hudOpacity={hudOpacity}
-              disabled={settingsOpen}
-              isTurboDrift={room.selectedGameId === 'turbo-drift'}
-              onVectorChange={handleSetVector}
-              onPulseActionA={handlePulseActionA}
-              onActionDown={onActionDown}
-              onActionUp={onActionUp}
-              onToggleTrackpadMode={() =>
-                updateControllerPrefs({
-                  ...controllerPrefs,
-                  trackpadModeOverride: effectiveTrackpadMode === 'glide' ? 'flick' : 'glide',
-                })
-              }
-              onToggleHandedness={() =>
-                updateControllerPrefs({
-                  ...controllerPrefs,
-                  trackpadHandedness:
-                    controllerPrefs.trackpadHandedness === 'right' ? 'left' : 'right',
-                })
-              }
-              onToggleTapForA={() =>
-                updateControllerPrefs({
-                  ...controllerPrefs,
-                  trackpadTapForAOverride: !effectiveTrackpadTapForA,
-                })
-              }
-            />
-          ) : (
-            /* PAD 1: Pro Analog Console */
-            analogPadSurface(useIntegratedHud)
-          )}
-        </div>
+        <>
+          {useIntegratedHud &&
+            currentPadProfile?.pocketDirectTouch &&
+            activeArcadePad === 'trackpad' && (
+              <DirectArenaTouchDeck
+                mode={currentPadProfile.pocketDirectTouch}
+                gameId={room.selectedGameId}
+                playerId={me.id}
+                accentHex={me.color.hex}
+                snapshotRef={latestSnapshotRef}
+                cardState={cardState}
+                isCssRotated={isCssRotated}
+                disabled={settingsOpen || room.status !== 'PLAYING'}
+                cooldownA={cdA}
+                onSendDirectInput={handleSendDirectInput}
+                onPulseActionA={handlePulseActionA}
+              />
+            )}
+          {!useIntegratedHud &&
+            room.selectedGameId === 'draw-guess-relay' &&
+            activeArcadePad !== 'trackpad' &&
+            cardState && (
+              <div className="shrink-0 mx-auto mb-1 px-3 py-1 rounded-xl bg-[#131924] border border-[#38BDF8]/40 text-xs font-extrabold text-center text-[#7DD3FC]">
+                {cardState.isMyTurn
+                  ? `${t('DRAW:', '请画：')} ${cardState.badgeText}`
+                  : lang === 'zh'
+                  ? cardState.statusHintZh
+                  : cardState.statusHint}
+              </div>
+            )}
+          <div
+            className={`flex-1 min-h-0 flex flex-col justify-end ${
+              useIntegratedHud ? 'relative z-10 pointer-events-none' : ''
+            }`}
+          >
+            {useIntegratedHud &&
+            currentPadProfile?.pocketDirectTouch &&
+            activeArcadePad === 'trackpad' ? null : !useIntegratedHud &&
+              room.selectedGameId === 'draw-guess-relay' &&
+              activeArcadePad === 'trackpad' ? (
+              <SketchNormalDeck
+                playerId={me.id}
+                accentHex={me.color.hex}
+                snapshotRef={latestSnapshotRef}
+                cardState={cardState}
+                disabled={settingsOpen || room.status !== 'PLAYING'}
+                onSendDirectInput={handleSendDirectInput}
+              />
+            ) : !useIntegratedHud &&
+              currentPadProfile?.pocketDirectTouch &&
+              activeArcadePad === 'trackpad' ? (
+              <div className="relative flex-1 min-h-0 overflow-hidden rounded-2xl border border-[#2C3545] bg-[#0B0E14]">
+                <PocketArenaCanvas
+                  gameId={room.selectedGameId}
+                  status={room.status}
+                  snapshotRef={latestSnapshotRef}
+                  competitiveRef={latestCompetitiveRef}
+                  fxRef={fxRef}
+                  tickVersion={pocketTickVersion}
+                  highlightPlayerId={me.id}
+                  highlightColorHex={me.color.hex}
+                  showYouMarker={room.status === 'COUNTDOWN'}
+                />
+                <DirectArenaTouchDeck
+                  mode={currentPadProfile.pocketDirectTouch}
+                  gameId={room.selectedGameId}
+                  playerId={me.id}
+                  accentHex={me.color.hex}
+                  snapshotRef={latestSnapshotRef}
+                  cardState={cardState}
+                  isCssRotated={isCssRotated}
+                  disabled={settingsOpen || room.status !== 'PLAYING'}
+                  cooldownA={cdA}
+                  onSendDirectInput={handleSendDirectInput}
+                  onPulseActionA={handlePulseActionA}
+                />
+              </div>
+            ) : activeArcadePad === 'arrows' ? (
+              /* PAD 2: Beginner-Friendly Easy Tap Arrows + Verb-Labeled A/B + Auto-Tap */
+              <EasyArrowsDeck
+                schema={schema}
+                accentHex={me.color.hex}
+                cooldownA={cdA}
+                cooldownB={cdB}
+                pressedA={pressedA}
+                pressedB={pressedB}
+                strictFourWay={effectiveArrowsStrictFourWay}
+                autoTapActive={autoTapPinned}
+                preferAutoTap={Boolean(currentPadProfile?.preferAutoTap)}
+                swapAB={!embedded && controllerPrefs.swapAB}
+                embedded={embedded}
+                pocketOverlay={useIntegratedHud}
+                hudOpacity={hudOpacity}
+                disabled={settingsOpen}
+                isTurboDrift={room.selectedGameId === 'turbo-drift'}
+                onVectorChange={handleSetVector}
+                onActionDown={onActionDown}
+                onActionUp={onActionUp}
+                onToggleAutoTap={() => setAutoTapPinned((v) => !v)}
+                onToggleStrictFourWay={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    arrowsStrictFourWay: !effectiveArrowsStrictFourWay,
+                  })
+                }
+              />
+            ) : activeArcadePad === 'trackpad' ? (
+              /* PAD 3: Swipe Trackpad + Reversible Ergonomic Side Triggers */
+              <SwipeTrackpadDeck
+                schema={schema}
+                accentHex={me.color.hex}
+                cooldownA={cdA}
+                cooldownB={cdB}
+                pressedA={pressedA}
+                pressedB={pressedB}
+                trackpadMode={effectiveTrackpadMode}
+                handedness={controllerPrefs.trackpadHandedness}
+                tapForA={effectiveTrackpadTapForA}
+                sensitivity={controllerPrefs.trackpadSensitivity}
+                swapAB={!embedded && controllerPrefs.swapAB}
+                isCssRotated={isCssRotated}
+                embedded={embedded}
+                pocketOverlay={useIntegratedHud}
+                hudOpacity={hudOpacity}
+                disabled={settingsOpen}
+                isTurboDrift={room.selectedGameId === 'turbo-drift'}
+                onVectorChange={handleSetVector}
+                onPulseActionA={handlePulseActionA}
+                onActionDown={onActionDown}
+                onActionUp={onActionUp}
+                onToggleTrackpadMode={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    trackpadModeOverride: effectiveTrackpadMode === 'glide' ? 'flick' : 'glide',
+                  })
+                }
+                onToggleHandedness={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    trackpadHandedness:
+                      controllerPrefs.trackpadHandedness === 'right' ? 'left' : 'right',
+                  })
+                }
+                onToggleTapForA={() =>
+                  updateControllerPrefs({
+                    ...controllerPrefs,
+                    trackpadTapForAOverride: !effectiveTrackpadTapForA,
+                  })
+                }
+              />
+            ) : (
+              /* PAD 1: Pro Analog Console */
+              analogPadSurface(useIntegratedHud)
+            )}
+          </div>
+        </>
       )}
 
       {/* Subtle Bottom Helper Strip (Hidden in Pocket Integrated HUD so full screen stays open) */}
