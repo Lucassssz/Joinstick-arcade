@@ -234,7 +234,7 @@ export const GAME_CATALOG: GameMetadata[] = [
       { label: '90 sec', value: 90 },
       { label: '120 sec', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'turbo-drift',
@@ -1146,7 +1146,7 @@ export const GAME_CATALOG: GameMetadata[] = [
       { label: '10 Rounds', value: 10 },
       { label: '14 Rounds', value: 14 },
     ],
-    defaultSetting: 8,
+    defaultSetting: 6,
   },
   {
     id: 'jungle-ladders',
@@ -1529,7 +1529,7 @@ export const GAME_CATALOG: GameMetadata[] = [
       { label: '7 Chests', value: 7 },
       { label: '9 Chests', value: 9 },
     ],
-    defaultSetting: 6,
+    defaultSetting: 5,
   },
   {
     id: 'pinball-clash',
@@ -2120,7 +2120,7 @@ export const GAME_CATALOG: GameMetadata[] = [
       { label: '7 Rounds', value: 7 },
       { label: '10 Rounds', value: 10 },
     ],
-    defaultSetting: 6,
+    defaultSetting: 5,
   },
   {
     id: 'dungeon-crawl-board',
@@ -2317,7 +2317,7 @@ export const GAME_CATALOG: GameMetadata[] = [
       { label: '3 Rounds', value: 3 },
       { label: '5 Rounds', value: 5 },
     ],
-    defaultSetting: 4,
+    defaultSetting: 3,
   },
   {
     id: 'royal-bluff',
@@ -2413,7 +2413,7 @@ export const GAME_CATALOG: GameMetadata[] = [
       { label: '5 Cards (Turbo)', value: 5 },
       { label: '7 Cards (Classic)', value: 7 },
     ],
-    defaultSetting: 6,
+    defaultSetting: 5,
   },
   {
     id: 'sushi-draft',

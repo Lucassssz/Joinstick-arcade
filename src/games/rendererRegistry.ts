@@ -209,7 +209,7 @@ type ModularRendererFn = (ctx: CanvasRenderingContext2D, snap: any) => void;
 const preloadedImages = new Set<string>();
 
 /**
- * Synchronous static renderer map for all 118 expansion-pack games (150 total games with core 32).
+ * Synchronous static renderer map for all 168 expansion-pack games (200 total games with core 32).
  * Bundled directly so 5-Game Cup Mode, random votes, thumbnails, and live matches render
  * immediately on Frame 0 with zero network chunk latency or "LOADING ARENA MODULE..." stalls.
  */

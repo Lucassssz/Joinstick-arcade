@@ -4060,7 +4060,7 @@ export function translateGameText(text: string, lang: Language): string {
   if ((m = trimmed.match(/^FLAGGED A MINE \(\+(\d+)\)!$/i))) return `精准标雷 (+${m[1]})！`;
   if ((m = trimmed.match(/^BOOM! (.+) HIT A MINE!$/i))) return `轰！${m[1]} 踩中地雷！`;
 
-  // --- Comprehensive Game Audit Additions (All 150 Games) ---
+  // --- Comprehensive Game Audit Additions (All 200 Games) ---
   if ((m = trimmed.match(/^(RED TEAM|BLUE TEAM|HOLO-CPU):\s*(\d+)\/(\d+)$/i))) {
     const tName = m[1].toUpperCase() === 'RED TEAM' ? '红队' : m[1].toUpperCase() === 'BLUE TEAM' ? '蓝队' : '全息AI';
     return `${tName}：${m[2]}/${m[3]}`;

@@ -238,7 +238,7 @@ export const PACK_GLOBAL_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'dino-dash',
@@ -272,7 +272,7 @@ export const PACK_GLOBAL_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'tile-2048-blitz',
@@ -374,7 +374,7 @@ export const PACK_GLOBAL_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: '7 Rounds', value: 7 },
       { label: '10 Rounds', value: 10 },
     ],
-    defaultSetting: 6,
+    defaultSetting: 5,
   },
   {
     id: 'wavelength-sync',
@@ -408,7 +408,7 @@ export const PACK_GLOBAL_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: '7 Rounds', value: 7 },
       { label: '10 Rounds', value: 10 },
     ],
-    defaultSetting: 6,
+    defaultSetting: 5,
   },
   {
     id: 'word-pulse',
@@ -442,7 +442,7 @@ export const PACK_GLOBAL_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: '5 Rounds', value: 5 },
       { label: '7 Rounds', value: 7 },
     ],
-    defaultSetting: 4,
+    defaultSetting: 3,
   },
   {
     id: 'trivia-blitz',
@@ -544,7 +544,7 @@ export const PACK_GLOBAL_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: '5 Rounds', value: 5 },
       { label: '7 Rounds', value: 7 },
     ],
-    defaultSetting: 4,
+    defaultSetting: 3,
   },
 ];
 

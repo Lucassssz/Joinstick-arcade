@@ -511,7 +511,7 @@ export const PACK_RETRO_ARCADE_GAME_CATALOG: GameMetadata[] = [
       { label: '6 Frames', value: 6 },
       { label: '8 Frames', value: 8 },
     ],
-    defaultSetting: 5,
+    defaultSetting: 4,
   },
   {
     id: 'coin-dozer',

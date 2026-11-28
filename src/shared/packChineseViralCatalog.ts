@@ -511,7 +511,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
       { label: 'Normal (14s)', value: 14 },
       { label: 'Relaxed (18s)', value: 18 },
     ],
-    defaultSetting: 12,
+    defaultSetting: 10,
   },
   {
     id: 'idiom-chain',

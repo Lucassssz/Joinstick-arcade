@@ -320,7 +320,7 @@ export const PACK_PHYSICS_BUILDER_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_marble_ring.svg',
+    coverImage: '',
     accentHex: '#9EE622',
     rules: [
       'Tilt the 360° analog stick to roll your marble across the labyrinth.',

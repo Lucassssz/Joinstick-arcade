@@ -103,7 +103,7 @@ export const PACK_CHAOS_SURVIVAL_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'musical-thrones',
@@ -239,7 +239,7 @@ export const PACK_CHAOS_SURVIVAL_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'laser-maze-heist',

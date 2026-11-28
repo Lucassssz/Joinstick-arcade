@@ -14,7 +14,7 @@ export const PACK_MIND_LOGIC_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_color_clash_1795252599562.jpg',
+    coverImage: '',
     accentHex: '#F97316',
     rules: [
       'Pick any numbered card (1–60) secretly from your private phone fan.',
@@ -48,7 +48,7 @@ export const PACK_MIND_LOGIC_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_liars_deck_1795252598916.jpg',
+    coverImage: '',
     accentHex: '#38BDF8',
     rules: [
       'Hold secret numbered cards (1–99) privately on your phone.',
@@ -82,7 +82,7 @@ export const PACK_MIND_LOGIC_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_treasure_dig_1795267485483.jpg',
+    coverImage: '',
     accentHex: '#0EA5E9',
     rules: [
       'Step Down/Up with Arrows or press DIVE / SWIM (A) to move along the sea floor.',
@@ -150,7 +150,7 @@ export const PACK_MIND_LOGIC_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_color_clash_1795252599562.jpg',
+    coverImage: '',
     accentHex: '#FACC15',
     rules: [
       'Watch the 4 colored Firework Stacks on the TV (Red, Blue, Gold, Green 1→5).',
@@ -184,7 +184,7 @@ export const PACK_MIND_LOGIC_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_treasure_dig_1795267485483.jpg',
+    coverImage: '',
     accentHex: '#F59E0B',
     rules: [
       'Hold Tunnel, Pickaxe, Dynamite, and Sabotage cards privately on your phone.',

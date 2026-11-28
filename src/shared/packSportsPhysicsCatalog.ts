@@ -35,7 +35,7 @@ export const PACK_SPORTS_PHYSICS_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'penalty-duel',
@@ -171,7 +171,7 @@ export const PACK_SPORTS_PHYSICS_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'ping-pong-pro',
@@ -273,7 +273,7 @@ export const PACK_SPORTS_PHYSICS_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'sumo-clash',
@@ -307,7 +307,7 @@ export const PACK_SPORTS_PHYSICS_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'canoe-sprint',
@@ -409,7 +409,7 @@ export const PACK_SPORTS_PHYSICS_GAME_CATALOG: GameMetadata[] = [
       { label: '90s', value: 90 },
       { label: '120s', value: 120 },
     ],
-    defaultSetting: 75,
+    defaultSetting: 60,
   },
   {
     id: 'billiards-snooker',

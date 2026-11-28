@@ -13,7 +13,7 @@ interface DemoClipPayload {
   frames: GameSnapshot[];
 }
 
-// Strict browser LRU clip cache so browsing 150 games never leaks RAM
+// Strict browser LRU clip cache so browsing 200 games never leaks RAM
 const MAX_CLIENT_CLIP_CACHE = 18;
 const clipCache = new Map<GameId, DemoClipPayload>();
 const inflightClips = new Map<GameId, Promise<DemoClipPayload | null>>();

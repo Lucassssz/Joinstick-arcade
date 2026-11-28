@@ -320,7 +320,7 @@ export const PACK_CREW_DEFENSE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_claw_mania.svg',
+    coverImage: '',
     accentHex: '#00C2FF',
     rules: [
       'Swipe smoothly across the pond to steer your bobber over fish shadows.',

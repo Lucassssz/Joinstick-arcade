@@ -14,7 +14,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_fruit_drop_1795267484776.jpg',
+    coverImage: '',
     accentHex: '#22C55E',
     rules: [
       'Swipe across the screen directly to slash flying fruit!',
@@ -48,7 +48,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_pinball_clash_1795267483180.jpg',
+    coverImage: '',
     accentHex: '#F97316',
     rules: [
       'Glide Left/Right along the top rail to aim your peg cannon.',
@@ -116,7 +116,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_red_light_dash_1795267484267.jpg',
+    coverImage: '',
     accentHex: '#FF3B9A',
     rules: [
       'Read the giant TV banner instantly as each 5-second microgame flips!',
@@ -150,7 +150,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_blade_duel_1795252597128.jpg',
+    coverImage: '',
     accentHex: '#EF4444',
     rules: [
       'Step Left / Right along the fencing lane; tap Up / Down to set High, Mid, or Low blade!',
@@ -184,7 +184,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_cannon_siege_1795252597698.jpg',
+    coverImage: '',
     accentHex: '#10D98B',
     rules: [
       'Glide your aim reticle across the dartboard rings with Pad 3 Touch-Glide.',
@@ -218,7 +218,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_rattan_volley.svg',
+    coverImage: '',
     accentHex: '#F59E0B',
     rules: [
       'Glide smoothly through the sky to steer your ornate Wau Bulan moon kite.',
@@ -252,7 +252,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_marble_ring.svg',
+    coverImage: '',
     accentHex: '#EC4899',
     rules: [
       'Glide your hand cursor smoothly across the woven mat over glowing Batu cloth stones.',
@@ -286,7 +286,7 @@ export const PACK_CULT_HERITAGE_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2–8P',
-    coverImage: '/src/assets/images/game_step_stomp.svg',
+    coverImage: '',
     accentHex: '#10D98B',
     rules: [
       'Dash Left / Right with Arrows to position cleanly under falling Chapteh feathers.',
