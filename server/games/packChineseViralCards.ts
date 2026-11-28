@@ -1,5 +1,6 @@
 import { getCardSeatPosition, TABLE_CENTER_X, TABLE_CENTER_Y } from '../../src/shared/cardLayout.ts';
 import type {
+  BotDifficulty,
   CardActionButton,
   CardClientAction,
   CardPrivateHandItem,
@@ -17,6 +18,7 @@ import type {
   SpeedMahjongSnapshot,
   UndercoverWordSnapshot,
 } from '../../src/shared/types.ts';
+import { getUniversalBotProfile, UNIVERSAL_BOT_PROFILES } from '../../src/shared/botProfile.ts';
 import { isStateFrenzyActive } from './packModuleAdapter.ts';
 import type {
   CompactGameInitContext as GameInitContext,
@@ -681,6 +683,7 @@ interface MjSeat {
   name: string;
   colorHex: string;
   isBot?: boolean;
+  botDifficulty?: BotDifficulty;
   hand: MahjongTileView[];
   melds: MahjongTileView[][];
   discards: MahjongTileView[];
@@ -759,6 +762,7 @@ export const speedMahjongModule: ServerGameModule<SpeedMahjongState, SpeedMahjon
       name: p.name,
       colorHex: p.colorHex,
       isBot: p.isBot,
+      botDifficulty: p.botDifficulty,
       hand: [],
       melds: [],
       discards: [],
@@ -963,7 +967,19 @@ export const speedMahjongModule: ServerGameModule<SpeedMahjongState, SpeedMahjon
             s.name !== state.lastDiscardBy &&
             s.hand.filter((t) => tileKey(t) === discKey).length >= 2
         );
-        if (pongBot && Math.random() < 0.72) {
+        const pongProb = pongBot
+          ? Math.max(
+              0.05,
+              Math.min(
+                0.98,
+                0.72 +
+                  (UNIVERSAL_BOT_PROFILES.arcade.evaluationNoise -
+                    getUniversalBotProfile(pongBot.botDifficulty).evaluationNoise) *
+                    0.75
+              )
+            )
+          : 0.72;
+        if (pongBot && Math.random() < pongProb) {
           const matches = pongBot.hand.filter((t) => tileKey(t) === discKey).slice(0, 2);
           const remIds = new Set(matches.map((m) => m.id));
           pongBot.hand = pongBot.hand.filter((t) => !remIds.has(t.id));
@@ -1065,6 +1081,7 @@ interface TavernSeat {
   name: string;
   colorHex: string;
   isBot?: boolean;
+  botDifficulty?: BotDifficulty;
   dice: number[];
   alive: boolean;
   score: number;
@@ -1165,6 +1182,7 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
       name: p.name,
       colorHex: p.colorHex,
       isBot: p.isBot,
+      botDifficulty: p.botDifficulty,
       dice: Array.from({ length: startDice }, () => 1 + Math.floor(Math.random() * 6)),
       alive: true,
       score: 0,
@@ -1348,7 +1366,17 @@ export const liarsDiceTavernModule: ServerGameModule<TavernDiceState, LiarsDiceT
       const totalDice = state.seats.reduce((sum, s) => sum + (s.alive ? s.dice.length : 0), 0);
       const expectedMax = Math.ceil(totalDice * 0.42);
       const nextQty = state.currentBidQty === 0 ? Math.max(2, Math.floor(totalDice * 0.25)) : state.currentBidQty + 1;
-      if (state.currentBidQty > 0 && (state.currentBidQty >= expectedMax || nextQty > totalDice || Math.random() < 0.28)) {
+      const challengeProb = Math.max(
+        0.05,
+        Math.min(
+          0.95,
+          0.28 +
+            (UNIVERSAL_BOT_PROFILES.arcade.evaluationNoise -
+              getUniversalBotProfile(active.botDifficulty).evaluationNoise) *
+              0.5
+        )
+      );
+      if (state.currentBidQty > 0 && (state.currentBidQty >= expectedMax || nextQty > totalDice || Math.random() < challengeProb)) {
         resolveLiarCall(state, active, frenzyActive);
       } else {
         const bestFace = [2, 3, 4, 5, 6].sort(
@@ -2149,6 +2177,7 @@ export const idiomChainModule: ServerGameModule<IdiomChainState, IdiomChainSnaps
         name: p.name,
         colorHex: p.colorHex,
         isBot: p.isBot,
+        botDifficulty: p.botDifficulty,
         alive: true,
         streak: 0,
         score: 0,
@@ -2262,7 +2291,18 @@ export const idiomChainModule: ServerGameModule<IdiomChainState, IdiomChainSnaps
     if (isBot) state.botTimer -= dt;
 
     if (active && isBot && state.botTimer <= 0) {
-      const smartPick = Math.random() < 0.82 ? state.choices.find((c) => c.correct) : state.choices[0];
+      const botDifficulty = (active as { botDifficulty?: BotDifficulty }).botDifficulty ?? inp?.botDifficulty;
+      const accuracyProb = Math.max(
+        0.05,
+        Math.min(
+          0.98,
+          0.82 +
+            (UNIVERSAL_BOT_PROFILES.arcade.evaluationNoise -
+              getUniversalBotProfile(botDifficulty).evaluationNoise) *
+              0.75
+        )
+      );
+      const smartPick = Math.random() < accuracyProb ? state.choices.find((c) => c.correct) : state.choices[0];
       if (smartPick) {
         const res = this.handleCardAction!(state, active.id, { type: 'play-card', cardId: smartPick.id }, players);
         return { finished: false, sounds: res.sounds, privateStates: res.privateStates };

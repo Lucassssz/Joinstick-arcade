@@ -49,18 +49,23 @@ import {
   GAME_CATALOG,
   getGameMeta,
   PLAYER_FILTER_OPTIONS,
+  TURN_PACED_GAME_IDS,
 } from '../src/shared/games.ts';
 import { getGamePadProfile } from '../src/shared/padProfiles.ts';
 import {
   CHAOS_WHEEL_MUTATORS,
   computeTournamentMarks,
+  getGameFrenzyTimeConfig,
   getMutatorSpec,
+  isGameSuitableForPlayerCount,
+  isMutatorEligibleFor,
   MUTATOR_BY_ID,
   TOURNAMENT_TOTAL_GAMES,
   type MutatorId,
 } from '../src/shared/modifiers.ts';
 import { SERVER_GAMES, type ServerPlayerInputState } from './games/engine.ts';
 import { hostAuth } from './hostAuth.ts';
+import { clearRealtimeBotMemory } from './games/botEngine.ts';
 import { computeBotInput, createBotMemory, type BotMemory } from './games/botController.ts';
 import {
   biasBotInputForCompetitiveDrops,
@@ -1768,7 +1773,9 @@ export class RoomManager {
         const room = this.getPrivilegedRoom(ws);
         if (!room) return;
         if (!MUTATOR_BY_ID[msg.mutatorId]) return;
-        room.activeMutator = msg.mutatorId;
+        room.activeMutator = isMutatorEligibleFor(msg.mutatorId, room.selectedGameId)
+          ? msg.mutatorId
+          : 'normal';
         room.lastActivityAt = Date.now();
         this.playHostSound(room, 'confirm');
         this.broadcastRoom(room);
@@ -2476,13 +2483,9 @@ export class RoomManager {
   }
 
   private spinRoomMutator(room: RoomRecord): void {
-    const isCard = CARD_GAME_IDS.has(room.selectedGameId);
-    const isBoard = BOARD_GAME_IDS.has(room.selectedGameId);
-    const eligible = CHAOS_WHEEL_MUTATORS.filter((m) => {
-      if ((isCard || isBoard) && m.id === 'early-frenzy') return false;
-      if (isCard && (m.invertControls || m.id === 'turbo')) return false;
-      return true;
-    });
+    const eligible = CHAOS_WHEEL_MUTATORS.filter((m) =>
+      isMutatorEligibleFor(m, room.selectedGameId)
+    );
     const pool = eligible.filter((m) => m.id !== room.activeMutator);
     const list = pool.length > 0 ? pool : eligible;
     const picked = list[Math.floor(Math.random() * list.length)];
@@ -2578,8 +2581,7 @@ export class RoomManager {
 
     const eligible = GAME_CATALOG.filter((g) => {
       if (playedSet.has(g.id)) return false;
-      if (playerCount <= 1) return g.suitableFor.includes('solo');
-      return true;
+      return isGameSuitableForPlayerCount(g, playerCount);
     });
     const basePool = eligible.length >= count ? eligible : GAME_CATALOG.filter((g) => !playedSet.has(g.id));
     const pool = basePool.length >= count ? basePool : [...GAME_CATALOG];
@@ -3612,56 +3614,24 @@ export class RoomManager {
           : ip
       );
 
-      const isTurnPacedGame =
-        room.selectedGameId === 'rich-street' ||
-        room.selectedGameId === 'jungle-ladders' ||
-        room.selectedGameId === 'ludo-royale' ||
-        room.selectedGameId === 'star-party-board' ||
-        room.selectedGameId === 'reversi-clash' ||
-        room.selectedGameId === 'four-in-a-row' ||
-        room.selectedGameId === 'naval-salvo' ||
-        room.selectedGameId === 'neon-checkers' ||
-        room.selectedGameId === 'carrom-arena' ||
-        room.selectedGameId === 'dungeon-crawl-board' ||
-        room.selectedGameId === 'lucky-auction' ||
-        room.selectedGameId === 'pit-harvest' ||
-        room.selectedGameId === 'gomoku-blitz' ||
-        room.selectedGameId === 'chess-blitz' ||
-        room.selectedGameId === 'domino-chain' ||
-        room.selectedGameId === 'hexagon-conquest' ||
-        room.selectedGameId === 'backgammon-sprint' ||
-        room.selectedGameId === 'mancala-jewels' ||
-        room.selectedGameId === 'curling-masters' ||
-        room.selectedGameId === 'truth-bomb' ||
-        room.selectedGameId === 'draw-guess-relay' ||
-        room.selectedGameId === 'mosaic-tile-draft' ||
-        room.selectedGameId === 'maze-wall-duel' ||
-        room.selectedGameId === 'corner-polyomino' ||
-        room.selectedGameId === 'pillar-ascent-3d' ||
-        room.selectedGameId === 'hex-island-settlers' ||
-        room.selectedGameId === 'hex-insect-chess' ||
-        room.selectedGameId === 'deep-sea-oxygen' ||
-        room.selectedGameId === 'picross-nonogram' ||
-        room.selectedGameId === 'speed-sudoku-duel' ||
-        room.selectedGameId === 'xiangqi-river-clash' ||
-        room.selectedGameId === 'tile-triple' ||
-        room.selectedGameId === 'tile-2048-blitz' ||
-        room.selectedGameId === 'mine-sweep-duel' ||
-        room.selectedGameId === 'geo-pin-rush' ||
-        room.selectedGameId === 'wavelength-sync' ||
-        room.selectedGameId === 'tangram-silhouette' ||
-        CARD_GAME_IDS.has(room.selectedGameId);
+      const isTurnPacedGame = TURN_PACED_GAME_IDS.has(room.selectedGameId);
       const isRaceFinishGame =
         room.selectedGameId === 'turbo-drift' ||
         room.selectedGameId === 'glass-bridge' ||
         room.selectedGameId === 'canoe-sprint' ||
         room.selectedGameId === 'egg-rush';
-      const speedScale = isTurnPacedGame ? 1.0 : mutator.speedScale * (room.frenzy.active ? 1.18 : 1.0);
+      const frenzyConfig = getGameFrenzyTimeConfig(room.selectedGameId);
+      const speedScale = isTurnPacedGame
+        ? 1.0
+        : mutator.speedScale * (room.frenzy.active ? frenzyConfig.speedMultiplier : 1.0);
       const simDt = Math.min(0.085, dt * speedScale);
       const scoreMult =
         isRaceFinishGame
           ? 1
-          : mutator.scoreMult * (room.frenzy.active && !engine.handlesOwnFrenzyMultiplier ? 2 : 1);
+          : mutator.scoreMult *
+            (room.frenzy.active && !engine.handlesOwnFrenzyMultiplier
+              ? frenzyConfig.scoreMultiplier
+              : 1);
 
       const prevSnapshot = room.lastSnapshot;
       const result = engine.step(room.gameState, currentInputs, simDt, room.frenzy.active);
@@ -4416,6 +4386,14 @@ export class RoomManager {
     }
   }
 
+  private clearRoomBotMemory(room: RoomRecord): void {
+    for (const p of room.players.values()) {
+      if (p.isBot) {
+        clearRealtimeBotMemory(`${room.selectedGameId}:${p.id}`);
+      }
+    }
+  }
+
   private stopGameLoop(room: RoomRecord): void {
     if (room.tickInterval) {
       clearInterval(room.tickInterval);
@@ -4423,6 +4401,7 @@ export class RoomManager {
     }
     room.competitiveState = null;
     room.lastCompetitiveSnapshot = null;
+    this.clearRoomBotMemory(room);
     this.clearVoteTimers(room);
   }
 
@@ -4503,8 +4482,12 @@ export class RoomManager {
       }
     }
 
+    this.clearRoomBotMemory(room);
     room.players.clear();
     this.rooms.delete(room.code);
+    if (this.rooms.size === 0) {
+      clearRealtimeBotMemory();
+    }
   }
 
   private pruneExpired(): void {

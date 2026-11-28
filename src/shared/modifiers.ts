@@ -1,4 +1,5 @@
 import type { GameId, GameMetadata } from './types.ts';
+import { BOARD_GAME_IDS, CARD_GAME_IDS, TURN_PACED_GAME_IDS } from './games.ts';
 import { PACK_MALAYSIAN_FRENZY_PERKS } from './packMalaysianCatalog.ts';
 import { PACK_CHINESE_VIRAL_FRENZY_PERKS } from './packChineseViralCatalog.ts';
 import { PACK_GLOBAL_VIRAL_FRENZY_PERKS } from './packGlobalViralCatalog.ts';
@@ -134,6 +135,19 @@ export const MUTATOR_BY_ID: Record<MutatorId, MutatorSpec> = MUTATORS.reduce(
 
 export function getMutatorSpec(id?: MutatorId | null): MutatorSpec {
   return (id && MUTATOR_BY_ID[id]) || MUTATOR_BY_ID.normal;
+}
+
+export function isMutatorEligibleFor(
+  mutator: MutatorId | MutatorSpec,
+  gameId: GameId
+): boolean {
+  const spec = typeof mutator === 'string' ? getMutatorSpec(mutator) : mutator;
+  const isCard = CARD_GAME_IDS.has(gameId);
+  const isBoard = BOARD_GAME_IDS.has(gameId);
+  if ((isCard || isBoard) && spec.id === 'early-frenzy') return false;
+  if (isCard && (spec.invertControls || spec.id === 'turbo')) return false;
+  if (TURN_PACED_GAME_IDS.has(gameId) && spec.id === 'turbo') return false;
+  return true;
 }
 
 export interface FrenzyTimeConfig {
@@ -474,36 +488,13 @@ export function computeTournamentMarks(rank: number, isFinaleGame: boolean): num
   return isFinaleGame ? Math.round(base * 1.5) : base;
 }
 
-export function pickTournamentGameIds(
-  catalog: GameMetadata[],
-  playerCount: number,
-  count = TOURNAMENT_TOTAL_GAMES
-): GameId[] {
-  const suitable = catalog.filter((g) => {
-    if (playerCount <= 1) return g.suitableFor.includes('solo');
-    if (playerCount === 2) return g.suitableFor.includes('double') || g.suitableFor.includes('solo');
-    return g.maxPlayers >= Math.min(playerCount, 4);
-  });
-
-  const shuffle = <T,>(arr: T[]): T[] => {
-    const copy = [...arr];
-    for (let i = copy.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy;
-  };
-
-  const picked: GameId[] = [];
-  for (const g of shuffle(suitable)) {
-    if (picked.length >= count) break;
-    picked.push(g.id);
+export function isGameSuitableForPlayerCount(
+  game: GameMetadata,
+  playerCount: number
+): boolean {
+  if (playerCount <= 1) return game.suitableFor.includes('solo');
+  if (playerCount === 2) {
+    return game.suitableFor.includes('double') || game.suitableFor.includes('solo');
   }
-  if (picked.length < count) {
-    for (const g of shuffle(catalog)) {
-      if (picked.length >= count) break;
-      if (!picked.includes(g.id)) picked.push(g.id);
-    }
-  }
-  return picked;
+  return game.maxPlayers >= Math.min(playerCount, 4);
 }

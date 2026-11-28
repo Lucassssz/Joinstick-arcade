@@ -6,6 +6,7 @@ import {
   getGameMeta,
   HERITAGE_GAME_IDS,
 } from '../shared/games';
+import { GAME_FRENZY_PERKS } from '../shared/modifiers';
 import { getPadTutorialGuide } from '../shared/padProfiles';
 import type { GameId, GameMetadata } from '../shared/types';
 import { getLocalizedGameMeta, type Language } from './i18n';
@@ -834,7 +835,16 @@ function getGameIndex(): IndexedGame[] {
     const en = getLocalizedGameMeta(base, 'en');
     const zh = getLocalizedGameMeta(base, 'zh');
     const aliases = GAME_ALIASES[base.id] ?? [];
-    const rawTerms = [base.id.replace(/-/g, ' '), en.name, zh.name, ...aliases];
+    const rawTerms = [
+      base.id.replace(/-/g, ' '),
+      en.name,
+      zh.name,
+      en.category,
+      zh.category,
+      en.tagline,
+      zh.tagline,
+      ...aliases,
+    ];
     const searchNorms = Array.from(
       new Set(rawTerms.map(normalizeText).filter((t) => t.length >= 2))
     );
@@ -1282,7 +1292,10 @@ function buildGameRulesReply(item: IndexedGame, lang: Language, intent: Intent):
   }
 
   if (intent === 'settings') {
-    const optionList = meta.settingOptions.map((o) => o.label).join(' / ');
+    const defaultTag = lang === 'zh' ? '默认' : 'default';
+    const optionList = meta.settingOptions
+      .map((o) => (o.value === meta.defaultSetting ? `${o.label} (${defaultTag})` : o.label))
+      .join(' / ');
     const bullets = [
       ...(meta.rules.length > 0 ? [meta.rules[meta.rules.length - 1]] : []),
       lang === 'zh'
@@ -1347,10 +1360,22 @@ function buildGameRulesReply(item: IndexedGame, lang: Language, intent: Intent):
     ? `操作：${schema.joystickLabel}，A键 ${schema.actionA.label}，B键 ${schema.actionB.label}`
     : `Controls: ${schema.joystickLabel} · A: ${schema.actionA.label} · B: ${schema.actionB.label}`;
 
+  const bullets = [...meta.rules, extraHint];
+  if (!isCard && !isBoard) {
+    const frenzyPerks = GAME_FRENZY_PERKS[item.id];
+    if (frenzyPerks) {
+      bullets.push(
+        lang === 'zh'
+          ? `烈焰狂热加成：${frenzyPerks.perk1Zh} · ${frenzyPerks.perk2Zh}`
+          : `Frenzy Mode Perks: ${frenzyPerks.perk1En} · ${frenzyPerks.perk2En}`
+      );
+    }
+  }
+
   return {
     title: meta.name,
     text: meta.description || meta.tagline,
-    bullets: [...meta.rules, extraHint],
+    bullets,
     metaBadges,
     resolvedGameId: item.id,
     choices,
@@ -1529,13 +1554,35 @@ export function answerRuleQuestion(
     }
   }
 
-  // 5. Moderate fuzzy game match
+  // 5. Moderate fuzzy game match (disambiguate with "Did you mean X?" + runner-up choices)
   if (gameMatch.best && gameMatch.score >= 45) {
-    const reply = buildGameRulesReply(gameMatch.best, lang, intent === 'unknown' ? 'rules' : intent);
-    if (gameMatch.runnersUp.length > 0) {
-      reply.suggestedGames = gameMatch.runnersUp.slice(0, 3).map((g) => toSuggestedGame(g, lang));
-    }
-    return reply;
+    const bestMeta = lang === 'zh' ? gameMatch.best.zh : gameMatch.best.en;
+    const candidates = [gameMatch.best, ...gameMatch.runnersUp.slice(0, 3)];
+    const runnerChoices: RuleBotChoice[] = candidates.map((cand) => {
+      const m = lang === 'zh' ? cand.zh : cand.en;
+      return {
+        id: `didyoumean_${cand.id}`,
+        label: m.name,
+        sublabel: `${genreLabelFor(cand.genre, lang)} · ${m.category}`,
+        accentHex: m.accentHex,
+        action: 'prompt',
+        value: lang === 'zh' ? `${m.name} 怎么玩？` : `How to play ${m.name}`,
+      };
+    });
+    runnerChoices.push(mainMenuChoice(lang));
+    return {
+      title: lang === 'zh' ? `你是不是想找「${bestMeta.name}」？` : `Did you mean ${bestMeta.name}?`,
+      text:
+        lang === 'zh'
+          ? `根据你的关键词匹配到以下最接近的游戏，点击任意一款立即查看完整规则：`
+          : `Here are the closest matching games—tap one below to open its full rules & controls:`,
+      suggestedGames: candidates.map((g) => toSuggestedGame(g, lang)),
+      choices: runnerChoices,
+      quickPrompts:
+        lang === 'zh'
+          ? ['返回主菜单', '推荐街机游戏', '推荐棋盘游戏']
+          : ['Main menu', 'Recommend arcade games', 'Recommend board games'],
+    };
   }
 
   // 6. Helpful smart fallback back to the 6 preset categories

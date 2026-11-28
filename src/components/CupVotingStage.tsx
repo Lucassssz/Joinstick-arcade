@@ -199,6 +199,11 @@ export function CupVotingStage({
                 : rawMeta.genre === 'card'
                 ? { en: 'CARD', zh: '卡牌', color: '#FF3B9A' }
                 : { en: 'ARCADE', zh: '街机', color: '#00C2FF' };
+            const chosenSettingVal =
+              room.selectedGameId === gameId ? room.gameSettingValue : rawMeta.defaultSetting;
+            const chosenSettingOpt =
+              meta.settingOptions.find((o) => o.value === chosenSettingVal) ??
+              meta.settingOptions[0];
 
             return (
               <motion.div
@@ -297,6 +302,12 @@ export function CupVotingStage({
                     <p className="mt-1.5 text-xs text-[#A5AEBD] line-clamp-2 leading-relaxed">
                       {meta.tagline}
                     </p>
+                    {isWinner && chosenSettingOpt && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#FFB800]/15 border border-[#FFB800]/50 text-[#FFB800] font-mono text-[11px] font-bold">
+                        <span>{meta.settingLabel}:</span>
+                        <span className="text-white">{chosenSettingOpt.label}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2.5">

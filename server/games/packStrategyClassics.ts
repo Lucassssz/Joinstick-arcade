@@ -1,10 +1,13 @@
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../../src/shared/types.ts';
 import type {
+  BotDifficulty,
   CardPrivateHandItem,
   CardPrivateState,
   LiarSuit,
   PlayingCardRank,
 } from '../../src/shared/types.ts';
+import { getUniversalBotProfile, UNIVERSAL_BOT_PROFILES } from '../../src/shared/botProfile.ts';
+import { getTurnBotDelayMs, selectCardBotMove } from './botEngine.ts';
 import type {
   BaccaratClubSnapshot,
   BackgammonSprintSnapshot,
@@ -1193,6 +1196,7 @@ interface RummyState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: RummyCard[];
     meldsCount: number;
@@ -1241,7 +1245,9 @@ export const rummyRoyaleModule: CompactGameModule<RummyState, RummyRoyaleSnapsho
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 3 + Math.random() * 3,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous melding race: scale turn delay by 3.5x so bots pace fairly against humans
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 3.5,
         hand: Array.from({ length: 7 }, () => drawRummyCard()),
         meldsCount: 0,
         score: 0,
@@ -1258,7 +1264,8 @@ export const rummyRoyaleModule: CompactGameModule<RummyState, RummyRoyaleSnapsho
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 3.2 + Math.random() * 2.5;
+        // Simultaneous melding race: scale turn delay by 3.5x so bots pace fairly against humans
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 3.5;
         // Check if bot already holds a meld
         let melded = false;
         for (let i = 0; i < p.hand.length && !melded; i++) {
@@ -1408,6 +1415,7 @@ interface TrickGameState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: { id: string; rank: PlayingCardRank; suit: LiarSuit }[];
     picked: boolean;
@@ -1447,7 +1455,8 @@ function createTrickModule(gameId: 'hearts-breaker' | 'spades-bidding'): Compact
           name: p.name,
           colorHex: p.colorHex,
           isBot: !!p.isBot,
-          botTimer: 1.6 + Math.random() * 2.2,
+          botDifficulty: p.botDifficulty,
+          botTimer: getTurnBotDelayMs(p.botDifficulty) / 1000,
           hand: hands[i] ?? [],
           picked: false,
           tricksWon: 0,
@@ -1470,7 +1479,7 @@ function createTrickModule(gameId: 'hearts-breaker' | 'spades-bidding'): Compact
           state.trick = [];
           state.players.forEach((p) => {
             p.picked = false;
-            p.botTimer = 1.4 + Math.random() * 2.0;
+            p.botTimer = getTurnBotDelayMs(p.botDifficulty) / 1000;
             if (p.hand.length === 0) p.hand = makeCardDeck().slice(0, 6);
           });
           state.banner = `TRICK ${state.round}/${state.maxRounds} — PICK YOUR CARD!`;
@@ -1484,7 +1493,83 @@ function createTrickModule(gameId: 'hearts-breaker' | 'spades-bidding'): Compact
         if (!p.isBot || p.picked || p.hand.length === 0) continue;
         p.botTimer -= dt;
         if (p.botTimer <= 0) {
-          const card = p.hand[Math.floor(Math.random() * p.hand.length)];
+          const card =
+            selectCardBotMove({
+              difficulty: p.botDifficulty,
+              publicView: {
+                gameId: state.gameId,
+                trick: state.trick,
+                round: state.round,
+                maxRounds: state.maxRounds,
+              },
+              privateSeatView: {
+                hand: p.hand,
+              },
+              legalMoves: p.hand,
+              scoreMove: (cand, pub) => {
+                const isTrump = pub.gameId === 'spades-bidding' && cand.suit === 'spades';
+                const cardPower = rankNumeric(cand.rank) + (isTrump ? 30 : 0);
+                const currentHigh = pub.trick.reduce((mx, t) => {
+                  const tTrump = pub.gameId === 'spades-bidding' && t.suit === 'spades';
+                  return Math.max(mx, rankNumeric(t.rank) + (tTrump ? 30 : 0));
+                }, -1);
+
+                if (pub.gameId === 'hearts-breaker') {
+                  const trickPenalty = pub.trick.reduce(
+                    (acc, t) =>
+                      acc +
+                      (t.suit === 'hearts' ? 25 : 0) +
+                      (t.suit === 'spades' && t.rank === 'Q' ? 120 : 0),
+                    0
+                  );
+                  const cardPenalty =
+                    (cand.suit === 'hearts' ? 25 : 0) +
+                    (cand.suit === 'spades' && cand.rank === 'Q' ? 120 : 0);
+                  if (pub.trick.length > 0 && cardPower < currentHigh) {
+                    // Safe to dump Q♠ or Hearts without winning the trick
+                    return {
+                      score: cardPenalty * 2 + rankNumeric(cand.rank),
+                      isAggressive: false,
+                    };
+                  }
+                  const penaltyRisk = trickPenalty + cardPenalty;
+                  if ((pub.trick.length === 0 || cardPower > currentHigh) && penaltyRisk > 0) {
+                    return {
+                      score: -penaltyRisk * 2 - cardPower,
+                      isAggressive: false,
+                    };
+                  }
+                  if (pub.trick.length > 0 && cardPower > currentHigh && penaltyRisk === 0) {
+                    return {
+                      score: 55 - cardPower * 0.5,
+                      isAggressive: false,
+                    };
+                  }
+                  return {
+                    score: 45 - cardPower - cardPenalty * 0.8,
+                    isAggressive: false,
+                  };
+                }
+
+                // Spades Bidding: spades trump (+30); play lowest winner if beating, else lowest card
+                if (pub.trick.length > 0 && cardPower > currentHigh) {
+                  return {
+                    score: 140 - cardPower,
+                    isAggressive: true,
+                  };
+                }
+                if (pub.trick.length === 0) {
+                  return {
+                    score: 60 + cardPower,
+                    isAggressive: true,
+                  };
+                }
+                return {
+                  score: 40 - cardPower - (isTrump ? 20 : 0),
+                  isAggressive: false,
+                };
+              },
+            }) ?? p.hand[0];
           p.hand = p.hand.filter((c) => c.id !== card.id);
           p.picked = true;
           state.trick.push({ playerId: p.id, playerName: p.name, colorHex: p.colorHex, rank: card.rank, suit: card.suit });
@@ -1650,6 +1735,7 @@ interface PokerState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: { id: string; rank: PlayingCardRank; suit: LiarSuit; selected: boolean }[];
     locked: boolean;
@@ -1695,7 +1781,8 @@ export const pokerShowdownModule: CompactGameModule<PokerState, PokerShowdownSna
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 2 + Math.random() * 2,
+        botDifficulty: p.botDifficulty,
+        botTimer: getTurnBotDelayMs(p.botDifficulty) / 1000,
         hand: makeCardDeck().slice(0, 5).map((c) => ({ ...c, selected: false })),
         locked: false,
         swapped: false,
@@ -1721,7 +1808,7 @@ export const pokerShowdownModule: CompactGameModule<PokerState, PokerShowdownSna
           p.locked = false;
           p.swapped = false;
           p.handRankLabel = null;
-          p.botTimer = 2 + Math.random() * 2;
+          p.botTimer = getTurnBotDelayMs(p.botDifficulty) / 1000;
         });
         state.banner = `HAND ${state.round}/${state.maxRounds} — DRAW OR LOCK!`;
       }
@@ -1733,7 +1820,27 @@ export const pokerShowdownModule: CompactGameModule<PokerState, PokerShowdownSna
     for (const p of state.players) {
       if (!p.isBot || p.locked) continue;
       p.botTimer -= dt;
-      if (p.botTimer <= 0) p.locked = true;
+      if (p.botTimer <= 0) {
+        if (!p.swapped && evalPokerHand(p.hand).tier < 1) {
+          let keepIdx = 0;
+          for (let i = 1; i < p.hand.length; i++) {
+            if (rankNumeric(p.hand[i].rank) > rankNumeric(p.hand[keepIdx].rank)) keepIdx = i;
+          }
+          p.hand.forEach((c, i) => {
+            c.selected = i !== keepIdx;
+          });
+          p.swapped = true;
+          const heldKeys = new Set(p.hand.map((c) => `${c.rank}_${c.suit}`));
+          const fresh = makeCardDeck().filter((c) => !heldKeys.has(`${c.rank}_${c.suit}`));
+          let idx = 0;
+          p.hand = p.hand.map((c) =>
+            c.selected && fresh[idx] ? { ...fresh[idx++], selected: false } : { ...c, selected: false }
+          );
+          sounds.push({ type: 'card', playerId: p.id });
+        } else {
+          p.locked = true;
+        }
+      }
     }
 
     if (state.timeLeft <= 0 || state.players.every((p) => p.locked)) {
@@ -1865,6 +1972,7 @@ interface TarotState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: ElementType[];
     picked: ElementType | null;
@@ -1896,7 +2004,8 @@ export const tarotArcanaModule: CompactGameModule<TarotState, TarotArcanaSnapsho
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.5 + Math.random() * 2,
+        botDifficulty: p.botDifficulty,
+        botTimer: getTurnBotDelayMs(p.botDifficulty) / 1000,
         hand: ['FIRE', 'NATURE', 'FROST', 'SUN'],
         picked: null,
         wins: 0,
@@ -1918,7 +2027,7 @@ export const tarotArcanaModule: CompactGameModule<TarotState, TarotArcanaSnapsho
         state.timeLeft = 12;
         state.players.forEach((p) => {
           p.picked = null;
-          p.botTimer = 1.4 + Math.random() * 2;
+          p.botTimer = getTurnBotDelayMs(p.botDifficulty) / 1000;
         });
         state.banner = `CLASH ${state.round}/${state.maxRounds} — CAST AN ELEMENT!`;
       }
@@ -2051,6 +2160,7 @@ interface BaccaratState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: { id: string; rank: PlayingCardRank; suit: LiarSuit; selected: boolean }[];
     locked: boolean;
@@ -2084,7 +2194,8 @@ export const baccaratClubModule: CompactGameModule<BaccaratState, BaccaratClubSn
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.5 + Math.random() * 2,
+        botDifficulty: p.botDifficulty,
+        botTimer: getTurnBotDelayMs(p.botDifficulty) / 1000,
         hand: makeCardDeck().slice(0, 4).map((c) => ({ ...c, selected: false })),
         locked: false,
         handTotal: null,
@@ -2109,7 +2220,7 @@ export const baccaratClubModule: CompactGameModule<BaccaratState, BaccaratClubSn
           p.hand = makeCardDeck().slice(0, 4).map((c) => ({ ...c, selected: false }));
           p.locked = false;
           p.handTotal = null;
-          p.botTimer = 1.5 + Math.random() * 2;
+          p.botTimer = getTurnBotDelayMs(p.botDifficulty) / 1000;
         });
         state.banner = `ROUND ${state.round}/${state.maxRounds} — FORM YOUR BEST 2-CARD PAIR!`;
       }
@@ -2265,6 +2376,7 @@ interface MemoryState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     pairs: number;
     streak: number;
@@ -2314,7 +2426,9 @@ export const memoryPairsModule: CompactGameModule<MemoryState, MemoryPairsSnapsh
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.5 + Math.random() * 1.5,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous memory race: 1.6x turn delay keeps flip cadence natural vs humans
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.6,
         pairs: 0,
         streak: 0,
         score: 0,
@@ -2342,22 +2456,29 @@ export const memoryPairsModule: CompactGameModule<MemoryState, MemoryPairsSnapsh
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0 && state.openPicks.length < 2) {
-        p.botTimer = 1.4 + Math.random() * 1.4;
+        // Simultaneous memory race: 1.6x turn delay keeps flip cadence natural vs humans
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.6;
         const hidden = state.cards.filter((c) => !c.flipped && !c.matchedByColor);
         if (hidden.length > 0) {
+          const noiseDelta =
+            (UNIVERSAL_BOT_PROFILES.arcade.evaluationNoise -
+              getUniversalBotProfile(p.botDifficulty).evaluationNoise) *
+            0.75;
+          const matchProb = clamp(0.78 + noiseDelta, 0.05, 0.98);
+          const pairProb = clamp(0.7 + noiseDelta, 0.05, 0.98);
           let pick = hidden[Math.floor(Math.random() * hidden.length)];
           if (state.openPicks.length === 1) {
             const firstCard = state.cards.find((c) => c.id === state.openPicks[0]);
             const knownMatch = firstCard
               ? hidden.find((c) => state.seenSymbols[c.id] === firstCard.symbol)
               : undefined;
-            if (knownMatch && Math.random() < 0.78) pick = knownMatch;
+            if (knownMatch && Math.random() < matchProb) pick = knownMatch;
           } else {
             // Look for two already-seen hidden matching cards
             const seenHidden = hidden.filter((c) => Boolean(state.seenSymbols[c.id]));
             for (const c of seenHidden) {
               const pair = seenHidden.find((other) => other.id !== c.id && state.seenSymbols[other.id] === state.seenSymbols[c.id]);
-              if (pair && Math.random() < 0.7) {
+              if (pair && Math.random() < pairProb) {
                 pick = c;
                 break;
               }
@@ -2493,6 +2614,7 @@ interface SequenceState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     hand: { id: string; rank: PlayingCardRank; suit: LiarSuit }[];
@@ -2553,7 +2675,9 @@ export const sequenceJackModule: CompactGameModule<SequenceState, SequenceJackSn
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 2.0 + Math.random() * 2.2,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous sequence board: 2.2x turn delay paces bot placements fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.2,
         actionCd: 0,
         hand: Array.from({ length: 5 }, () => drawSeqCard()),
         chips: 0,
@@ -2573,7 +2697,8 @@ export const sequenceJackModule: CompactGameModule<SequenceState, SequenceJackSn
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 2.0 + Math.random() * 2.0;
+        // Simultaneous sequence board: 2.2x turn delay paces bot placements fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.2;
         const card = p.hand[Math.floor(Math.random() * p.hand.length)];
         if (card) playSeqCard(state, p, card.id, mult, sounds);
       }

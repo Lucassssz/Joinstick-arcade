@@ -38,6 +38,7 @@ import {
   Zap,
 } from 'lucide-react';
 import {
+  BOARD_GAME_IDS,
   CARD_GAME_IDS,
   filterGamesByPlayerMode,
   getGameGenre,
@@ -3234,12 +3235,19 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
       ? Math.round((readyHumans.length / connectedHumans.length) * 100)
       : 100;
   const activeTournament = room.tournament?.active ? room.tournament : null;
-  const frenzyPerks = GAME_FRENZY_PERKS[room.selectedGameId] || {
-    perk1En: '2× SCORE BOOST',
-    perk1Zh: '双倍积分狂热',
-    perk2En: '1.18× SPEED RUSH',
-    perk2Zh: '1.18× 极速冲刺',
-  };
+  const activeSettingOpt =
+    selectedGame.settingOptions.find((o) => o.value === room.gameSettingValue) ??
+    selectedGame.settingOptions[0];
+  const showFrenzyPerks =
+    !CARD_GAME_IDS.has(room.selectedGameId) && !BOARD_GAME_IDS.has(room.selectedGameId);
+  const frenzyPerks = showFrenzyPerks
+    ? GAME_FRENZY_PERKS[room.selectedGameId] || {
+        perk1En: '2× SCORE BOOST',
+        perk1Zh: '双倍积分狂热',
+        perk2En: '1.18× SPEED RUSH',
+        perk2Zh: '1.18× 极速冲刺',
+      }
+    : null;
 
   return (
     <div className="fixed inset-0 h-dvh w-full bg-[#121419] text-[#F4F6FA] flex flex-col overflow-hidden select-none">
@@ -3705,21 +3713,23 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       <Flame className="w-4 h-4 text-[#FF8A00] animate-pulse" />
                     </div>
 
-                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FF4D2E]/30 to-[#FF8A00]/15 border-2 border-[#FF5E1A] px-4 py-4 flex items-center justify-center gap-2.5 shadow-[0_0_28px_rgba(255,77,46,0.35),inset_0_0_20px_rgba(255,77,46,0.25)]">
-                        <Flame className="w-7 h-7 text-[#FFB800] drop-shadow-[0_0_10px_#FF5E1A] shrink-0 animate-pulse" />
-                        <span className="font-display text-lg sm:text-2xl font-black text-white drop-shadow">
-                          {lang === 'zh' ? frenzyPerks.perk1Zh : frenzyPerks.perk1En}
-                        </span>
-                      </div>
+                    {frenzyPerks && (
+                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FF4D2E]/30 to-[#FF8A00]/15 border-2 border-[#FF5E1A] px-4 py-4 flex items-center justify-center gap-2.5 shadow-[0_0_28px_rgba(255,77,46,0.35),inset_0_0_20px_rgba(255,77,46,0.25)]">
+                          <Flame className="w-7 h-7 text-[#FFB800] drop-shadow-[0_0_10px_#FF5E1A] shrink-0 animate-pulse" />
+                          <span className="font-display text-lg sm:text-2xl font-black text-white drop-shadow">
+                            {lang === 'zh' ? frenzyPerks.perk1Zh : frenzyPerks.perk1En}
+                          </span>
+                        </div>
 
-                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FFB800]/28 to-[#FF5E1A]/15 border-2 border-[#FFB800] px-4 py-4 flex items-center justify-center gap-2.5 shadow-[0_0_28px_rgba(255,184,0,0.3),inset_0_0_20px_rgba(255,184,0,0.22)]">
-                        <Zap className="w-7 h-7 text-[#FFE066] drop-shadow-[0_0_10px_#FFB800] shrink-0 animate-pulse" />
-                        <span className="font-display text-lg sm:text-2xl font-black text-white drop-shadow">
-                          {lang === 'zh' ? frenzyPerks.perk2Zh : frenzyPerks.perk2En}
-                        </span>
+                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FFB800]/28 to-[#FF5E1A]/15 border-2 border-[#FFB800] px-4 py-4 flex items-center justify-center gap-2.5 shadow-[0_0_28px_rgba(255,184,0,0.3),inset_0_0_20px_rgba(255,184,0,0.22)]">
+                          <Zap className="w-7 h-7 text-[#FFE066] drop-shadow-[0_0_10px_#FFB800] shrink-0 animate-pulse" />
+                          <span className="font-display text-lg sm:text-2xl font-black text-white drop-shadow">
+                            {lang === 'zh' ? frenzyPerks.perk2Zh : frenzyPerks.perk2En}
+                          </span>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </motion.div>
 
@@ -3819,6 +3829,11 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[#00C2FF]">
                         {t('How to Play', '玩法说明')} · {selectedGame.category}
                       </span>
+                      {activeSettingOpt && (
+                        <span className="px-2 py-0.5 rounded bg-[#101217] border border-[#2A303D] text-[10px] font-mono font-bold text-[#E5E7EB]">
+                          {selectedGame.settingLabel}: {activeSettingOpt.label}
+                        </span>
+                      )}
                       {room.activeMutator !== 'normal' && (
                         <span
                           className="px-2 py-0.5 rounded bg-[#101217] border text-[10px] font-mono font-black"

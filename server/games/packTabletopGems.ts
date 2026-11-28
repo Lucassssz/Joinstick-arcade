@@ -1,8 +1,11 @@
 import type {
+  BotDifficulty,
   CardColor,
   CardPrivateHandItem,
   CardPrivateState,
 } from '../../src/shared/types.ts';
+import { getUniversalBotProfile, UNIVERSAL_BOT_PROFILES } from '../../src/shared/botProfile.ts';
+import { getTurnBotDelayMs } from './botEngine.ts';
 import type {
   CamelStackDerbySnapshot,
   CornerPolyominoSnapshot,
@@ -829,6 +832,7 @@ interface CamelStackState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     betColor: string | null;
@@ -912,7 +916,9 @@ export const camelStackDerbyModule: CompactGameModule<CamelStackState, CamelStac
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.4 + Math.random() * 1.6,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous camel betting race: 2.0x turn delay paces bot bets/rolls fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0,
         actionCd: 0,
         betColor: null,
         coins: 50,
@@ -942,10 +948,22 @@ export const camelStackDerbyModule: CompactGameModule<CamelStackState, CamelStac
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 1.8 + Math.random() * 1.6;
+        // Simultaneous camel betting race: 2.0x turn delay paces bot bets/rolls fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0;
         if (!p.betColor) {
           const leader = getLeadingCamelId(state.camels);
-          p.betColor = Math.random() < 0.72 ? leader : CAMEL_SPECS[Math.floor(Math.random() * CAMEL_SPECS.length)].id;
+          const leaderBetProb = clamp(
+            0.72 +
+              (UNIVERSAL_BOT_PROFILES.arcade.evaluationNoise -
+                getUniversalBotProfile(p.botDifficulty).evaluationNoise) *
+                0.75,
+            0.05,
+            0.98
+          );
+          p.betColor =
+            Math.random() < leaderBetProb
+              ? leader
+              : CAMEL_SPECS[Math.floor(Math.random() * CAMEL_SPECS.length)].id;
           p.lastAction = `BET ${p.betColor.toUpperCase()}`;
         } else {
           const unrolled = state.camels.filter((c) => !state.rolledThisLeg.includes(c.id));
@@ -1090,6 +1108,7 @@ interface RouteExpressState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     hand: { id: string; color: TileColor | 'wild' }[];
@@ -1173,7 +1192,9 @@ export const routeExpressModule: CompactGameModule<RouteExpressState, RouteExpre
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.8 + Math.random() * 1.8,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous rail building race: 2.0x turn delay paces bot claims fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0,
         actionCd: 0,
         hand: drawTrainCards(5),
         routesClaimed: 0,
@@ -1193,7 +1214,8 @@ export const routeExpressModule: CompactGameModule<RouteExpressState, RouteExpre
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 1.9 + Math.random() * 1.9;
+        // Simultaneous rail building race: 2.0x turn delay paces bot claims fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0;
         let built = false;
         for (const c of p.hand) {
           if (tryClaimRouteByColor(state, p, c.color, mult, sounds)) {
@@ -1336,6 +1358,7 @@ interface GemEngineState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     gems: Record<TileColor, number>;
@@ -1403,7 +1426,9 @@ export const gemEngineGuildModule: CompactGameModule<GemEngineState, GemEngineGu
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.5 + Math.random() * 1.5,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous gem drafting race: 2.0x turn delay paces bot buys fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0,
         actionCd: 0,
         gems: { red: 1, blue: 1, gold: 1, green: 1 },
         discounts: { red: 0, blue: 0, gold: 0, green: 0 },
@@ -1425,7 +1450,8 @@ export const gemEngineGuildModule: CompactGameModule<GemEngineState, GemEngineGu
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 1.6 + Math.random() * 1.6;
+        // Simultaneous gem drafting race: 2.0x turn delay paces bot buys fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0;
         const sorted = [...state.market].sort((a, b) => b.pts - a.pts);
         let bought = false;
         for (const m of sorted) {
@@ -1918,6 +1944,7 @@ interface SecretRankState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     flagsCaptured: number;
@@ -2051,7 +2078,9 @@ export const secretRankFlagsModule: CompactGameModule<SecretRankState, SecretRan
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.8 + Math.random() * 1.6,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous tactical flag race: 2.0x turn delay paces bot marches fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0,
         actionCd: 0,
         flagsCaptured: 0,
         score: 0,
@@ -2074,7 +2103,8 @@ export const secretRankFlagsModule: CompactGameModule<SecretRankState, SecretRan
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 2.0 + Math.random() * 1.6;
+        // Simultaneous tactical flag race: 2.0x turn delay paces bot marches fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 2.0;
         const unit = mobile[Math.floor(Math.random() * mobile.length)];
         if (unit) moveFlagUnit(state, p, unit.id, false, mult, sounds);
       }

@@ -136,6 +136,54 @@ export function getGameGenre(id: GameId): GameGenre {
 }
 
 /**
+ * Games governed by discrete turns / async prompts rather than continuous
+ * real-time frame stepping (`speedScale` is locked to 1.0x and Turbo mutator is ineligible).
+ * Note: `block-stack`, `mini-golf-pro`, and `billiards-snooker` are intentionally
+ * excluded despite being categorized under Board/Tabletop because all three run
+ * simultaneous real-time physics, gravity, and `dt`-driven timers.
+ */
+export const TURN_PACED_GAME_IDS = new Set<GameId>([
+  'rich-street',
+  'jungle-ladders',
+  'ludo-royale',
+  'star-party-board',
+  'reversi-clash',
+  'four-in-a-row',
+  'naval-salvo',
+  'neon-checkers',
+  'carrom-arena',
+  'dungeon-crawl-board',
+  'lucky-auction',
+  'pit-harvest',
+  'gomoku-blitz',
+  'chess-blitz',
+  'domino-chain',
+  'hexagon-conquest',
+  'backgammon-sprint',
+  'mancala-jewels',
+  'curling-masters',
+  'truth-bomb',
+  'draw-guess-relay',
+  'mosaic-tile-draft',
+  'maze-wall-duel',
+  'corner-polyomino',
+  'pillar-ascent-3d',
+  'hex-island-settlers',
+  'hex-insect-chess',
+  'deep-sea-oxygen',
+  'picross-nonogram',
+  'speed-sudoku-duel',
+  'xiangqi-river-clash',
+  'tile-triple',
+  'tile-2048-blitz',
+  'mine-sweep-duel',
+  'geo-pin-rush',
+  'wavelength-sync',
+  'tangram-silhouette',
+  ...CARD_GAME_IDS,
+]);
+
+/**
  * Modular Game Catalog Registry.
  * Written in clear, simple English so players of all ages understand every game in seconds.
  */
@@ -2476,6 +2524,90 @@ export const GAME_CATALOG: GameMetadata[] = [
   ...PACK_MIND_LOGIC_GAME_CATALOG,
   ...PACK_CULT_HERITAGE_GAME_CATALOG,
 ];
+
+const CONCISE_COACH_LINES: Partial<Record<GameId, string>> = {
+  'blade-duel': 'Start with 3 Hearts — aim and strike (A) to score a Round KO!',
+  'rich-street': 'On your turn, press ROLL / BUY (A) to roll dice and buy city blocks!',
+  'kitchen-rush': 'Grab crate items with (A), cook, and serve matching food orders!',
+  'treasure-dig': 'Walk the beach — your ring glows bright gold near buried treasure!',
+  'fruit-drop': 'Move left & right to catch falling fruits and dodge rotten bombs!',
+  'lucky-auction': 'Read the Mystery Clue on stage, then bid (A) or pass (B) on chests!',
+  'color-clash': 'Tap any lit card in your hand (or Joystick + A) to match the pile!',
+  'liars-deck': 'Play cards matching the TV Target Rank (or bluff!) — Jokers are Wild!',
+  'lava-hopper': 'Stay on solid pillars — jump off flashing red pillars before they sink!',
+  'ludo-royale': 'On your turn, press ROLL (A) to roll the die and move your token.',
+  'star-party-board': 'On your turn, press DICE BLOCK (A) to roll and hop around the island.',
+  'naval-salvo': 'Steer crosshairs over the 8×6 grid and press FIRE (A) to sink ships!',
+  'neon-checkers': 'Push Left/Right to pick a valid move, then press MOVE (A).',
+  'carrom-arena': 'Push Left/Right to aim your Striker, then shoot with (A)!',
+  'dungeon-crawl-board': 'On your turn, press ROLL (A) to advance and battle dungeon foes.',
+  'boom-kittens': 'Tap glowing Action cards before drawing — avoid Exploding Kittens!',
+  'property-deal': 'Draw 2 cards each turn and play up to 3 cards from your hand!',
+  'flip-seven': 'Tap HIT to flip another card or STAY to bank your round points!',
+  'dark-flip-clash': 'Match the center card by Color or Rank — Flip cards invert the table!',
+  'sushi-draft': 'Everyone picks 1 Sushi card at once to draft and pass the rest!',
+  'line-breakers': 'Galah Panjang: Runners dash past guards; guards tag to swap sides!',
+  'desk-flippers': 'Flick your eraser onto rival erasers across the wooden school desk!',
+  'spin-clash': 'Spin and slam rival Gasing tops out of the chalk ring!',
+  'marble-ring': 'Aim and shoot your striker to knock marbles out of the chalk circle!',
+  'rattan-volley': 'Kick the rattan ball over the net using agile leaps and spikes!',
+  'step-stomp': 'Time your stride and stomp rival shoes in classic One-Two-Jus!',
+  'pit-harvest': 'Sow seeds counter-clockwise around the 7-pit Congkak board!',
+  'big-two-royale': 'Beat the table with higher singles, pairs, or 5-card poker combos!',
+  'lucky-21': 'Get closer to 21 than the Banker without busting — 21★ wins big!',
+  'ten-pair-showdown': 'Pick 3 cards summing to a multiple of 10, then score the last 2!',
+  'melon-merge': 'Aim left/right and press DROP (A) to merge matching fruits bigger!',
+  'tile-triple': 'Move over uncovered tiles and press PICK (A) to match triples!',
+  'block-hop': 'Hold JUMP (A) to charge power, then release to land on the next block!',
+  'platform-leap': 'Steer left/right and press LEAP (A) to climb rising ledges!',
+  'egg-rush': 'Sprint forward and dodge spinning sweepers to reach the finish!',
+  'goose-alert': 'Geese finish station tasks (A); Ducks sabotage and sneak tags!',
+  'truth-bomb': 'Hold the ticking bomb? Aim at a rival and press PASS (A) fast!',
+  'draw-guess-relay': 'Artist paints clues with Joystick + (A); others guess fast on phone!',
+  'landlord-clash': 'Bid 1×–3× to become Landlord, then empty your hand first to win!',
+  'speed-mahjong': 'Draw 1 tile and discard 1 each turn to form winning sets & pairs!',
+  'midnight-werewolf': 'Act secretly at night by role, then debate and vote out Werewolves!',
+  'idiom-chain': 'Chain a phrase starting with the anchor idiom’s final character!',
+  'sky-climb': 'Steer left/right and jump (A) up floating sky beams before rivals!',
+  'turf-ribbon': 'Loop outside your base and return safely to claim new territory!',
+  'glass-bridge': 'Pick the left or right glass lane and press LEAP (A) to cross!',
+  'tug-titan': 'Tap PULL (A) fast — strike on the golden pulse for 2× rope power!',
+  'tile-2048-blitz': 'Swipe or flick directions to slide and merge matching number tiles!',
+  'wavelength-sync': 'Read both spectrum ends and the clue — dial close to the bullseye!',
+  'codenames-grid': 'Read the Spymaster Clue and tap matching word tiles on the 4×4 grid!',
+  'fib-party': 'Plant a believable fake answer, then spot the real truth to score!',
+  'brick-clash': 'Slide your paddle left/right to bounce plasma balls through bricks!',
+  'alien-wave': 'Strafe left/right and fire (A) plasma bolts to clear alien waves!',
+  'block-stack': 'Move falling blocks left/right, rotate (A), and clear lines fast!',
+  'barrel-tower': 'Run girders, climb glowing ladders (Up), and leap rolling barrels!',
+  'skee-roll': 'Aim left/right along the lane and launch (A) for 100-pt pockets!',
+  'tunnel-dig': 'Drill underground tunnels with the joystick and scoop glowing gems!',
+  'bubble-pop-arc': 'Aim your launcher left/right and bank shots to pop matching clusters!',
+  'pin-strike': 'Line up your bowling ball left/right, spin, and knock down all pins!',
+  'coin-dozer': 'Slide the dispenser left/right and drop tokens onto the pusher!',
+  'rummy-royale': 'Meld sets of 3 matching ranks or same-suit runs on your phone!',
+  'hearts-breaker': 'Tap a card from your hand to follow suit and dodge Hearts & Q♠!',
+  'tarot-arcana': 'Pick 1 secret Arcana card each round to out-element your rivals!',
+  'baccarat-club': 'Closest hand to 9 wins (A=1, face cards=0, last digit counts)!',
+  'trap-builder-run': 'Place traps or platforms (A) during BUILD, then race to the goal!',
+  'track-crafter-gp': 'Drop track pieces (A) during CRAFT, then drift the custom circuit!',
+  'horde-survivor': 'Steer 360° to kite monster swarms while orbiting blades auto-slice!',
+  'swarm-herd-clash': 'Roam the arena to recruit stray neutral units into your huge swarm!',
+  'air-traffic-landing': 'Swipe onto incoming planes and drag them safely to matching runways!',
+  'gem-engine-guild': 'Mine gem tokens to buy discount cards and race to 15 prestige pts!',
+  'secret-rank-flags': 'Keep your unit ranks hidden and command troops to capture the Flag!',
+  'deep-sea-oxygen': 'Dive deeper for treasure and return to the sub before air runs out!',
+  'corridor-fencing': 'Step left/right to advance and press Up/Down to set blade height!',
+  'five-stones-toss': 'Toss Ibu (B) and sweep your hand across clustered Batu cloth stones!',
+  'chapteh-juggle': 'Dash under falling Chapteh feathers and tap (A) on ring contact!',
+};
+
+for (const game of GAME_CATALOG) {
+  const coachLine = CONCISE_COACH_LINES[game.id];
+  if (coachLine && !game.coachLine) {
+    game.coachLine = coachLine;
+  }
+}
 
 export const GAME_BY_ID: Record<GameId, GameMetadata> = GAME_CATALOG.reduce(
   (acc, game) => {

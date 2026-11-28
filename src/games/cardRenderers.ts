@@ -8,6 +8,15 @@ import {
   LiarCard,
   LiarsDeckSnapshot,
 } from '../shared/types';
+import {
+  clamp01,
+  easeInOutCubic,
+  easeOutBack,
+  easeOutCubic,
+  getMotionTime,
+  lerpHex,
+  parseHexRgb,
+} from './arcadeMotion';
 import { drawShadowOval, drawStudioBackdrop, shadeHex } from './render25d';
 import { isTablePlayerHidden } from './canvasHelpers';
 import { drawNameplate, drawPopupTexts, tCanvas } from './renderers';
@@ -23,44 +32,6 @@ const CLASH_COLORS: Record<CardColor, { bg: string; dark: string; rim: string }>
 // ============================================================
 // MOTION CURVES & JUICY TABLE 60FPS FX STATE
 // ============================================================
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
-function easeOutCubic(t: number): number {
-  const x = clamp01(t);
-  return 1 - Math.pow(1 - x, 3);
-}
-
-function easeInOutCubic(t: number): number {
-  const x = clamp01(t);
-  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-}
-
-function easeOutBack(t: number, overshoot = 1.70158): number {
-  const x = clamp01(t) - 1;
-  return 1 + (overshoot + 1) * x * x * x + overshoot * x * x;
-}
-
-function parseHexRgb(hex: string): [number, number, number] {
-  let clean = hex.trim().replace('#', '');
-  if (clean.length === 3) {
-    clean = clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2];
-  }
-  const num = parseInt(clean, 16);
-  if (Number.isNaN(num)) return [255, 184, 0];
-  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
-}
-
-function lerpHex(fromHex: string, toHex: string, alpha: number): string {
-  const a = clamp01(alpha);
-  const [r1, g1, b1] = parseHexRgb(fromHex);
-  const [r2, g2, b2] = parseHexRgb(toHex);
-  const r = Math.round(r1 + (r2 - r1) * a);
-  const g = Math.round(g1 + (g2 - g1) * a);
-  const b = Math.round(b1 + (b2 - b1) * a);
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
 
 interface TrackedFlight {
   fc: FlyingCardAnim;
@@ -132,7 +103,7 @@ function createAmbientMotes(): AmbientMote[] {
   return out;
 }
 
-interface JuicyTableFX {
+export interface JuicyTableFX {
   gameId: string;
   lastFrameMs: number;
   feltAccentHex: string;
@@ -159,34 +130,48 @@ interface JuicyTableFX {
   motes: AmbientMote[];
 }
 
-const fx: JuicyTableFX = {
-  gameId: '',
-  lastFrameMs: 0,
-  feltAccentHex: '#10D98B',
-  orbitAngle: 0,
-  orbitVel: 1.45,
-  lastDirection: 1,
-  lastTopKey: '',
-  pileSlam: 0,
-  pileSlamRot: 0,
-  lastDeckCount: -1,
-  deckPulse: 0,
-  lastPileCount: -1,
-  lastActivePlayerId: '',
-  spotlightX: TABLE_CENTER_X,
-  spotlightY: TABLE_CENTER_Y,
-  spotlightAlpha: 0,
-  lastBannerText: null,
-  bannerAnim: 1,
-  flights: new Map(),
-  ripples: [],
-  sparks: [],
-  seats: new Map(),
-  comets: [],
-  motes: createAmbientMotes(),
-};
+export function createJuicyTableFX(): JuicyTableFX {
+  return {
+    gameId: '',
+    lastFrameMs: 0,
+    feltAccentHex: '#10D98B',
+    orbitAngle: 0,
+    orbitVel: 1.45,
+    lastDirection: 1,
+    lastTopKey: '',
+    pileSlam: 0,
+    pileSlamRot: 0,
+    lastDeckCount: -1,
+    deckPulse: 0,
+    lastPileCount: -1,
+    lastActivePlayerId: '',
+    spotlightX: TABLE_CENTER_X,
+    spotlightY: TABLE_CENTER_Y,
+    spotlightAlpha: 0,
+    lastBannerText: null,
+    bannerAnim: 1,
+    flights: new Map(),
+    ripples: [],
+    sparks: [],
+    seats: new Map(),
+    comets: [],
+    motes: createAmbientMotes(),
+  };
+}
+
+const defaultCardFx: JuicyTableFX = createJuicyTableFX();
+let activeCardFx: JuicyTableFX | null = null;
+
+export function setActiveCardFx(state: JuicyTableFX | null): void {
+  activeCardFx = state;
+}
+
+function getCardFx(): JuicyTableFX {
+  return activeCardFx ?? defaultCardFx;
+}
 
 function spawnLandingJuice(x: number, y: number, colorHex: string, strong = false) {
+  const fx = getCardFx();
   fx.ripples.push({
     x,
     y,
@@ -213,7 +198,8 @@ function spawnLandingJuice(x: number, y: number, colorHex: string, strong = fals
 }
 
 function stepTableFX(gameId: string): number {
-  const nowMs = performance.now();
+  const fx = getCardFx();
+  const nowMs = getMotionTime() * 1000;
   const gapMs = nowMs - fx.lastFrameMs;
   if (fx.gameId !== gameId || gapMs > 650 || fx.lastFrameMs === 0) {
     fx.gameId = gameId;
@@ -286,6 +272,7 @@ function syncSeatStates(
   activePlayerId: string,
   activeColorHex: string
 ): void {
+  const fx = getCardFx();
   const total = players.length;
 
   // Detect turn handoff for comet trail & spotlight glide
@@ -362,6 +349,7 @@ function drawCasinoCardTable(
   feltAccentHex: string,
   spotlightHex: string
 ): void {
+  const fx = getCardFx();
   drawStudioBackdrop(ctx, '#090D11', spotlightHex, 'rgba(255,255,255,0.025)', 54);
 
   const cx = TABLE_CENTER_X;
@@ -705,6 +693,7 @@ function drawSeatPod(
   turnTotal: number
 ): void {
   if (isTablePlayerHidden(p.id)) return;
+  const fx = getCardFx();
   const seat = getCardSeatPosition(seatIdx, total);
   const now = fx.orbitAngle * 2.8;
   const isDanger = isActiveTurn && turnTimeLeft <= 5;
@@ -864,7 +853,8 @@ function drawFlyingCardsAndFX(
   flyingCards: FlyingCardAnim[],
   dt: number
 ): void {
-  const nowMs = performance.now();
+  const fx = getCardFx();
+  const nowMs = getMotionTime() * 1000;
   const activeIds = new Set<string>();
 
   for (const fc of flyingCards) {
@@ -1057,6 +1047,7 @@ function drawTableBanner(
   text: string | null,
   colorHex: string | null
 ): void {
+  const fx = getCardFx();
   if (!text) {
     fx.lastBannerText = null;
     return;
@@ -1096,6 +1087,7 @@ export function renderColorClash(
   ctx: CanvasRenderingContext2D,
   snap: ColorClashSnapshot
 ): void {
+  const fx = getCardFx();
   const dt = stepTableFX('color-clash');
   const targetAccentHex = CLASH_COLORS[snap.activeColor].bg;
   fx.feltAccentHex = lerpHex(fx.feltAccentHex, targetAccentHex, 1 - Math.exp(-8 * dt));
@@ -1324,6 +1316,7 @@ export function renderLiarsDeck(
   ctx: CanvasRenderingContext2D,
   snap: LiarsDeckSnapshot
 ): void {
+  const fx = getCardFx();
   const dt = stepTableFX('liars-deck');
   const isBluffHot = snap.phase === 'challenge' || snap.revealVerdict === 'bluff-caught';
   const targetAccent = isBluffHot ? '#FF4D2E' : '#FFB800';
@@ -1420,7 +1413,7 @@ export function renderLiarsDeck(
   // Challenge Window Ring around center pile
   if (snap.phase === 'challenge') {
     const frac = Math.max(0, Math.min(1, snap.turnTimeLeft / Math.max(1, snap.turnTotal)));
-    const pulseR = 96 + Math.sin(performance.now() * 0.009) * 3;
+    const pulseR = 96 + Math.sin(getMotionTime() * 9) * 3;
     ctx.save();
     ctx.strokeStyle = 'rgba(255, 77, 46, 0.28)';
     ctx.lineWidth = 6;

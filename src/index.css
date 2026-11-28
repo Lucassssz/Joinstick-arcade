@@ -177,10 +177,106 @@
   will-change: transform, opacity;
 }
 
+@keyframes jsFrenzyStage1 {
+  0% {
+    transform: translate3d(105%, 0, 0) scale(0.92);
+    opacity: 0;
+  }
+  15% {
+    transform: translate3d(0%, 0, 0) scale(1.03);
+    opacity: 1;
+  }
+  78% {
+    transform: translate3d(0%, 0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(-105%, 0, 0) scale(0.92);
+    opacity: 0;
+  }
+}
+
+@keyframes jsFrenzyStage2 {
+  0%, 40% {
+    transform: translate3d(105%, 0, 0) scale(0.92);
+    opacity: 0;
+  }
+  52% {
+    transform: translate3d(0%, 0, 0) scale(1.02);
+    opacity: 1;
+  }
+  90% {
+    transform: translate3d(0%, 0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(-105%, 0, 0) scale(0.92);
+    opacity: 0;
+  }
+}
+
+@keyframes jsFrenzyStreak {
+  0% {
+    transform: translate3d(120%, 0, 0);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.92;
+  }
+  80% {
+    opacity: 0.92;
+  }
+  100% {
+    transform: translate3d(-140%, 0, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes jsFrenzyEmber {
+  0% {
+    transform: translate3d(260px, 110px, 0) scale(0.6);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0.92;
+  }
+  100% {
+    transform: translate3d(-280px, -130px, 0) scale(1.25);
+    opacity: 0;
+  }
+}
+
+.frenzy-stage-1 {
+  animation: jsFrenzyStage1 1.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.frenzy-stage-2 {
+  animation: jsFrenzyStage2 3.0s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.frenzy-streak {
+  animation-name: jsFrenzyStreak;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.frenzy-ember {
+  animation-name: jsFrenzyEmber;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card-deal-anim,
   .swatch-pop-anim,
-  .card-loading-sweep {
+  .card-loading-sweep,
+  .frenzy-stage-1,
+  .frenzy-stage-2,
+  .frenzy-streak,
+  .frenzy-ember {
     animation: none;
   }
   .card-hand-item,

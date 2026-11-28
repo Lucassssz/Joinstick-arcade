@@ -64,6 +64,9 @@ export const FREE_ROAM_ARENA_GAMES = new Set<GameId>([
   'moving-day-havoc',
   'wau-kite-cut',
   'five-stones-toss',
+  // Free-roam 2D arenas that also use COMPACT_RING_GAMES spawn bounds (matching hex-drop & hot-lava-floor)
+  'marble-ring',
+  'roulette-arena',
 ]);
 
 const COMPACT_RING_GAMES = new Set<GameId>([

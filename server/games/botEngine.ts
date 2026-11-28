@@ -127,6 +127,8 @@ export interface RealtimeBotAdapterInput {
   holdActionB?: boolean;
   /** True for lane/grid/cursor real-time games where dx/dy should not be rotated by 2D angular aimError */
   discreteSteering?: boolean;
+  /** Optional deterministic RNG for tests; defaults to Math.random */
+  rng?: () => number;
 }
 
 /**
@@ -139,6 +141,7 @@ export interface RealtimeBotAdapterInput {
  * Fairness guarantee: never modifies max movement speed, cooldowns, knockback, or rules.
  */
 export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): ControllerInput {
+  const rng = input.rng ?? Math.random;
   const profile = getUniversalBotProfile(input.difficulty);
   const roundMarker = input.roundMarker ?? 'r1';
   const seedHash = hashString(`${input.memoryKey}:${input.botId}`);
@@ -225,7 +228,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
       if (inStartDelay && isOffensiveMove) {
         mem.heldDx = 0;
         mem.heldDy = 0;
-      } else if (Math.random() < profile.mistakeRate * 0.65) {
+      } else if (rng() < profile.mistakeRate * 0.65) {
         mem.heldDx = 0;
         mem.heldDy = 0;
       } else {
@@ -234,9 +237,9 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
       }
     } else {
       // Decide whether this decision window is aggressive or safe/objective-focused
-      const shouldMistake = Math.random() < profile.mistakeRate;
+      const shouldMistake = rng() < profile.mistakeRate;
       const wantsAggressiveEngagement =
-        !hasStationaryOpponentInOpening && Math.random() <= profile.aggression;
+        !hasStationaryOpponentInOpening && rng() <= profile.aggression;
 
       // 1. If structured targets + selfPos are provided and not in boundary recovery, compute lookahead intercept
       if (!nearDangerBoundary && input.selfPos && input.targets && input.targets.length > 0) {
@@ -262,7 +265,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
           // Apply mistakeRate to target selection when multiple targets exist
           let chosen = scored[0].t;
           if (scored.length > 1 && shouldMistake) {
-            const altIdx = 1 + Math.floor(Math.random() * (scored.length - 1));
+            const altIdx = 1 + Math.floor(rng() * (scored.length - 1));
             chosen = scored[altIdx].t;
           }
 
@@ -283,7 +286,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
       // 2. Apply startDelay, mistakeRate, and aggression
       if (nearDangerBoundary && input.selfPos && input.safeCenter) {
         // Steer back toward safe center when near the edge, unless a mistake happens on non-critical boundary
-        if (!criticalBoundary && shouldMistake && Math.random() < 0.4) {
+        if (!criticalBoundary && shouldMistake && rng() < 0.4) {
           const centerAngle = Math.atan2(toCenterY, toCenterX) + mem.orbitDir * 0.85;
           baseDx = Math.cos(centerAngle);
           baseDy = Math.sin(centerAngle);
@@ -314,13 +317,13 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
         const shouldPlaySafe = isOffensiveMove && !wantsAggressiveEngagement;
 
         if (shouldMistake) {
-          if (Math.random() < 0.38) {
+          if (rng() < 0.38) {
             baseDx = 0;
             baseDy = 0;
           } else {
-            mem.wanderAngle += (Math.random() - 0.5) * 2.4;
+            mem.wanderAngle += (rng() - 0.5) * 2.4;
             const curAngle = Math.hypot(baseDx, baseDy) > 0.05 ? Math.atan2(baseDy, baseDx) : mem.wanderAngle;
-            const deviation = (Math.random() < 0.5 ? 1 : -1) * (1.2 + Math.random() * 1.15);
+            const deviation = (rng() < 0.5 ? 1 : -1) * (1.2 + rng() * 1.15);
             baseDx = Math.cos(curAngle + deviation);
             baseDy = Math.sin(curAngle + deviation);
           }
@@ -331,7 +334,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
             const inwardOrbit = centerAngle + mem.orbitDir * 0.45;
             baseDx = Math.cos(inwardOrbit);
             baseDy = Math.sin(inwardOrbit);
-          } else if (Math.random() < 0.45) {
+          } else if (rng() < 0.45) {
             baseDx = 0;
             baseDy = 0;
           } else {
@@ -345,7 +348,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
         // On a mistake roll, apply sloppy cornering/aim deviation or brief hesitation without wandering off-objective
         if (shouldMistake && Math.hypot(baseDx, baseDy) > 0.05) {
           const curAngle = Math.atan2(baseDy, baseDx);
-          const sloppyOffset = (Math.random() < 0.5 ? 1 : -1) * (0.28 + profile.aimError * 0.75);
+          const sloppyOffset = (rng() < 0.5 ? 1 : -1) * (0.28 + profile.aimError * 0.75);
           baseDx = Math.cos(curAngle + sloppyOffset);
           baseDy = Math.sin(curAngle + sloppyOffset);
         }
@@ -356,7 +359,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
       if (mag > 0.05) {
         const rawAngle = Math.atan2(baseDy, baseDx);
         const errScale = criticalBoundary ? 0.55 : 1.0;
-        const angularJitter = (Math.random() * 2 - 1) * profile.aimError * errScale;
+        const angularJitter = (rng() * 2 - 1) * profile.aimError * errScale;
         const finalAngle = rawAngle + angularJitter;
         const legalMag = mag >= 0.35 ? 1.0 : mag;
         mem.heldDx = Number((Math.cos(finalAngle) * legalMag).toFixed(3));
@@ -379,6 +382,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
     mem,
     'A',
     Boolean(input.holdActionA),
+    rng,
   );
   const fireB = evaluateButtonReaction(
     Boolean(input.wantsActionB),
@@ -389,6 +393,7 @@ export function runRealtimeBotAdapter(input: RealtimeBotAdapterInput): Controlle
     mem,
     'B',
     Boolean(input.holdActionB),
+    rng,
   );
 
   return {
@@ -408,6 +413,7 @@ function evaluateButtonReaction(
   mem: RealtimeBotMemory,
   btn: 'A' | 'B',
   isHoldMode = false,
+  rng: () => number = Math.random,
 ): boolean {
   const pendingKey = btn === 'A' ? 'pendingA' : 'pendingB';
   const holdingKey = btn === 'A' ? 'holdingA' : 'holdingB';
@@ -434,7 +440,7 @@ function evaluateButtonReaction(
     }
     if (!mem[pendingKey] && clockSec >= mem[cooldownKey]) {
       mem[pendingKey] = true;
-      const jitter = 0.75 + Math.random() * 0.3;
+      const jitter = 0.75 + rng() * 0.3;
       mem[readyKey] = clockSec + profile.reactionTime * jitter;
     }
     if (mem[pendingKey] && clockSec >= mem[readyKey]) {
@@ -448,7 +454,7 @@ function evaluateButtonReaction(
   // Latch a new reaction window when wantsAction triggers and button is off cognitive cooldown
   if (wantsAction && !mem[pendingKey] && clockSec >= mem[cooldownKey]) {
     mem[pendingKey] = true;
-    const jitter = 0.85 + Math.random() * 0.3;
+    const jitter = 0.85 + rng() * 0.3;
     mem[readyKey] = clockSec + profile.reactionTime * jitter;
   }
 
@@ -456,8 +462,8 @@ function evaluateButtonReaction(
   if (mem[pendingKey] && clockSec >= mem[readyKey]) {
     mem[pendingKey] = false;
     mem[cooldownKey] = clockSec + profile.reactionTime * 0.7;
-    const passesMistake = Math.random() >= profile.mistakeRate * 0.75;
-    const passesAggression = !isAggressive || Math.random() <= Math.min(1, profile.aggression + 0.18);
+    const passesMistake = rng() >= profile.mistakeRate * 0.75;
+    const passesAggression = !isAggressive || rng() <= Math.min(1, profile.aggression + 0.18);
     if (passesMistake && passesAggression) {
       return true;
     }
@@ -487,6 +493,7 @@ export interface TurnBasedBotAdapterInput<TMove> {
   difficulty?: BotDifficulty;
   candidates: ScoredCandidateMove<TMove>[];
   scoreMove?: (move: TMove, lookaheadDepth: number, profile: UniversalBotProfile) => number;
+  rng?: () => number;
 }
 
 /**
@@ -501,6 +508,7 @@ export function selectTurnBasedBotMove<TMove>(input: TurnBasedBotAdapterInput<TM
   if (!candidates || candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0].move;
 
+  const rng = input.rng ?? Math.random;
   const profile = getUniversalBotProfile(input.difficulty);
 
   const rawScores = candidates.map((c) => {
@@ -526,7 +534,7 @@ export function selectTurnBasedBotMove<TMove>(input: TurnBasedBotAdapterInput<TM
 
   const noisyRanked = candidates.map((c, idx) => {
     const normalized = span > 1e-6 ? (rawScores[idx] - minScore) / span : 0.5;
-    const noise = (Math.random() * 2 - 1) * profile.evaluationNoise;
+    const noise = (rng() * 2 - 1) * profile.evaluationNoise;
     return {
       move: c.move,
       normalizedScore: normalized,
@@ -536,9 +544,9 @@ export function selectTurnBasedBotMove<TMove>(input: TurnBasedBotAdapterInput<TM
 
   noisyRanked.sort((a, b) => b.finalScore - a.finalScore);
 
-  if (noisyRanked.length > 1 && Math.random() < profile.mistakeRate) {
+  if (noisyRanked.length > 1 && rng() < profile.mistakeRate) {
     const maxFallbackIdx = Math.min(noisyRanked.length - 1, Math.max(1, Math.ceil(noisyRanked.length * 0.6)));
-    const fallbackIdx = 1 + Math.floor(Math.random() * maxFallbackIdx);
+    const fallbackIdx = 1 + Math.floor(rng() * maxFallbackIdx);
     return noisyRanked[fallbackIdx].move;
   }
 
@@ -556,6 +564,7 @@ export interface CardBotAdapterInput<TMove, TPublicView, TPrivateSeatView> {
     privateSeatView: TPrivateSeatView,
     profile: UniversalBotProfile,
   ) => { score: number; lookaheadScore?: number; isAggressive?: boolean };
+  rng?: () => number;
 }
 
 /**
@@ -584,6 +593,7 @@ export function selectCardBotMove<TMove, TPublicView, TPrivateSeatView>(
   return selectTurnBasedBotMove({
     difficulty: input.difficulty,
     candidates,
+    rng: input.rng,
   });
 }
 

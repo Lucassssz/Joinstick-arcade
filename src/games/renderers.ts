@@ -63,7 +63,13 @@ import {
   renderPinballClash,
   renderRedLightDash,
 } from './partyRenderersC';
-import { renderColorClash, renderLiarsDeck } from './cardRenderers';
+import {
+  createJuicyTableFX,
+  JuicyTableFX,
+  renderColorClash,
+  renderLiarsDeck,
+  setActiveCardFx,
+} from './cardRenderers';
 import { renderModularGame } from './rendererRegistry';
 import {
   ArcadeMotionState,
@@ -83,10 +89,16 @@ export interface RenderFxState {
   skidMarks: { x: number; y: number; alpha: number; color: string }[];
   shake: number;
   arcade: ArcadeMotionState;
+  card: JuicyTableFX;
 }
 
 export function createRenderFxState(): RenderFxState {
-  return { skidMarks: [], shake: 0, arcade: createArcadeMotionState() };
+  return {
+    skidMarks: [],
+    shake: 0,
+    arcade: createArcadeMotionState(),
+    card: createJuicyTableFX(),
+  };
 }
 
 // ============================================================
@@ -1068,6 +1080,7 @@ export function renderGameSnapshot(
   setHiddenTablePlayer(hidePlayerId, hiddenPlayerName);
   const snap = prepareArcadeFrame(rawSnap, fx.arcade);
   setActiveArcadeMotion(fx.arcade);
+  setActiveCardFx(fx.card);
   ctx.save();
   clearDrawnNameplates(ctx);
 
@@ -1080,7 +1093,7 @@ export function renderGameSnapshot(
       const ox = kickX + (fx.shake > 0.2 ? (Math.random() - 0.5) * fx.shake : 0);
       const oy = kickY + (fx.shake > 0.2 ? (Math.random() - 0.5) * fx.shake : 0);
       ctx.translate(ox, oy);
-      fx.shake *= 0.85;
+      fx.shake *= Math.pow(0.85, fx.arcade.dt * 60);
     } else {
       fx.shake = 0;
     }
@@ -1191,6 +1204,7 @@ export function renderGameSnapshot(
     drawArcadeFrontFX(ctx, fx.arcade);
   } finally {
     setHiddenTablePlayer(null, null);
+    setActiveCardFx(null);
     setActiveArcadeMotion(null);
     ctx.restore();
   }

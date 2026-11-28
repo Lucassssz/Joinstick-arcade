@@ -1,8 +1,10 @@
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../../src/shared/types.ts';
 import type {
+  BotDifficulty,
   CardPrivateHandItem,
   CardPrivateState,
 } from '../../src/shared/types.ts';
+import { getTurnBotDelayMs } from './botEngine.ts';
 import type {
   DeepSeaOxygenSnapshot,
   FireworkHintsSnapshot,
@@ -63,6 +65,7 @@ interface RowSixState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: { id: string; val: number; bulls: number }[];
     picked: { id: string; val: number; bulls: number } | null;
@@ -163,7 +166,8 @@ export const rowSixBustModule: CompactGameModule<RowSixState, RowSixBustSnapshot
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.4 + Math.random() * 1.8,
+        botDifficulty: p.botDifficulty,
+        botTimer: getTurnBotDelayMs(p.botDifficulty) / 1000,
         hand: makeBullHand(6),
         picked: null,
         bullsTaken: 0,
@@ -196,7 +200,7 @@ export const rowSixBustModule: CompactGameModule<RowSixState, RowSixBustSnapshot
         }
         p.picked = pick;
         p.lastAction = 'READY';
-        p.botTimer = 1.5 + Math.random() * 1.8;
+        p.botTimer = getTurnBotDelayMs(p.botDifficulty) / 1000;
       }
     }
 
@@ -724,6 +728,7 @@ interface OneCardCourtState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     hand: CourtCard[];
     shielded: boolean;
@@ -774,7 +779,8 @@ export const oneCardCourtModule: CompactGameModule<OneCardCourtState, OneCardCou
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.5 + Math.random() * 1.8,
+        botDifficulty: p.botDifficulty,
+        botTimer: getTurnBotDelayMs(p.botDifficulty) / 1000,
         hand: [drawCourtCard(), drawCourtCard()],
         shielded: false,
         playedCard: null,
@@ -800,7 +806,7 @@ export const oneCardCourtModule: CompactGameModule<OneCardCourtState, OneCardCou
           p.hand = [drawCourtCard(), drawCourtCard()];
           p.shielded = false;
           p.playedCard = null;
-          p.botTimer = 1.4 + Math.random() * 1.8;
+          p.botTimer = getTurnBotDelayMs(p.botDifficulty) / 1000;
           p.lastAction = 'CHOOSING';
         }
         state.banner = `COURT ROUND ${state.round} — PROTECT YOUR ROYAL SECRET!`;
@@ -954,6 +960,7 @@ interface FireworkState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     hand: FireworkCard[];
@@ -1017,7 +1024,9 @@ export const fireworkHintsModule: CompactGameModule<FireworkState, FireworkHints
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.6 + Math.random() * 1.6,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous firework launching: 1.8x turn delay keeps cadence fair
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.8,
         actionCd: 0,
         hand: Array.from({ length: 5 }, () => drawFireworkCard()),
         hintsGiven: 0,
@@ -1038,7 +1047,8 @@ export const fireworkHintsModule: CompactGameModule<FireworkState, FireworkHints
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 1.9 + Math.random() * 1.7;
+        // Simultaneous firework launching: 1.8x turn delay keeps cadence fair
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.8;
         const playable = p.hand.find((c) => state.stacks[c.color] + 1 === c.num);
         if (playable) {
           launchFirework(state, p, playable.id, mult, sounds);
@@ -1172,6 +1182,7 @@ interface TunnelSaboteurState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     hand: MineCard[];
@@ -1269,7 +1280,9 @@ export const tunnelSaboteurModule: CompactGameModule<TunnelSaboteurState, Tunnel
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.6 + Math.random() * 1.6,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous tunnel digging race: 1.8x turn delay paces bot actions fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.8,
         actionCd: 0,
         hand: Array.from({ length: 4 }, () => drawMineCard()),
         digs: 0,
@@ -1290,7 +1303,8 @@ export const tunnelSaboteurModule: CompactGameModule<TunnelSaboteurState, Tunnel
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 1.6 + Math.random() * 1.6;
+        // Simultaneous tunnel digging race: 1.8x turn delay paces bot actions fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.8;
         const pick = p.hand.find((c) => c.kind !== 'sabotage') ?? p.hand[0];
         if (pick) playMineCard(state, p, pick.id, mult, sounds);
       }
@@ -1775,6 +1789,7 @@ interface WordTileState {
     name: string;
     colorHex: string;
     isBot: boolean;
+    botDifficulty?: BotDifficulty;
     botTimer: number;
     actionCd: number;
     rack: { id: string; letter: string }[];
@@ -1864,7 +1879,9 @@ export const wordTileCrossroadsModule: CompactGameModule<WordTileState, WordTile
         name: p.name,
         colorHex: p.colorHex,
         isBot: !!p.isBot,
-        botTimer: 1.5 + Math.random() * 1.5,
+        botDifficulty: p.botDifficulty,
+        // Simultaneous word spelling race: 1.8x turn delay paces bot tile plays fairly
+        botTimer: (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.8,
         actionCd: 0,
         rack: makeRackForTargets(targets),
         wordsBuilt: 0,
@@ -1889,7 +1906,8 @@ export const wordTileCrossroadsModule: CompactGameModule<WordTileState, WordTile
       if (!p.isBot) continue;
       p.botTimer -= dt;
       if (p.botTimer <= 0) {
-        p.botTimer = 1.7 + Math.random() * 1.7;
+        // Simultaneous word spelling race: 1.8x turn delay paces bot tile plays fairly
+        p.botTimer = (getTurnBotDelayMs(p.botDifficulty) / 1000) * 1.8;
         const neededChars = new Set(
           state.targets.flatMap((t) => (t.claimedBy ? [] : t.word.split('').filter((_, ci) => !t.filled[ci])))
         );

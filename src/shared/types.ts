@@ -237,6 +237,7 @@ export interface GameMetadata {
   coverImage: string;
   accentHex: string;
   rules: string[];
+  coachLine?: string;
   controllerSchema: ControllerSchema;
   settingLabel: string;
   settingOptions: { label: string; value: number }[];

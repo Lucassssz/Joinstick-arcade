@@ -752,6 +752,32 @@ export function PhoneController({
   const [pocketCoachDismissed, setPocketCoachDismissed] = useState(false);
   const [pocketCoachExpired, setPocketCoachExpired] = useState(false);
   const [pocketCardActed, setPocketCardActed] = useState(false);
+  const [pocketTopHudTucked, setPocketTopHudTucked] = useState(false);
+  const pocketHudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pocketCompletionRef = useRef<{
+    gameId: GameId | null;
+    round: number | null;
+    hole: number | null;
+    phase: string | null;
+    meFinished: boolean;
+    meAlive: boolean;
+  }>({
+    gameId: null,
+    round: null,
+    hole: null,
+    phase: null,
+    meFinished: false,
+    meAlive: true,
+  });
+  const prevHudStatusFlagsRef = useRef<{
+    alive: boolean;
+    frenzy: boolean;
+    handLen: number | null;
+  }>({
+    alive: true,
+    frenzy: false,
+    handLen: null,
+  });
   const prevCardTurnRef = useRef<boolean | null>(null);
   const prevPocketMatchPhaseRef = useRef<{ status: RoomSnapshot['status'] | null; gameId: GameId | null }>({
     status: null,
@@ -1271,6 +1297,31 @@ export function PhoneController({
     prevPocketMatchPhaseRef.current = { status: nextStatus, gameId: nextGameId };
   }, [room?.status, room?.selectedGameId]);
 
+  const clearPocketHudTimer = () => {
+    if (pocketHudTimerRef.current) {
+      clearTimeout(pocketHudTimerRef.current);
+      pocketHudTimerRef.current = null;
+    }
+  };
+
+  const schedulePocketHudAutoTuck = (delayMs = 2800) => {
+    clearPocketHudTimer();
+    pocketHudTimerRef.current = setTimeout(() => {
+      pocketHudTimerRef.current = null;
+      setPocketTopHudTucked(true);
+    }, delayMs);
+  };
+
+  const revealPocketHudTemporarily = (delayMs = 3800) => {
+    setPocketTopHudTucked(false);
+    schedulePocketHudAutoTuck(delayMs);
+  };
+
+  const tuckPocketHudNow = () => {
+    clearPocketHudTimer();
+    setPocketTopHudTucked(true);
+  };
+
   // Auto-fade the live Pocket Mode arcade coach strip after 6.5s of active play
   useEffect(() => {
     if (
@@ -1287,6 +1338,82 @@ export function PhoneController({
     }, 6500);
     return () => window.clearTimeout(timer);
   }, [room?.roomMode, room?.status, room?.selectedGameId, pocketCoachDismissed, pocketCoachExpired]);
+
+  // Pocket Mode top HUD: auto-tuck ("keep up") during active play & auto-show on status/completion
+  const pocketHudPinnedOpen = Boolean(
+    repositionMode ||
+      emoteDrawerOpen ||
+      pocketMenuOpen ||
+      pocketRulesOpen ||
+      settingsOpen ||
+      !wsConnected
+  );
+
+  useEffect(() => {
+    if (room?.roomMode !== 'pocket' || room.status !== 'PLAYING') {
+      clearPocketHudTimer();
+      setPocketTopHudTucked(false);
+      pocketCompletionRef.current = {
+        gameId: room?.selectedGameId ?? null,
+        round: null,
+        hole: null,
+        phase: null,
+        meFinished: false,
+        meAlive: true,
+      };
+      return;
+    }
+    pocketCompletionRef.current = {
+      gameId: room.selectedGameId,
+      round: null,
+      hole: null,
+      phase: null,
+      meFinished: false,
+      meAlive: true,
+    };
+    if (!pocketHudPinnedOpen) {
+      revealPocketHudTemporarily(2400);
+    }
+    return () => clearPocketHudTimer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.roomMode, room?.status, room?.selectedGameId]);
+
+  useEffect(() => {
+    if (room?.roomMode !== 'pocket' || room.status !== 'PLAYING') return;
+    if (pocketHudPinnedOpen) {
+      clearPocketHudTimer();
+      setPocketTopHudTucked(false);
+    } else if (!pocketTopHudTucked && !pocketHudTimerRef.current) {
+      schedulePocketHudAutoTuck(3200);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pocketHudPinnedOpen, room?.roomMode, room?.status, pocketTopHudTucked]);
+
+  const selfPlayerForHud = room?.players.find((p) => p.id === joinedPlayerId) ?? null;
+  const selfAliveForHud = selfPlayerForHud ? selfPlayerForHud.alive : true;
+  const frenzyActiveForHud = Boolean(room?.frenzy?.active);
+  const cardHandLenForHud = cardState ? cardState.hand.length : null;
+
+  useEffect(() => {
+    const prev = prevHudStatusFlagsRef.current;
+    if (room?.roomMode === 'pocket' && room.status === 'PLAYING') {
+      const eliminatedNow = prev.alive && !selfAliveForHud;
+      const frenzyTriggered = !prev.frenzy && frenzyActiveForHud;
+      const handEmptied =
+        prev.handLen !== null &&
+        prev.handLen > 0 &&
+        cardHandLenForHud === 0;
+      if ((eliminatedNow || frenzyTriggered || handEmptied) && !pocketHudPinnedOpen) {
+        revealPocketHudTemporarily(4200);
+      }
+    }
+    prevHudStatusFlagsRef.current = {
+      alive: selfAliveForHud,
+      frenzy: frenzyActiveForHud,
+      handLen: cardHandLenForHud,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.roomMode, room?.status, selfAliveForHud, frenzyActiveForHud, cardHandLenForHud, pocketHudPinnedOpen]);
 
   // Pocket Mode audio & BGM lifecycle
   useEffect(() => {
@@ -1570,6 +1697,58 @@ export function PhoneController({
                 lastPocketHudBumpRef.current = nowMs;
                 setPocketTickVersion((v) => v + 1);
               }
+
+              // Detect in-match completion milestones (round/hole/phase/finish) in Pocket Mode
+              if (
+                roomRef.current?.roomMode === 'pocket' &&
+                roomRef.current.status === 'PLAYING'
+              ) {
+                const s = msg.snapshot as unknown as Record<string, unknown>;
+                const snapRound = typeof s.round === 'number' ? s.round : null;
+                const snapHole = typeof s.hole === 'number' ? s.hole : null;
+                const snapPhase = typeof s.phase === 'string' ? s.phase : null;
+                const playersArr = Array.isArray(s.players)
+                  ? (s.players as Array<Record<string, unknown>>)
+                  : [];
+                const myIdNow = joinedPlayerIdRef.current;
+                const meSnap = myIdNow ? playersArr.find((p) => p?.id === myIdNow) : undefined;
+                const meFinished = Boolean(
+                  meSnap &&
+                    (meSnap.finished === true ||
+                      meSnap.sunk === true ||
+                      meSnap.completed === true)
+                );
+                const meAlive =
+                  meSnap && typeof meSnap.alive === 'boolean' ? meSnap.alive : true;
+
+                const prevComp = pocketCompletionRef.current;
+                if (prevComp.gameId === roomRef.current.selectedGameId) {
+                  const roundCompleted =
+                    prevComp.round !== null && snapRound !== null && snapRound > prevComp.round;
+                  const holeCompleted =
+                    prevComp.hole !== null && snapHole !== null && snapHole > prevComp.hole;
+                  const phaseDone =
+                    snapPhase !== null &&
+                    snapPhase !== prevComp.phase &&
+                    /^(reveal|round-?end|round_?over|resolve|scoring|finished|celebration|intermission|showdown|results|ended|hole-?done)$/i.test(
+                      snapPhase
+                    );
+                  const playerDone =
+                    (!prevComp.meFinished && meFinished) || (prevComp.meAlive && !meAlive);
+
+                  if (roundCompleted || holeCompleted || phaseDone || playerDone) {
+                    revealPocketHudTemporarily(4200);
+                  }
+                }
+                pocketCompletionRef.current = {
+                  gameId: roomRef.current.selectedGameId,
+                  round: snapRound,
+                  hole: snapHole,
+                  phase: snapPhase,
+                  meFinished,
+                  meAlive,
+                };
+              }
             }
             if (roomRef.current?.roomMode === 'pocket') {
               for (const s of msg.sounds) {
@@ -1645,6 +1824,7 @@ export function PhoneController({
       syncStore.detachSocket();
       socket.close();
       wsRef.current = null;
+      clearPocketHudTimer();
       if (hostToastTimerRef.current) clearTimeout(hostToastTimerRef.current);
       if (manualReconnectTimerRef.current) clearTimeout(manualReconnectTimerRef.current);
       if (wakeLockRef.current) {
@@ -4937,14 +5117,21 @@ export function PhoneController({
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
                   {t('Rules & Controls', '玩法与操作')}
                 </span>
-                {room.activeMutator !== 'normal' && (
-                  <span
-                    className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-[#101217]"
-                    style={{ color: activeMutatorSpec.accentHex }}
-                  >
-                    {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-mono tabular-nums">
+                  {(activeSettingOpt ?? gameMeta.settingOptions[0]) && (
+                    <span className="px-1.5 py-0.5 rounded bg-[#101217] border border-[#2A303D] font-bold text-[#E5E7EB]">
+                      {gameMeta.settingLabel}: {(activeSettingOpt ?? gameMeta.settingOptions[0]).label}
+                    </span>
+                  )}
+                  {room.activeMutator !== 'normal' && (
+                    <span
+                      className="font-black px-1.5 py-0.5 rounded bg-[#101217]"
+                      style={{ color: activeMutatorSpec.accentHex }}
+                    >
+                      {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
+                    </span>
+                  )}
+                </div>
               </div>
               <p className="text-sm font-bold text-white leading-snug">{gameMeta.tagline}</p>
               {gameMeta.rules.length > 0 && (
@@ -5211,6 +5398,12 @@ export function PhoneController({
   };
 
   const useIntegratedHud = isPocketRoom;
+  const pocketTopHudHidden = Boolean(
+    useIntegratedHud &&
+      room.status === 'PLAYING' &&
+      !pocketHudPinnedOpen &&
+      pocketTopHudTucked
+  );
   const pocketArcadeCoachVisible = Boolean(
     useIntegratedHud &&
       !isCardGame &&
@@ -5226,7 +5419,7 @@ export function PhoneController({
   );
   const pocketCardCoachTip =
     useIntegratedHud && isCardGame && room.status === 'PLAYING' && !pocketCoachDismissed && !pocketCardActed
-      ? gameMeta.rules[0] || gameMeta.tagline || null
+      ? gameMeta.coachLine || gameMeta.rules[0] || gameMeta.tagline || null
       : null;
   const activeSettingOptLive = gameMeta.settingOptions.find(
     (opt) => opt.value === room.gameSettingValue
@@ -5276,12 +5469,24 @@ export function PhoneController({
       </div>
     ) : useIntegratedHud ? (
       <div
-        className={`relative z-20 flex items-center justify-between gap-2 shrink-0 pointer-events-none ${
-          isCardGame ? 'h-9 mb-0.5' : 'h-9'
+        aria-hidden={pocketTopHudHidden}
+        onPointerDownCapture={() => {
+          if (room.status === 'PLAYING' && !pocketHudPinnedOpen && !pocketTopHudHidden) {
+            schedulePocketHudAutoTuck(4000);
+          }
+        }}
+        className={`absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-2 pointer-events-none h-9 transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform ${
+          pocketTopHudHidden
+            ? '-translate-y-[calc(100%+16px)] opacity-0'
+            : 'translate-y-0 opacity-100'
         }`}
       >
         {/* Top-Left Corner Pill: Player Identity + Live Stat + Compact Badges */}
-        <div className="pointer-events-auto flex items-center gap-1.5 min-w-0 max-w-[44%]">
+        <div
+          className={`${
+            pocketTopHudHidden ? 'pointer-events-none' : 'pointer-events-auto'
+          } flex items-center gap-1.5 min-w-0 max-w-[44%]`}
+        >
           <div className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm">
             <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
             <div className="min-w-0 leading-tight">
@@ -5320,8 +5525,12 @@ export function PhoneController({
 
         {/* Center intentionally open so top-center game HUDs, timers & seats are unobstructed */}
 
-        {/* Top-Right Corner Pill: Pad Switcher + Emote + Pause + Quick Menu + Leave */}
-        <div className="pointer-events-auto flex items-center gap-1 shrink-0 px-1 py-0.5 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm">
+        {/* Top-Right Corner Pill: Pad Switcher + Emote + Pause + Quick Menu + Leave + Hide */}
+        <div
+          className={`${
+            pocketTopHudHidden ? 'pointer-events-none' : 'pointer-events-auto'
+          } flex items-center gap-1 shrink-0 px-1 py-0.5 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm`}
+        >
           {!wsConnected && (
             <span
               title={t('Reconnecting...', '正在重连...')}
@@ -5443,6 +5652,17 @@ export function PhoneController({
           >
             <LogOut className="w-3.5 h-3.5" />
           </button>
+          {room.status === 'PLAYING' && (
+            <button
+              type="button"
+              onClick={tuckPocketHudNow}
+              aria-label={t('Keep top bar tucked', '收起顶部控制栏')}
+              title={t('Hide top bar', '收起顶部栏')}
+              className="h-7 w-7 rounded-lg bg-[#1A202C] hover:bg-[#252D3D] text-[#9CA3AF] hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     ) : (
@@ -5887,9 +6107,36 @@ export function PhoneController({
 
       {topControlBar}
 
+      {/* Minimal Top-Right Pull-Down Tab when Pocket HUD is tucked up */}
+      {useIntegratedHud && room.status === 'PLAYING' && !repositionMode && (
+        <button
+          type="button"
+          onClick={() => revealPocketHudTemporarily(4000)}
+          aria-label={t('Show top controls', '展开顶部控制栏')}
+          title={t('Show top controls', '展开顶部菜单与状态')}
+          className={`absolute top-0 right-1 z-30 min-w-[46px] min-h-[30px] flex items-start justify-end cursor-pointer transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+            pocketTopHudHidden
+              ? 'opacity-80 hover:opacity-100 translate-y-0 pointer-events-auto'
+              : 'opacity-0 -translate-y-full pointer-events-none'
+          }`}
+        >
+          <span className="h-[18px] px-2 rounded-b-lg bg-[#0D1017]/82 border-x border-b border-white/20 backdrop-blur-sm shadow-md inline-flex items-center gap-1">
+            <span
+              className="w-1.5 h-1.5 rounded-full shrink-0"
+              style={{ backgroundColor: me.color.hex }}
+            />
+            <ChevronDown className="w-3 h-3 text-[#E5E7EB]" />
+          </span>
+        </button>
+      )}
+
       {/* Non-Blocking Live In-Game Coach Strip (First 6.5s of Pocket Arcade Match) */}
       {pocketArcadeCoachVisible && (
-        <div className="pointer-events-none absolute top-10 left-1/2 -translate-x-1/2 z-20 w-[min(92vw,480px)] flex justify-center">
+        <div
+          className={`pointer-events-none absolute top-10 left-1/2 z-20 w-[min(92vw,480px)] flex justify-center transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+            pocketTopHudHidden ? '-translate-x-1/2 -translate-y-8' : '-translate-x-1/2 translate-y-0'
+          }`}
+        >
           <div className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0B0E14]/90 border border-white/18 shadow-xl backdrop-blur-sm text-[11px] sm:text-xs">
             <span
               className="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse"
@@ -5904,7 +6151,7 @@ export function PhoneController({
                     ? `${t('Draw:', '请画出：')} ${cardState.badgeText}`
                     : t('Draw directly on board or tap a word card!', '直接在白板画画或点击词卡猜词！')
                   : t('Drag your paddle directly on screen to hit!', '直接在画面上拖动球拍击球！')
-                : gameMeta.rules[0] || gameMeta.tagline}
+                : gameMeta.coachLine || gameMeta.rules[0] || gameMeta.tagline}
             </span>
             {!(currentPadProfile?.pocketDirectTouch && activeArcadePad === 'trackpad') && (
               <span className="hidden sm:inline font-mono text-[10px] font-black shrink-0" style={{ color: schema.actionA.colorHex }}>
@@ -6161,9 +6408,9 @@ export function PhoneController({
                     <div className="font-display text-4xl sm:text-5xl font-black text-white tabular-nums my-1">
                       {room.countdownValue}
                     </div>
-                    {gameMeta.rules[0] && (
+                    {(gameMeta.coachLine || gameMeta.rules[0]) && (
                       <p className="text-[11px] font-semibold text-[#CBD5E1] pt-1.5 border-t border-white/10 leading-snug">
-                        {gameMeta.rules[0]}
+                        {gameMeta.coachLine || gameMeta.rules[0]}
                       </p>
                     )}
                   </div>

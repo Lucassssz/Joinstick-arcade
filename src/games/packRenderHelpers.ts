@@ -1,4 +1,5 @@
 import { ARENA_WIDTH } from '../shared/types';
+import { getSpringBannerAnim } from './arcadeMotion';
 import {
   drawHudChip,
   drawPopupTexts,
@@ -105,14 +106,17 @@ export function drawBoardBanner(
 ): void {
   if (!text) return;
   const label = tCanvas(text);
+  const anim = getSpringBannerAnim(`pack:${accent}:${topY}`, text);
   ctx.save();
   ctx.font = '900 17px "Plus Jakarta Sans", sans-serif';
   const w = Math.max(240, ctx.measureText(label).width + 38);
   const h = 36;
-  const x = ARENA_WIDTH / 2 - w / 2;
+  ctx.translate(ARENA_WIDTH / 2, topY + h / 2);
+  ctx.scale(anim.scale, anim.scale);
+  ctx.globalAlpha = anim.alpha;
   ctx.fillStyle = 'rgba(13, 15, 20, 0.92)';
   ctx.beginPath();
-  ctx.roundRect(x, topY, w, h, 10);
+  ctx.roundRect(-w / 2, -h / 2, w, h, 10);
   ctx.fill();
   ctx.strokeStyle = accent;
   ctx.lineWidth = 2;
@@ -120,6 +124,6 @@ export function drawBoardBanner(
   ctx.fillStyle = '#F8FAFC';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, ARENA_WIDTH / 2, topY + h / 2 + 0.5);
+  ctx.fillText(label, 0, 0.5);
   ctx.restore();
 }

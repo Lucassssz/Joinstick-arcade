@@ -241,6 +241,7 @@ interface GameTranslationZh {
   actionBLabel: string;
   actionBSublabel: string;
   controlTip: string;
+  coachLine?: string;
   settingLabel: string;
   settingOptions: Record<number, string>;
 }
@@ -286,7 +287,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '极速闪避',
     controlTip: '躲在陨石后面掩护，关键时刻按加速甩开激光！',
     settingLabel: '比赛时长',
-    settingOptions: { 60: '60 秒', 75: '75 秒', 90: '90 秒', 120: '120 秒' },
+    settingOptions: { 60: '60 秒', 90: '90 秒', 120: '120 秒' },
   },
   'turbo-drift': {
     name: '极速漂移',
@@ -685,7 +686,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '放弃或护盾',
     controlTip: '前期多买地并升级商铺，最终总资产最高者赢得冠军！',
     settingLabel: '游戏回合',
-    settingOptions: { 6: '6 回合', 8: '8 回合', 10: '10 回合', 14: '14 回合' },
+    settingOptions: { 6: '6 回合', 10: '10 回合', 14: '14 回合' },
   },
   'jungle-ladders': {
     name: '丛林蛇梯棋',
@@ -790,7 +791,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '冲刺/甩盘',
     controlTip: '端着熟食面向右侧出餐台直接按抛盘，省下跑路时间狂刷分！',
     settingLabel: '营业时长',
-    settingOptions: { 60: '60 秒', 75: '75 秒', 80: '80 秒', 90: '90 秒', 120: '120 秒' },
+    settingOptions: { 60: '60 秒', 80: '80 秒', 120: '120 秒' },
   },
   'treasure-dig': {
     name: '海岛寻宝挖矿',
@@ -853,7 +854,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '本轮观望',
     controlTip: '直接快速按出价 (A) 即可自动比当前最高价多加 $50！',
     settingLabel: '拍卖轮数',
-    settingOptions: { 5: '5 个宝箱', 6: '6 个宝箱', 7: '7 个宝箱', 9: '9 个宝箱' },
+    settingOptions: { 5: '5 个宝箱', 7: '7 个宝箱', 9: '9 个宝箱' },
   },
   'pinball-clash': {
     name: '弹珠对决',
@@ -1105,7 +1106,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '超强冲力球',
     controlTip: '瞄准中央红后周围的球堆大力弹射，一杆将多枚棋子撞入四角球袋！',
     settingLabel: '回合数',
-    settingOptions: { 5: '5 回合', 6: '6 回合', 7: '7 回合', 10: '10 回合' },
+    settingOptions: { 5: '5 回合', 7: '7 回合', 10: '10 回合' },
   },
   'dungeon-crawl-board': {
     name: '地城勇者棋',
@@ -1189,7 +1190,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '安全落袋',
     controlTip: '牌堆里大数字 (9–12) 张数更多、更容易重复，没护盾时记得见好就收！',
     settingLabel: '对局轮数',
-    settingOptions: { 3: '3 轮', 4: '4 轮', 5: '5 轮' },
+    settingOptions: { 3: '3 轮', 5: '5 轮' },
   },
   'royal-bluff': {
     name: '宫廷心机牌',
@@ -1231,7 +1232,7 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
     actionBSublabel: '抽取牌堆',
     controlTip: '手里留一张 FLIP 翻转牌，在对手快赢时瞬间切入暗黑面送他 +5 大礼！',
     settingLabel: '初始手牌',
-    settingOptions: { 5: '5 张（极速）', 6: '6 张（标准）', 7: '7 张（经典）' },
+    settingOptions: { 5: '5 张（极速）', 7: '7 张（经典）' },
   },
   'sushi-draft': {
     name: '回转寿司牌',
@@ -1562,6 +1563,83 @@ const GAME_ZH: Record<GameId, GameTranslationZh> = {
   >),
 };
 
+const ZH_COACH_LINES: Partial<Record<GameId, string>> = {
+  'blade-duel': '每人初始 3 颗红心，摇杆瞄准按 A 突刺斩击夺取回合 KO！',
+  'rich-street': '轮到你时按「掷骰 / 购买 (A)」掷骰买地、建房收租！',
+  'kitchen-rush': '按 A 取食材、下锅烹饪，并将做好的料理端到对应订单台！',
+  'treasure-dig': '在沙滩走动寻宝，离宝藏越近脚下光环越亮越红！',
+  'fruit-drop': '左右推摇杆接住空中水果，小心避开烂果与炸弹！',
+  'lucky-auction': '看舞台线索猜宝箱是钻石还是小黄鸭，按 A 出价或 B 观望！',
+  'color-clash': '私密手牌只显示在手机上——点击高亮卡牌或按 A 出牌！',
+  'liars-deck': '打出符合大屏目标点数的牌（或吹牛），小丑牌 JOKER 万能！',
+  'lava-hopper': '稳稳站在石柱上，看到闪烁红光立刻跳开防止沉入岩浆！',
+  'ludo-royale': '轮到你时按「掷骰 (A)」投出骰子并推进选中的棋子。',
+  'star-party-board': '轮到你时按「敲击骰子 (A)」环岛前进抢星星！',
+  'naval-salvo': '用摇杆在 8×6 海域雷达移动准星，按「开火 (A)」轰沉战舰！',
+  'neon-checkers': '左右推摇杆切换高亮可行棋步，按 A 确认走子或连跳！',
+  'carrom-arena': '左右推摇杆调整母球发射角，按 A 蓄力弹射进袋！',
+  'dungeon-crawl-board': '轮到你时按「掷骰/出击 (A)」沿地城冒险打怪夺金！',
+  'boom-kittens': '摸牌前先点击手机上的发光功能牌保命，千万别抽中炸弹猫！',
+  'property-deal': '每回合摸 2 张牌，最多从手机手牌打出 3 张地产或行动牌！',
+  'flip-seven': '轮到你时点「要牌」搏高分，或点「停牌」安全锁分落袋！',
+  'dark-flip-clash': '打出与中央同色或同点数手牌，FLIP 牌可瞬间反转全桌！',
+  'sushi-draft': '全员同时从手机选 1 张寿司上盘，剩牌顺时针传给下家！',
+  'line-breakers': '过五关：突围方冲过防线，守线方抓人立刻互换攻防！',
+  'desk-flippers': '在木头课桌上瞄准弹飞橡皮擦，压住对手橡皮即可夺分！',
+  'spin-clash': '旋转陀螺撞击对手，把敌方陀螺全部撞出粉笔圈外！',
+  'marble-ring': '瞄准圆圈内的彩色玻璃珠，按 A 发射母珠将它们撞出圈外！',
+  'rattan-volley': '腾空倒钩扣杀藤球过网，别让球在己方半场落地！',
+  'step-stomp': '抓准节拍大步踏出「一二踩」，稳稳踩中对手鞋尖得分！',
+  'pit-harvest': '逆时针沿 7 格木洞播撒种子，尽可能把石子送入己方大仓！',
+  'big-two-royale': '用更大的单张、对子或五张牌型压制桌面，先出完手牌获胜！',
+  'lucky-21': '手机点击要牌逼近 21 点但别爆牌，赢过庄家即可得分！',
+  'ten-pair-showdown': '挑出 3 张相加为 10 的倍数的牌「成牛」，比拼剩下两张！',
+  'melon-merge': '左右移动水果瞄准落点，按「投放 (A)」合成更大水果！',
+  'tile-triple': '移动选框到顶层方块按「拾取 (A)」，凑齐 3 个相同立即消除！',
+  'block-hop': '长按「蓄力跳 (A)」控制力度，松手精准跳上前方方块！',
+  'platform-leap': '左右控制空中走位，按「起跳 (A)」不断跃上更高跳台！',
+  'egg-rush': '摇杆控制奔跑冲刺，灵活闪避旋转摆锤率先冲过终点！',
+  'goose-alert': '大鹅靠近发光任务台按 A 做任务；鸭子潜行破坏并偷袭！',
+  'truth-bomb': '抱住倒计时炸弹时瞄准他人按「传炸弹 (A)」甩给对手！',
+  'draw-guess-relay': '画手移动画笔按住 A 作画；其他玩家在手机抢答猜词！',
+  'landlord-clash': '开局在手机叫分抢地主夺 3 张底牌，率先出完手牌获胜！',
+  'speed-mahjong': '轮流摸一打一，在手机私密手牌快速凑齐胡牌牌型！',
+  'midnight-werewolf': '黑夜按身份秘密行动，白天辩论投票找出隐藏狼人！',
+  'idiom-chain': '盯紧大屏当前成语尾字，迅速接出同字开头的四字成语！',
+  'sky-climb': '摇杆左右走位并按「跳跃 (A)」抢先攀上高空浮梁！',
+  'turf-ribbon': '离开领地拉出丝带圈地，平安返回己方基地即占领新地盘！',
+  'glass-bridge': '左右选定玻璃踏板后按「跳跃 (A)」闯关，抢先抵达终点！',
+  'tug-titan': '连点「拉绳 (A)」，在中心黄金脉冲亮起时发力享双倍拉力！',
+  'tile-2048-blitz': '向四方向滑动合并相同数字方块，冲刺更高分值！',
+  'wavelength-sync': '阅读两端极端词与神秘线索，旋转指针停在最准的靶心！',
+  'codenames-grid': '看清特工首领线索与数字，在 4×4 词阵中点击对应词卡！',
+  'fib-party': '先编一条以假乱真的假答案，再从混排选项中找出真答案！',
+  'brick-clash': '左右移动挡板稳稳弹回光球，击碎砖块争夺金砖高分！',
+  'alien-wave': '左右移动战机，按「开火 (A)」连射等离子击退外星舰队！',
+  'block-stack': '左右移动下落方块、按 A 旋转，快速消行把垃圾扔给对手！',
+  'barrel-tower': '沿钢梁奔跑、靠近发光梯子上爬，并跳跃躲开滚落木桶！',
+  'skee-roll': '左右瞄准球道角度，按 A 发射滚球冲击 100 分高分袋！',
+  'tunnel-dig': '摇杆向下钻开泥土隧道，沿途抢收闪耀地下钻石宝石！',
+  'bubble-pop-arc': '左右推摇杆瞄准发射泡泡，利用墙壁反弹连片消除！',
+  'pin-strike': '左右调整发球站位并加旋击球，全倒拿下 Strike 高分！',
+  'coin-dozer': '左右滑动推币机投放口，抓准推板时机投放金币！',
+  'rummy-royale': '在手机凑齐 3 张同点或同花顺牌组并打出，尽早清空手牌！',
+  'hearts-breaker': '跟出同花色手牌，全力躲避红心与惩罚极高的黑桃 Q♠！',
+  'tarot-arcana': '每回合选 1 张秘密塔罗元素牌上阵，以克制属性击败对手！',
+  'baccarat-club': '两张手牌点数相加只看个位（A=1，面牌=0），最接近 9 获胜！',
+  'trap-builder-run': '建造阶段按 A 放置机关或踏板，随后全速竞速冲线！',
+  'track-crafter-gp': '拼装阶段按 A 放下加速带或陷阱，随后漂移跑完自制赛道！',
+  'horde-survivor': '360° 灵活走位风筝怪群，利用环绕飞刃清怪吃宝石！',
+  'swarm-herd-clash': '漫游广场招揽白色中立小兵壮大军团，吞并规模更小的对手！',
+  'air-traffic-landing': '滑向来袭飞机并拖向同色跑道引导安全降落！',
+  'gem-engine-guild': '采集红蓝金绿宝石购买折扣卡牌，率先冲上 15 威望分！',
+  'secret-rank-flags': '隐藏己方军衔秘密布阵，指挥部队夺取敌方军旗！',
+  'deep-sea-oxygen': '下潜海底抢捞宝箱，在全船氧气耗尽前务必游回潜艇！',
+  'corridor-fencing': '左右走位进退，上下切换高/中/低剑势突刺对手拿分！',
+  'five-stones-toss': '先抛起母石 B，再敏捷滑扫桌面抓起聚拢的布石包！',
+  'chapteh-juggle': '跑位到飘落羽毛毽子正下方，在落环瞬间按 A 连续颠球！',
+};
+
 export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMetadata {
   if (lang === 'en') return game;
   const zh = GAME_ZH[game.id];
@@ -1575,6 +1653,7 @@ export function getLocalizedGameMeta(game: GameMetadata, lang: Language): GameMe
     description: zh.description,
     playerModeLabel: zh.playerModeLabel,
     rules: zh.rules,
+    coachLine: zh.coachLine ?? ZH_COACH_LINES[game.id] ?? game.coachLine,
     controllerSchema: {
       ...game.controllerSchema,
       joystickLabel: zh.joystickLabel,

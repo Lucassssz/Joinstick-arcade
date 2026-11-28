@@ -57,6 +57,42 @@ interface LandingViewProps {
 const LANDING_EASE = [0.16, 1, 0.3, 1] as const;
 const IN_VIEW_ONCE = { once: true, amount: 0.08 } as const;
 
+function useCountUp(targets: number[], active: boolean, durationMs = 1200): number[] {
+  const [values, setValues] = useState<number[]>(() => targets.map(() => 0));
+
+  useEffect(() => {
+    if (!active) return;
+    const reducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      setValues(targets);
+      return;
+    }
+
+    let startTime: number | null = null;
+    let rafId = 0;
+
+    const animate = (timestamp: number) => {
+      if (startTime === null) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+      setValues(targets.map((val) => Math.round(easeProgress * val)));
+
+      if (progress < 1) {
+        rafId = requestAnimationFrame(animate);
+      }
+    };
+
+    rafId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId);
+  }, [active, durationMs, targets]);
+
+  return values;
+}
+
 export function LandingView({
   onHostRoom,
   onStartPocket,
@@ -157,14 +193,9 @@ export function LandingView({
   const [statsAnimated, setStatsAnimated] = useState(false);
   const statsRef = useRef<HTMLDivElement>(null);
 
-  const [displayGames, setDisplayGames] = useState(0);
-  const [displayPhones, setDisplayPhones] = useState(0);
-  const [displayHz, setDisplayHz] = useState(0);
-
   // Intersection Observer for Game Types Count-Up (Section 4)
   const [gameTypesAnimated, setGameTypesAnimated] = useState(false);
   const gameTypesRef = useRef<HTMLElement>(null);
-  const [displayTypeCounts, setDisplayTypeCounts] = useState<number[]>([0, 0, 0, 0, 0]);
 
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [isFlipping, setIsFlipping] = useState(false);
@@ -224,28 +255,8 @@ export function LandingView({
     return { arcade, board, card, sports, party };
   }, []);
 
-  useEffect(() => {
-    if (!statsAnimated) return;
-    let startTime: number | null = null;
-    const duration = 1200;
-
-    const animate = (timestamp: number) => {
-      if (!startTime) startTime = timestamp;
-      const elapsed = timestamp - startTime;
-      const progress = Math.min(1, elapsed / duration);
-      const easeProgress = 1 - Math.pow(1 - progress, 3);
-
-      setDisplayGames(Math.round(easeProgress * totalGamesCount));
-      setDisplayPhones(Math.round(easeProgress * 8));
-      setDisplayHz(Math.round(easeProgress * 30));
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      }
-    };
-
-    requestAnimationFrame(animate);
-  }, [statsAnimated, totalGamesCount]);
+  const statTargets = useMemo(() => [totalGamesCount, 8, 30], [totalGamesCount]);
+  const [displayGames, displayPhones, displayHz] = useCountUp(statTargets, statsAnimated);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -264,43 +275,17 @@ export function LandingView({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!gameTypesAnimated) return;
-    const targets = [
+  const typeCountTargets = useMemo(
+    () => [
       gameTypeCounts.arcade,
       gameTypeCounts.board,
       gameTypeCounts.card,
       gameTypeCounts.sports,
       gameTypeCounts.party,
-    ];
-    const reducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reducedMotion) {
-      setDisplayTypeCounts(targets);
-      return;
-    }
-
-    let startTime: number | null = null;
-    let rafId = 0;
-    const duration = 1200;
-
-    const animate = (timestamp: number) => {
-      if (!startTime) startTime = timestamp;
-      const elapsed = timestamp - startTime;
-      const progress = Math.min(1, elapsed / duration);
-      const easeProgress = 1 - Math.pow(1 - progress, 3);
-
-      setDisplayTypeCounts(targets.map((val) => Math.round(easeProgress * val)));
-
-      if (progress < 1) {
-        rafId = requestAnimationFrame(animate);
-      }
-    };
-
-    rafId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafId);
-  }, [gameTypesAnimated, gameTypeCounts]);
+    ],
+    [gameTypeCounts]
+  );
+  const displayTypeCounts = useCountUp(typeCountTargets, gameTypesAnimated);
 
   const requestHost = (gameId?: GameId, target: 'host' | 'pocket' | 'passes' = 'host') => {
     if (target === 'passes') {

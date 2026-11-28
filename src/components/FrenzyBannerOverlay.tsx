@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Flame, Zap } from 'lucide-react';
+import { BOARD_GAME_IDS, CARD_GAME_IDS } from '../shared/games';
 import { GAME_FRENZY_PERKS } from '../shared/modifiers';
 import type { FrenzyState, GameId, RoomStatus } from '../shared/types';
 import { useLanguage } from '../lib/i18n';
@@ -11,77 +12,6 @@ interface FrenzyBannerOverlayProps {
   compact?: boolean;
 }
 
-const FRENZY_KEYFRAMES_CSS = `
-@keyframes jsFrenzyStage1 {
-  0% {
-    transform: translate3d(105%, 0, 0) scale(0.92);
-    opacity: 0;
-  }
-  15% {
-    transform: translate3d(0%, 0, 0) scale(1.03);
-    opacity: 1;
-  }
-  78% {
-    transform: translate3d(0%, 0, 0) scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(-105%, 0, 0) scale(0.92);
-    opacity: 0;
-  }
-}
-@keyframes jsFrenzyStage2 {
-  0%, 40% {
-    transform: translate3d(105%, 0, 0) scale(0.92);
-    opacity: 0;
-  }
-  52% {
-    transform: translate3d(0%, 0, 0) scale(1.02);
-    opacity: 1;
-  }
-  90% {
-    transform: translate3d(0%, 0, 0) scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(-105%, 0, 0) scale(0.92);
-    opacity: 0;
-  }
-}
-@keyframes jsFrenzyStreak {
-  0% {
-    transform: translate3d(120%, 0, 0);
-    opacity: 0;
-  }
-  20% {
-    opacity: 0.92;
-  }
-  80% {
-    opacity: 0.92;
-  }
-  100% {
-    transform: translate3d(-140%, 0, 0);
-    opacity: 0;
-  }
-}
-@keyframes jsFrenzyEmber {
-  0% {
-    transform: translate3d(260px, 110px, 0) scale(0.6);
-    opacity: 0;
-  }
-  25% {
-    opacity: 1;
-  }
-  75% {
-    opacity: 0.92;
-  }
-  100% {
-    transform: translate3d(-280px, -130px, 0) scale(1.25);
-    opacity: 0;
-  }
-}
-`;
-
 export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
   gameId,
   status,
@@ -89,12 +19,15 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
   compact = false,
 }: FrenzyBannerOverlayProps) {
   const { lang, t } = useLanguage();
-  const frenzyPerks = GAME_FRENZY_PERKS[gameId] || {
-    perk1En: '2× SCORE BOOST',
-    perk1Zh: '双倍积分狂热',
-    perk2En: '1.18× SPEED RUSH',
-    perk2Zh: '1.18× 极速冲刺',
-  };
+  const showFrenzyPerks = !CARD_GAME_IDS.has(gameId) && !BOARD_GAME_IDS.has(gameId);
+  const frenzyPerks = showFrenzyPerks
+    ? GAME_FRENZY_PERKS[gameId] || {
+        perk1En: '2× SCORE BOOST',
+        perk1Zh: '双倍积分狂热',
+        perk2En: '1.18× SPEED RUSH',
+        perk2Zh: '1.18× 极速冲刺',
+      }
+    : null;
 
   // Latch a deterministic 3.0s client fly-through banner whenever Frenzy triggers,
   // even if high-frequency touch re-renders or late snapshots occur.
@@ -147,13 +80,11 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
     ? Math.max(1, Math.ceil(frenzy.freezeRemaining))
     : localRemainSec;
 
-  const perk1Label = lang === 'zh' ? frenzyPerks.perk1Zh : frenzyPerks.perk1En;
-  const perk2Label = lang === 'zh' ? frenzyPerks.perk2Zh : frenzyPerks.perk2En;
+  const perk1Label = frenzyPerks ? (lang === 'zh' ? frenzyPerks.perk1Zh : frenzyPerks.perk1En) : '';
+  const perk2Label = frenzyPerks ? (lang === 'zh' ? frenzyPerks.perk2Zh : frenzyPerks.perk2En) : '';
 
   return (
     <>
-      <style>{FRENZY_KEYFRAMES_CSS}</style>
-
       {/* Active Frenzy Fiery Edge Vignette + Persistent Top-Center FRENZY TIME Banner */}
       {status === 'PLAYING' && frenzy.active && !showFlyThrough && (
         <>
@@ -170,9 +101,11 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
               <span className="font-display font-black text-[11px] sm:text-xs tracking-wider uppercase text-transparent bg-clip-text bg-gradient-to-r from-[#FFF3B0] via-[#FFB800] to-[#FF6B4A] whitespace-nowrap">
                 {t('FRENZY TIME · 2×', '烈焰狂热时间 · 2×')}
               </span>
-              <span className="hidden sm:inline text-[10px] font-mono font-bold text-[#FFE066] truncate max-w-[260px]">
-                · {perk1Label} · {perk2Label}
-              </span>
+              {frenzyPerks && (
+                <span className="hidden sm:inline text-[10px] font-mono font-bold text-[#FFE066] truncate max-w-[260px]">
+                  · {perk1Label} · {perk2Label}
+                </span>
+              )}
               <Zap className="w-3 h-3 text-[#FFE066] animate-pulse shrink-0" />
             </div>
           </div>
@@ -197,9 +130,10 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
               key={idx}
               style={{
                 top: streak.top,
-                animation: `jsFrenzyStreak ${streak.dur} linear ${streak.delay} infinite`,
+                animationDuration: streak.dur,
+                animationDelay: streak.delay,
               }}
-              className={`absolute left-0 w-2/3 ${streak.h} bg-gradient-to-r ${streak.color} blur-[1px]`}
+              className={`frenzy-streak absolute left-0 w-2/3 ${streak.h} bg-gradient-to-r ${streak.color} blur-[1px]`}
             />
           ))}
 
@@ -210,9 +144,10 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
               style={{
                 top: `${22 + ((i * 17) % 60)}%`,
                 left: `${18 + ((i * 23) % 68)}%`,
-                animation: `jsFrenzyEmber ${0.95 + (i % 4) * 0.18}s ease-out ${(i % 5) * 0.11}s infinite`,
+                animationDuration: `${0.95 + (i % 4) * 0.18}s`,
+                animationDelay: `${(i % 5) * 0.11}s`,
               }}
-              className={`absolute rounded-full ${
+              className={`frenzy-ember absolute rounded-full ${
                 i % 3 === 0
                   ? 'w-3 h-3 bg-[#FFB800] shadow-[0_0_14px_#FFB800]'
                   : i % 3 === 1
@@ -223,12 +158,7 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
           ))}
 
           {/* STAGE 1 (First 1.45s): FRENZY TIME / FRENZY MODE! Sweeps in from Right -> Holds Center -> Exits Left */}
-          <div
-            style={{
-              animation: 'jsFrenzyStage1 1.45s cubic-bezier(0.22, 1, 0.36, 1) forwards',
-            }}
-            className="absolute inset-0 flex items-center justify-center px-3 sm:px-4 pb-7"
-          >
+          <div className="frenzy-stage-1 absolute inset-0 flex items-center justify-center px-3 sm:px-4 pb-7">
             <div
               className={`relative w-[92%] rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#2D0D09]/96 via-[#43140A]/96 to-[#1D0B0E]/96 border-2 border-[#FF8A00] text-center shadow-[0_0_70px_rgba(255,77,46,0.88)] ${
                 compact ? 'max-w-lg px-4 py-3 sm:px-6 sm:py-4' : 'max-w-2xl px-4 py-5 sm:px-10 sm:py-9'
@@ -270,75 +200,72 @@ export const FrenzyBannerOverlay = memo(function FrenzyBannerOverlay({
           </div>
 
           {/* STAGE 2 (1.2s -> 3.0s): SPECIAL FEATURES Sweeps in from Right -> Holds Center -> Exits Left */}
-          <div
-            style={{
-              animation: 'jsFrenzyStage2 3.0s cubic-bezier(0.22, 1, 0.36, 1) forwards',
-            }}
-            className="absolute inset-0 flex items-center justify-center px-3 sm:px-4 pb-7"
-          >
-            <div
-              className={`relative w-[92%] rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#33110D]/96 via-[#1B0C0E]/96 to-[#12090C]/98 border-2 border-[#FFB800] text-center shadow-[0_0_70px_rgba(255,138,0,0.78)] ${
-                compact ? 'max-w-xl p-3 sm:p-4' : 'max-w-2xl p-5 sm:p-7'
-              }`}
-            >
-              <div className="pointer-events-none absolute -right-12 inset-y-4 w-16 bg-gradient-to-l from-transparent via-[#FF4D2E]/45 to-[#FFB800]/65 blur-xl rounded-full" />
-              <div className="pointer-events-none absolute -left-8 inset-y-6 w-12 bg-gradient-to-r from-transparent to-[#FF8A00]/50 blur-lg rounded-full" />
-
+          {frenzyPerks && (
+            <div className="frenzy-stage-2 absolute inset-0 flex items-center justify-center px-3 sm:px-4 pb-7">
               <div
-                className={`inline-flex items-center gap-1.5 rounded-full bg-[#FF4D2E]/30 border border-[#FF8A00]/80 text-[#FFE066] font-mono font-black tracking-widest uppercase ${
-                  compact ? 'px-3 py-0.5 text-[10px] sm:text-xs' : 'px-4 py-1 text-xs'
+                className={`relative w-[92%] rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#33110D]/96 via-[#1B0C0E]/96 to-[#12090C]/98 border-2 border-[#FFB800] text-center shadow-[0_0_70px_rgba(255,138,0,0.78)] ${
+                  compact ? 'max-w-xl p-3 sm:p-4' : 'max-w-2xl p-5 sm:p-7'
                 }`}
               >
-                <Flame className="w-3.5 h-3.5 text-[#FF8A00] animate-pulse" />
-                <span>{t('FRENZY TIME · SPECIAL BOOSTS ACTIVE', '狂热时间 · 专属强化已激活')}</span>
-                <Flame className="w-3.5 h-3.5 text-[#FF8A00] animate-pulse" />
-              </div>
+                <div className="pointer-events-none absolute -right-12 inset-y-4 w-16 bg-gradient-to-l from-transparent via-[#FF4D2E]/45 to-[#FFB800]/65 blur-xl rounded-full" />
+                <div className="pointer-events-none absolute -left-8 inset-y-6 w-12 bg-gradient-to-r from-transparent to-[#FF8A00]/50 blur-lg rounded-full" />
 
-              <div
-                className={`grid grid-cols-2 ${
-                  compact ? 'mt-2 gap-2 sm:gap-3' : 'mt-4 gap-3.5'
-                }`}
-              >
                 <div
-                  className={`relative overflow-hidden rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#FF4D2E]/30 to-[#FF8A00]/15 border-2 border-[#FF5E1A] flex items-center justify-center gap-2 shadow-[0_0_24px_rgba(255,77,46,0.35),inset_0_0_18px_rgba(255,77,46,0.25)] ${
-                    compact ? 'px-2.5 py-2 sm:px-3.5 sm:py-3' : 'px-4 py-4'
+                  className={`inline-flex items-center gap-1.5 rounded-full bg-[#FF4D2E]/30 border border-[#FF8A00]/80 text-[#FFE066] font-mono font-black tracking-widest uppercase ${
+                    compact ? 'px-3 py-0.5 text-[10px] sm:text-xs' : 'px-4 py-1 text-xs'
                   }`}
                 >
-                  <Flame
-                    className={`${
-                      compact ? 'w-4 h-4 sm:w-6 sm:h-6' : 'w-7 h-7'
-                    } text-[#FFB800] drop-shadow-[0_0_10px_#FF5E1A] shrink-0 animate-pulse`}
-                  />
-                  <span
-                    className={`font-display font-black text-white drop-shadow leading-tight ${
-                      compact ? 'text-xs sm:text-base' : 'text-lg sm:text-2xl'
-                    }`}
-                  >
-                    {perk1Label}
-                  </span>
+                  <Flame className="w-3.5 h-3.5 text-[#FF8A00] animate-pulse" />
+                  <span>{t('FRENZY TIME · SPECIAL BOOSTS ACTIVE', '狂热时间 · 专属强化已激活')}</span>
+                  <Flame className="w-3.5 h-3.5 text-[#FF8A00] animate-pulse" />
                 </div>
 
                 <div
-                  className={`relative overflow-hidden rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#FFB800]/28 to-[#FF5E1A]/15 border-2 border-[#FFB800] flex items-center justify-center gap-2 shadow-[0_0_24px_rgba(255,184,0,0.3),inset_0_0_18px_rgba(255,184,0,0.22)] ${
-                    compact ? 'px-2.5 py-2 sm:px-3.5 sm:py-3' : 'px-4 py-4'
+                  className={`grid grid-cols-2 ${
+                    compact ? 'mt-2 gap-2 sm:gap-3' : 'mt-4 gap-3.5'
                   }`}
                 >
-                  <Zap
-                    className={`${
-                      compact ? 'w-4 h-4 sm:w-6 sm:h-6' : 'w-7 h-7'
-                    } text-[#FFE066] drop-shadow-[0_0_10px_#FFB800] shrink-0 animate-pulse`}
-                  />
-                  <span
-                    className={`font-display font-black text-white drop-shadow leading-tight ${
-                      compact ? 'text-xs sm:text-base' : 'text-lg sm:text-2xl'
+                  <div
+                    className={`relative overflow-hidden rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#FF4D2E]/30 to-[#FF8A00]/15 border-2 border-[#FF5E1A] flex items-center justify-center gap-2 shadow-[0_0_24px_rgba(255,77,46,0.35),inset_0_0_18px_rgba(255,77,46,0.25)] ${
+                      compact ? 'px-2.5 py-2 sm:px-3.5 sm:py-3' : 'px-4 py-4'
                     }`}
                   >
-                    {perk2Label}
-                  </span>
+                    <Flame
+                      className={`${
+                        compact ? 'w-4 h-4 sm:w-6 sm:h-6' : 'w-7 h-7'
+                      } text-[#FFB800] drop-shadow-[0_0_10px_#FF5E1A] shrink-0 animate-pulse`}
+                    />
+                    <span
+                      className={`font-display font-black text-white drop-shadow leading-tight ${
+                        compact ? 'text-xs sm:text-base' : 'text-lg sm:text-2xl'
+                      }`}
+                    >
+                      {perk1Label}
+                    </span>
+                  </div>
+
+                  <div
+                    className={`relative overflow-hidden rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#FFB800]/28 to-[#FF5E1A]/15 border-2 border-[#FFB800] flex items-center justify-center gap-2 shadow-[0_0_24px_rgba(255,184,0,0.3),inset_0_0_18px_rgba(255,184,0,0.22)] ${
+                      compact ? 'px-2.5 py-2 sm:px-3.5 sm:py-3' : 'px-4 py-4'
+                    }`}
+                  >
+                    <Zap
+                      className={`${
+                        compact ? 'w-4 h-4 sm:w-6 sm:h-6' : 'w-7 h-7'
+                      } text-[#FFE066] drop-shadow-[0_0_10px_#FFB800] shrink-0 animate-pulse`}
+                    />
+                    <span
+                      className={`font-display font-black text-white drop-shadow leading-tight ${
+                        compact ? 'text-xs sm:text-base' : 'text-lg sm:text-2xl'
+                      }`}
+                    >
+                      {perk2Label}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Bottom Fiery Fuse Progress Bar */}
           <div

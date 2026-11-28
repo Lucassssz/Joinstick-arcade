@@ -1890,6 +1890,24 @@ export function computeBotInput(
     case 'trivia-blitz':
     case 'codenames-grid':
     case 'fib-party':
+    case 'rummy-royale':
+    case 'hearts-breaker':
+    case 'spades-bidding':
+    case 'poker-showdown':
+    case 'tarot-arcana':
+    case 'baccarat-club':
+    case 'memory-pairs':
+    case 'sequence-jack':
+    case 'camel-stack-derby':
+    case 'route-express':
+    case 'gem-engine-guild':
+    case 'secret-rank-flags':
+    case 'row-six-bust':
+    case 'silent-sync':
+    case 'one-card-court':
+    case 'firework-hints':
+    case 'tunnel-saboteur':
+    case 'word-tile-crossroads':
       // Card, Mahjong, Quiz & Social Deduction games run native AI inside each engine's step()
       break;
 
