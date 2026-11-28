@@ -143,12 +143,14 @@ export function GameHoverPreview({
 
     const cached = getCachedClip(gameId);
     if (cached) {
-      ensureGameRendererLoaded(gameId).then(() => {
-        if (!cancelled) {
-          setClip(cached);
-          setPlaying(true);
-        }
-      });
+      ensureGameRendererLoaded(gameId)
+        .then(() => {
+          if (!cancelled) {
+            setClip(cached);
+            setPlaying(true);
+          }
+        })
+        .catch(() => {});
       return () => {
         cancelled = true;
         controller.abort();

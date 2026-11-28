@@ -23,6 +23,7 @@ import {
   Plus,
   Power,
   QrCode,
+  RefreshCw,
   RotateCcw,
   Search,
   Share2,
@@ -90,7 +91,7 @@ import {
   useLanguage,
 } from '../lib/i18n';
 import { createRenderFxState, renderGameSnapshot } from '../games/renderers';
-import { preloadGameRenderer } from '../games/rendererRegistry';
+import { isGameRendererReady, preloadGameRenderer, preloadRenderer } from '../games/rendererRegistry';
 import { getStylizedGameThumbnail } from '../games/thumbnailGenerator';
 import { ChaosWheelModal } from './ChaosWheelModal';
 import { GuestPassManagerModal, HostUnlockModal } from './HostAccessModal';
@@ -204,6 +205,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
   const [rankShifts, setRankShifts] = useState<Record<string, number>>({});
   const [cardFlipDir, setCardFlipDir] = useState<1 | -1>(1);
   const [lobbySearchQuery, setLobbySearchQuery] = useState('');
+  const [rendererLoadState, setRendererLoadState] = useState<'ready' | 'loading' | 'error'>('ready');
   const [liveTurnInfo, setLiveTurnInfo] = useState<{
     activePlayerId: string | null;
     turnElapsedSec: number;
@@ -715,7 +717,7 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     const renderLoop = () => {
       const canvas = canvasRef.current;
       const snap = latestSnapshotRef.current;
-      if (canvas && snap) {
+      if (canvas && snap && isGameRendererReady(snap.gameId)) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           renderGameSnapshot(
@@ -1160,10 +1162,29 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     wsRef.current?.send({ type: 'room:return-setup' });
   };
 
+  const ensureSelectedGameReady = useCallback(async (gameId: GameId): Promise<boolean> => {
+    if (isGameRendererReady(gameId)) {
+      setRendererLoadState('ready');
+      return true;
+    }
+    setRendererLoadState('loading');
+    try {
+      await preloadRenderer(gameId);
+      setRendererLoadState('ready');
+      return true;
+    } catch {
+      setRendererLoadState('error');
+      return false;
+    }
+  }, []);
+
   const handleStartMatch = () => {
     arcadeAudio.unlock();
     setErrorMsg(null);
     fxRef.current = createRenderFxState();
+    if (room?.selectedGameId) {
+      void ensureSelectedGameReady(room.selectedGameId);
+    }
     wsRef.current?.send({ type: 'game:start' });
   };
 
@@ -1198,15 +1219,24 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
     wsRef.current?.send({ type: 'room:set-mutator', mutatorId });
   };
 
+  const handleDismissBriefing = async () => {
+    arcadeAudio.unlock();
+    if (!room?.selectedGameId) return;
+    const ready = await ensureSelectedGameReady(room.selectedGameId);
+    if (!ready) return;
+    wsRef.current?.send({ type: 'game:dismiss-briefing' });
+  };
+
   useEffect(() => {
-    if (room?.selectedGameId) {
-      preloadGameRenderer(room.selectedGameId);
+    const targetGameId = room?.tournament?.vote?.winningGameId ?? room?.selectedGameId;
+    if (targetGameId) {
+      void ensureSelectedGameReady(targetGameId);
     }
-  }, [room?.selectedGameId]);
+  }, [room?.selectedGameId, room?.tournament?.vote?.winningGameId, ensureSelectedGameReady]);
 
   const handleSelectGame = (gameId: GameId, settingValue?: number) => {
     arcadeAudio.unlock();
-    preloadGameRenderer(gameId);
+    void ensureSelectedGameReady(gameId);
     setErrorMsg(null);
     wsRef.current?.send({ type: 'game:select', gameId, settingValue });
   };
@@ -3577,6 +3607,35 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
             }`}
           />
 
+          {/* Renderer Chunk Loading / Retry Overlay (never show a black canvas mid-game) */}
+          {(room.status === 'COUNTDOWN' || room.status === 'PLAYING' || room.status === 'PAUSED') &&
+            (!isGameRendererReady(room.selectedGameId) || rendererLoadState === 'error') && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-[#0B0D12]/92 backdrop-blur-sm p-6 text-center">
+                {rendererLoadState === 'error' ? (
+                  <>
+                    <p className="text-sm font-bold text-[#FCA5A5]">
+                      {t('Failed to load arena module. Check your connection.', '加载竞技场模块失败，请检查网络连接。')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void ensureSelectedGameReady(room.selectedGameId)}
+                      className="tactile-btn h-10 px-4 rounded-xl bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-display font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                      <span>{t('Retry Load', '重新加载')}</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-7 h-7 text-[#00C2FF] animate-spin" aria-hidden="true" />
+                    <span className="font-mono text-xs font-bold text-[#D1D5DB]">
+                      {t('LOADING ARENA MODULE...', '正在加载竞技场模块...')}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+
           {/* Active Frenzy Fiery Edge Vignette */}
           {room.status === 'PLAYING' && room.frenzy.active && !room.frenzy.freezing && (
             <div className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-[#FF5E1A]/75 shadow-[inset_0_0_65px_rgba(255,77,46,0.34)] z-10 animate-pulse" />
@@ -3950,6 +4009,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
                     })}
                   </div>
 
+                  {rendererLoadState === 'error' && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#3B1219] border border-[#FF4D2E]/60 px-3 py-2 text-xs font-bold text-[#FCA5A5]">
+                      <span>
+                        {t(
+                          'Failed to load arena module. Check your connection and retry.',
+                          '竞技场模块加载失败，请检查网络后重试。'
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void ensureSelectedGameReady(room.selectedGameId)}
+                        className="h-7 px-3 rounded-lg bg-[#FF4D2E] hover:bg-[#FF6145] text-white text-[11px] font-extrabold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <RefreshCw className="w-3 h-3" aria-hidden="true" />
+                        <span>{t('Retry', '重试')}</span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                     <button
                       type="button"
@@ -3969,19 +4047,25 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
 
                     <button
                       type="button"
+                      disabled={rendererLoadState === 'loading'}
                       onClick={() =>
                         guardHostOnlyClick(() => {
-                          arcadeAudio.unlock();
-                          wsRef.current?.send({ type: 'game:dismiss-briefing' });
+                          void handleDismissBriefing();
                         })
                       }
-                      className={`tactile-btn h-10 px-5 rounded-xl bg-[#FF4D2E] text-white font-display font-bold text-xs sm:text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 transition-all ${
+                      className={`tactile-btn h-10 px-5 rounded-xl bg-[#FF4D2E] text-white font-display font-bold text-xs sm:text-sm shadow-[0_3px_0_#B82E17] inline-flex items-center gap-2 transition-all disabled:opacity-70 ${
                         room.remoteFocus.modalIndex === 0 ? 'ring-2 ring-[#FFB800]' : ''
                       } ${isScreenRemoteLocked ? 'cursor-default' : 'hover:bg-[#FF6145] cursor-pointer'}`}
                     >
-                      <Play className="w-4 h-4 fill-current shrink-0" />
+                      {rendererLoadState === 'loading' ? (
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+                      ) : (
+                        <Play className="w-4 h-4 fill-current shrink-0" />
+                      )}
                       <span>
-                        {connectedHumans.length === 0
+                        {rendererLoadState === 'loading'
+                          ? t('Loading Arena...', '正在加载竞技场...')
+                          : connectedHumans.length === 0
                           ? t('Start Match', '开始比赛')
                           : t('Host Override: Start Now', '房主直接开始')}
                       </span>

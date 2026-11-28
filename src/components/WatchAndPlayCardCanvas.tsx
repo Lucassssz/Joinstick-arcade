@@ -384,10 +384,17 @@ export function WatchAndPlayCardCanvas({
   useEffect(() => {
     const cached = getCachedRuleClips(gameId);
     if (cached) {
-      ensureGameRendererLoaded(gameId).then(() => {
-        setRuleClips(cached);
-      });
-      return;
+      let cancelled = false;
+      ensureGameRendererLoaded(gameId)
+        .then(() => {
+          if (!cancelled) {
+            setRuleClips(cached);
+          }
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
     }
 
     setRuleClips(null);

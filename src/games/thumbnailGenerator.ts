@@ -1,6 +1,6 @@
 import { ARENA_HEIGHT, ARENA_WIDTH, type GameId, type GameSnapshot } from '../shared/types';
 import type { getGameGenre } from '../shared/games';
-import { ensureGameRendererLoaded } from './rendererRegistry';
+import { preloadRenderer } from './rendererRegistry';
 import { createRenderFxState, renderGameSnapshot } from './renderers';
 
 type GameGenre = ReturnType<typeof getGameGenre>;
@@ -1072,7 +1072,7 @@ export function getStylizedGameThumbnail(
     try {
       const [snap] = await Promise.all([
         fetchDemoSnapshotWithRetry(gameId),
-        ensureGameRendererLoaded(gameId),
+        preloadRenderer(gameId),
       ]);
       if (!snap) return null;
 

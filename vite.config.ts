@@ -33,6 +33,40 @@ export default defineConfig(() => {
         '@': path.resolve(import.meta.dirname, '.'),
       },
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            includeDependenciesRecursively: false,
+            groups: [
+              {
+                name: 'vendor-react',
+                test: /\/node_modules\/(react|react-dom|scheduler)\//,
+              },
+              {
+                name: 'vendor-motion',
+                test: /\/node_modules\/(motion|motion-dom|motion-utils|framer-motion)\//,
+              },
+              { name: 'packMalaysian', test: /\/src\/games\/packMalaysianRenderers/ },
+              { name: 'packChineseViral', test: /\/src\/games\/packChineseViral/ },
+              { name: 'packGlobalViral', test: /\/src\/games\/packGlobalViral/ },
+              { name: 'packRetroArcade', test: /\/src\/games\/packRetroArcade/ },
+              { name: 'packSportsPhysics', test: /\/src\/games\/packSportsPhysics/ },
+              { name: 'packChaosSurvival', test: /\/src\/games\/packChaosSurvival/ },
+              { name: 'packStrategy', test: /\/src\/games\/packStrategyClassics/ },
+              { name: 'packTabletop', test: /\/src\/games\/packTabletopGems/ },
+              { name: 'packMindLogic', test: /\/src\/games\/packMindLogic/ },
+              { name: 'packCrewDefense', test: /\/src\/games\/packCrewDefense/ },
+              { name: 'packPhysicsBuilder', test: /\/src\/games\/packPhysicsBuilder/ },
+              { name: 'packCultHeritage', test: /\/src\/games\/packCultHeritage/ },
+              { name: 'newArcade', test: /\/src\/games\/newArcadeRenderers/ },
+              { name: 'newBoard', test: /\/src\/games\/newBoardRenderers/ },
+              { name: 'newCard', test: /\/src\/games\/newCardRenderers/ },
+            ],
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.

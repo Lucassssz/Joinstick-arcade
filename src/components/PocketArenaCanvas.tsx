@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
@@ -10,7 +10,7 @@ import {
 } from '../shared/types';
 import { useLanguage } from '../lib/i18n';
 import { renderGameSnapshot, type RenderFxState } from '../games/renderers';
-import { preloadGameRenderer } from '../games/rendererRegistry';
+import { isGameRendererReady, preloadRenderer } from '../games/rendererRegistry';
 
 interface PocketArenaCanvasProps {
   gameId: GameId;
@@ -241,8 +241,53 @@ export function PocketArenaCanvas({
     };
   }, [highlightPlayerId, highlightColorHex, showYouMarker]);
 
+  const [rendererReady, setRendererReady] = useState<boolean>(() => isGameRendererReady(gameId));
+  const [rendererError, setRendererError] = useState<boolean>(false);
+
+  const loadGameChunk = useCallback(() => {
+    if (isGameRendererReady(gameId)) {
+      setRendererReady(true);
+      setRendererError(false);
+      return;
+    }
+    setRendererReady(false);
+    setRendererError(false);
+    preloadRenderer(gameId)
+      .then(() => {
+        setRendererReady(true);
+        setRendererError(false);
+      })
+      .catch(() => {
+        setRendererReady(false);
+        setRendererError(true);
+      });
+  }, [gameId]);
+
   useEffect(() => {
-    preloadGameRenderer(gameId);
+    let active = true;
+    if (isGameRendererReady(gameId)) {
+      setRendererReady(true);
+      setRendererError(false);
+      return;
+    }
+    setRendererReady(false);
+    setRendererError(false);
+    preloadRenderer(gameId)
+      .then(() => {
+        if (active) {
+          setRendererReady(true);
+          setRendererError(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setRendererReady(false);
+          setRendererError(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [gameId]);
 
   useEffect(() => {
@@ -258,7 +303,7 @@ export function PocketArenaCanvas({
     const renderLoop = () => {
       const canvas = canvasRef.current;
       const snap = snapshotRef.current;
-      if (canvas && snap) {
+      if (canvas && snap && isGameRendererReady(snap.gameId)) {
         if (!hasSnapshot) setHasSnapshot(true);
         const ctx = canvas.getContext('2d');
         if (ctx) {
@@ -290,7 +335,7 @@ export function PocketArenaCanvas({
 
     rafId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(rafId);
-  }, [status, gameId, snapshotRef, competitiveRef, fxRef, hasSnapshot]);
+  }, [status, gameId, snapshotRef, competitiveRef, fxRef, hasSnapshot, rendererReady]);
 
   const zoomClass =
     cameraFocus === 'turn-focus'
@@ -309,7 +354,19 @@ export function PocketArenaCanvas({
         height={ARENA_HEIGHT}
         className={`w-full h-full object-contain select-none pointer-events-none transition-transform duration-300 ease-out origin-[50%_51%] will-change-transform ${zoomClass}`}
       />
-      {!hasSnapshot && (
+      {rendererError ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-[#090B10]/95 px-4 text-center text-xs font-semibold text-[#FCA5A5]">
+          <span>{t('Failed to load arena module. Check your connection.', '加载竞技场模块失败，请检查网络连接。')}</span>
+          <button
+            type="button"
+            onClick={loadGameChunk}
+            className="h-8 px-3.5 rounded-lg bg-[#FF4D2E] hover:bg-[#FF6145] text-white font-bold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>{t('Retry', '重试')}</span>
+          </button>
+        </div>
+      ) : (!hasSnapshot || !rendererReady) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#090B10]/90 text-xs font-semibold text-[#A5AEBD]">
           <Loader2 className="w-5 h-5 text-[#00C2FF] animate-spin" aria-hidden="true" />
           <span>{t('Syncing live arena…', '正在同步实时游戏画面…')}</span>

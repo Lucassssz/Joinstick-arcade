@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -96,6 +96,7 @@ import {
 import { CardControllerDeck, type PocketCardSituation } from './CardControllerDeck';
 import { PhoneControllerDemo } from './PhoneControllerDemo';
 import { createRenderFxState } from '../games/renderers';
+import { isGameRendererReady, preloadRenderer } from '../games/rendererRegistry';
 import { arcadeAudio } from '../lib/audio';
 import {
   ActionButtonSpec,
@@ -807,6 +808,7 @@ export function PhoneController({
   const prevRoomStatusRef = useRef<RoomSnapshot['status'] | null>(null);
   const prevOutcomeStatusRef = useRef<RoomSnapshot['status'] | null>(null);
   const [outcomeOverlayOpen, setOutcomeOverlayOpen] = useState(false);
+  const [rendererLoadState, setRendererLoadState] = useState<'ready' | 'loading' | 'error'>('ready');
   const dragTargetRef = useRef<{
     target: 'stick' | 'buttons';
     pointerId: number;
@@ -2146,6 +2148,29 @@ export function PhoneController({
     wsRef.current?.send({ type: 'tournament:vote', gameId });
   };
 
+  const ensureGameRendererReady = useCallback(async (gameId: GameId): Promise<boolean> => {
+    if (isGameRendererReady(gameId)) {
+      setRendererLoadState('ready');
+      return true;
+    }
+    setRendererLoadState('loading');
+    try {
+      await preloadRenderer(gameId);
+      setRendererLoadState('ready');
+      return true;
+    } catch {
+      setRendererLoadState('error');
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const targetGameId = room?.tournament?.vote?.winningGameId ?? room?.selectedGameId;
+    if (targetGameId) {
+      void ensureGameRendererReady(targetGameId);
+    }
+  }, [room?.selectedGameId, room?.tournament?.vote?.winningGameId, ensureGameRendererReady]);
+
   const handleLeave = () => {
     const now = Date.now();
     if (now - lastReconnectTapRef.current < 280) return;
@@ -3458,6 +3483,7 @@ export function PhoneController({
         }}
         onSelectGame={(gameId, settingValue) => {
           setErrorMsg(null);
+          void ensureGameRendererReady(gameId);
           wsRef.current?.send({ type: 'game:select', gameId, settingValue });
         }}
         onChangeFilter={(filter) => {
@@ -3467,6 +3493,9 @@ export function PhoneController({
           arcadeAudio.unlock();
           triggerRoomFullscreen();
           setErrorMsg(null);
+          if (room?.selectedGameId) {
+            void ensureGameRendererReady(room.selectedGameId);
+          }
           wsRef.current?.send({ type: 'game:start' });
         }}
         onStartTournament={() => {
@@ -5058,13 +5087,35 @@ export function PhoneController({
               </div>
 
               <div className="shrink-0 space-y-1.5">
+                {rendererLoadState === 'error' && (
+                  <div className="flex items-center justify-between gap-2 rounded-xl bg-[#3B1219] border border-[#FF4D2E]/60 px-2.5 py-1.5 text-[11px] font-bold text-[#FCA5A5]">
+                    <span className="truncate">{t('Arena load failed', '加载竞技场失败')}</span>
+                    <button
+                      type="button"
+                      onClick={() => void ensureGameRendererReady(room.selectedGameId)}
+                      className="px-2 py-0.5 rounded bg-[#FF4D2E] text-white text-[10px] font-extrabold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" aria-hidden="true" />
+                      <span>{t('Retry', '重试')}</span>
+                    </button>
+                  </div>
+                )}
                 <button
                   type="button"
+                  disabled={rendererLoadState === 'loading'}
                   onClick={() => {
                     triggerRoomFullscreen();
-                    wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+                    if (me.ready) {
+                      wsRef.current?.send({ type: 'player:ready', ready: false });
+                      return;
+                    }
+                    void ensureGameRendererReady(room.selectedGameId).then((ok) => {
+                      if (ok) {
+                        wsRef.current?.send({ type: 'player:ready', ready: true });
+                      }
+                    });
                   }}
-                  className="relative tactile-btn w-full h-14 sm:h-16 rounded-2xl font-display font-extrabold text-base sm:text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
+                  className="relative tactile-btn w-full h-14 sm:h-16 rounded-2xl font-display font-extrabold text-base sm:text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-70"
                   style={
                     me.ready
                       ? {
@@ -5079,9 +5130,15 @@ export function PhoneController({
                         }
                   }
                 >
-                  {me.ready && <Check className="w-5 h-5" />}
+                  {rendererLoadState === 'loading' ? (
+                    <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    me.ready && <Check className="w-5 h-5" />
+                  )}
                   <span>
-                    {me.ready
+                    {rendererLoadState === 'loading'
+                      ? t('Loading Arena...', '正在加载竞技场...')
+                      : me.ready
                       ? t('Ready! Waiting...', '已准备！等待其他人')
                       : t("I'm Ready!", '我准备好了！')}
                   </span>
@@ -5231,13 +5288,35 @@ export function PhoneController({
                   />
                 </div>
               )}
+              {rendererLoadState === 'error' && (
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-[#3B1219] border border-[#FF4D2E]/60 px-2.5 py-1.5 text-[11px] font-bold text-[#FCA5A5]">
+                  <span className="truncate">{t('Failed to load arena module', '竞技场模块加载失败')}</span>
+                  <button
+                    type="button"
+                    onClick={() => void ensureGameRendererReady(room.selectedGameId)}
+                    className="px-2 py-0.5 rounded bg-[#FF4D2E] text-white text-[10px] font-extrabold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3 h-3" aria-hidden="true" />
+                    <span>{t('Retry', '重试')}</span>
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
+                disabled={rendererLoadState === 'loading'}
                 onClick={() => {
                   triggerRoomFullscreen();
-                  wsRef.current?.send({ type: 'player:ready', ready: !me.ready });
+                  if (me.ready) {
+                    wsRef.current?.send({ type: 'player:ready', ready: false });
+                    return;
+                  }
+                  void ensureGameRendererReady(room.selectedGameId).then((ok) => {
+                    if (ok) {
+                      wsRef.current?.send({ type: 'player:ready', ready: true });
+                    }
+                  });
                 }}
-                className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none"
+                className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-70"
                 style={
                   me.ready
                     ? {
@@ -5252,9 +5331,17 @@ export function PhoneController({
                       }
                 }
               >
-                {me.ready && <Check className="w-6 h-6" />}
+                {rendererLoadState === 'loading' ? (
+                  <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
+                ) : (
+                  me.ready && <Check className="w-6 h-6" />
+                )}
                 <span>
-                  {me.ready ? t('Ready! Waiting for Others', '已准备！等待其他玩家') : t("I'm Ready!", '我准备好了！')}
+                  {rendererLoadState === 'loading'
+                    ? t('Loading Arena...', '正在加载竞技场...')
+                    : me.ready
+                    ? t('Ready! Waiting for Others', '已准备！等待其他玩家')
+                    : t("I'm Ready!", '我准备好了！')}
                 </span>
               </button>
 
@@ -5290,10 +5377,24 @@ export function PhoneController({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => wsRef.current?.send({ type: 'game:dismiss-briefing' })}
-                className="h-8 px-3 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[11px] font-extrabold text-[#14120B] cursor-pointer"
+                disabled={rendererLoadState === 'loading'}
+                onClick={() => {
+                  void ensureGameRendererReady(room.selectedGameId).then((ok) => {
+                    if (ok) {
+                      wsRef.current?.send({ type: 'game:dismiss-briefing' });
+                    }
+                  });
+                }}
+                className="h-8 px-3 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[11px] font-extrabold text-[#14120B] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-70"
               >
-                {t('Host Start Now', '房主直接开始')}
+                {rendererLoadState === 'loading' && (
+                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                )}
+                <span>
+                  {rendererLoadState === 'loading'
+                    ? t('Loading...', '加载中...')
+                    : t('Host Start Now', '房主直接开始')}
+                </span>
               </button>
             </div>
           </div>

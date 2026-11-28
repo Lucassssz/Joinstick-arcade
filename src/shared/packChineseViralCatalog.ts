@@ -14,7 +14,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_melon_merge_1795857316947.jpg',
     accentHex: '#22C55E',
     rules: [
       'Aim left/right with the joystick and press DROP (A) to release the next fruit.',
@@ -48,7 +48,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_tile_triple_1795857317154.jpg',
     accentHex: '#A3E635',
     rules: [
       'Move your cursor over uncovered tiles and press PICK (A) to place them in your tray.',
@@ -82,7 +82,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_block_hop_1795857317923.jpg',
     accentHex: '#06B6D4',
     rules: [
       'Hold JUMP (A) to charge jump power, then release to leap to the next platform.',
@@ -116,7 +116,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['solo', 'double', 'multiplayer'],
     playerModeLabel: '1P · 2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_platform_leap_1795857318566.jpg',
     accentHex: '#F43F5E',
     rules: [
       'Steer left/right with the joystick and press LEAP (A) to jump between rising ledges.',
@@ -150,7 +150,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['double', 'multiplayer'],
     playerModeLabel: '2P · 3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_egg_rush_1795857320184.jpg',
     accentHex: '#FACC15',
     rules: [
       'Run forward with the joystick and dodge spinning sweepers and bouncy bumpers.',
@@ -184,7 +184,7 @@ export const PACK_CHINESE_VIRAL_GAME_CATALOG: GameMetadata[] = [
     maxPlayers: 8,
     suitableFor: ['multiplayer'],
     playerModeLabel: '3–8P',
-    coverImage: '',
+    coverImage: '/src/assets/images/game_goose_alert_1795857319402.jpg',
     accentHex: '#FB923C',
     rules: [
       'Geese: stand near glowing stations and hold/tap TASK (A) to fill the manor meter.',
