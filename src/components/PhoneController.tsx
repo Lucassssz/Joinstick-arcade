@@ -5585,34 +5585,36 @@ export function PhoneController({
             : 'translate-y-0 opacity-100'
         }`}
       >
-        {/* Top-Left Corner Pill: Player Identity + Live Stat + Compact Badges */}
+        {/* Top-Left Corner Pill: Player Identity + Live Stat + Compact Badges (hidden on Pocket card tables since status is unified in bottom-left roster) */}
         <div
           className={`${
             pocketTopHudHidden ? 'pointer-events-none' : 'pointer-events-auto'
           } flex items-center gap-1.5 min-w-0 max-w-[44%]`}
         >
-          <div className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm">
-            <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
-            <div className="min-w-0 leading-tight">
-              <div className="text-[11px] font-bold text-white truncate flex items-center gap-1">
-                <span className="truncate max-w-[78px]">{me.name}</span>
-                {room.teamMode !== 'ffa' && (() => {
-                  const spec = getTeamSpec(me.teamId);
-                  return spec ? (
-                    <span
-                      className="px-1 py-0.2 rounded text-[9px] font-mono font-black shrink-0"
-                      style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
-                    >
-                      {spec.emoji}
-                    </span>
-                  ) : null;
-                })()}
-              </div>
-              <div className="text-[10px] font-mono text-[#9CA3AF] truncate tabular-nums">
-                {translateGameText(me.statText, lang)}
+          {!isCardGame && (
+            <div className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-xl bg-[#0D1017]/82 border border-white/12 backdrop-blur-sm shadow-sm">
+              <PlayerAvatar avatarId={me.avatarId} colorHex={me.color.hex} size="xs" />
+              <div className="min-w-0 leading-tight">
+                <div className="text-[11px] font-bold text-white truncate flex items-center gap-1">
+                  <span className="truncate max-w-[78px]">{me.name}</span>
+                  {room.teamMode !== 'ffa' && (() => {
+                    const spec = getTeamSpec(me.teamId);
+                    return spec ? (
+                      <span
+                        className="px-1 py-0.2 rounded text-[9px] font-mono font-black shrink-0"
+                        style={{ backgroundColor: `${spec.colorHex}24`, color: spec.colorHex }}
+                      >
+                        {spec.emoji}
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+                <div className="text-[10px] font-mono text-[#9CA3AF] truncate tabular-nums">
+                  {translateGameText(me.statText, lang)}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {room.frenzy.active && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FF4D2E]/90 border border-[#FFB800]/80 text-white font-mono text-[9px] font-black animate-pulse shrink-0 shadow-[0_0_12px_rgba(255,77,46,0.55)]">

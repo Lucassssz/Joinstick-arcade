@@ -1063,171 +1063,330 @@ export function CardControllerDeck({
   };
 
   // =========================================================================
-  // ZONE A — UNO MOBILE TOP OPPONENT ARC (Avatars, Turn Rings, Mini Card Fan & UNO! Badge)
+  // ZONE A/C — UNIFIED LEFT TABLE ROSTER (Me + All Opponents, Zero Top Obstruction)
   // =========================================================================
-  const renderUnoOpponentArc = () => {
-    const opponents = situation?.players.filter((p) => !p.isMe) ?? [];
+  const renderUnifiedPocketRoster = (isTurnActiveNow: boolean, hintText: string) => {
+    const isClockwise = (situation?.direction ?? 1) === 1;
+    const ringHex = activeColorSpec?.ring ?? playerColorHex ?? '#00C2FF';
+    const allPlayers = situation?.players ?? [];
+    const mePlayer = allPlayers.find((p) => p.isMe) ?? null;
+    const opponents = allPlayers.filter((p) => !p.isMe);
+    const orderedPlayers = mePlayer ? [mePlayer, ...opponents] : opponents;
+    const isOut = mePlayer?.alive === false;
+    const myHandCount = cardState.hand.length;
+    const myRawStat = mePlayer?.stat ? translateGameText(mePlayer.stat, lang) : `${myHandCount}🃏`;
+    const activeTableTag = situation?.tableBadge
+      ? {
+          text: translateGameText(situation.tableBadge.text, lang),
+          bg: situation.tableBadge.bg,
+          fg: situation.tableBadge.fg,
+        }
+      : cardState.targetRank
+      ? {
+          text: `${t('Tgt', '目标')}:${cardState.targetRank}`,
+          bg: '#FFB800',
+          fg: '#14120B',
+        }
+      : cardState.badgeText
+      ? {
+          text: translateGameText(cardState.badgeText, lang),
+          bg: cardState.badgeColorHex ?? '#FFB800',
+          fg: '#0B1219',
+        }
+      : null;
+
+    const getToneCls = (tone?: 'danger' | 'warn' | 'good' | 'neutral') =>
+      tone === 'danger'
+        ? 'bg-[#FF3B30] text-white'
+        : tone === 'warn'
+        ? 'bg-[#FFB800] text-[#14120B]'
+        : tone === 'good'
+        ? 'bg-[#10D98B] text-[#0A1913]'
+        : 'bg-white/15 text-[#E5E7EB]';
+
+    const compactPlayers =
+      orderedPlayers.length > 0
+        ? orderedPlayers
+        : [
+            {
+              id: 'me',
+              name: t('You', '你'),
+              avatarId: 'fox',
+              colorHex: playerColorHex,
+              stat: myRawStat,
+              cardCount: myHandCount,
+              lastAction: null,
+              statusTag: myHandCount === 1 ? 'UNO!' : null,
+              statusTone: (myHandCount === 1 ? 'danger' : 'neutral') as 'danger' | 'neutral',
+              isActive: isTurnActiveNow,
+              isMe: true,
+              alive: true,
+            },
+          ];
 
     return (
-      <div className="pointer-events-auto w-full shrink-0 px-2 pt-0.5 flex items-center justify-center gap-1.5 sm:gap-2.5 overflow-x-auto arcade-scrollbar">
-        {opponents.length === 0 ? (
-          <div className="px-3 py-1 rounded-full bg-black/45 border border-white/10 text-[11px] font-bold text-[#9CA3AF]">
-            {t('Solo Practice Table', '单人牌桌练习')}
-          </div>
-        ) : (
-          opponents.map((p, idx) => {
-            const count = typeof p.cardCount === 'number' ? p.cardCount : null;
-            const isUnoDanger = count === 1 || p.statusTag === 'UNO!';
-            const fanSlices = count !== null ? Math.min(4, Math.max(1, count)) : 2;
-            const arcOffsetCls =
-              opponents.length >= 3 && (idx === 0 || idx === opponents.length - 1)
-                ? 'translate-y-1'
-                : '';
-
-            return (
-              <div
-                key={p.id}
-                className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-2xl border backdrop-blur-md shrink-0 transition-all duration-200 ${arcOffsetCls} ${
-                  p.isActive
-                    ? 'bg-[#172235]/95 border-[#FFB800] shadow-[0_0_16px_rgba(255,184,0,0.42)] scale-[1.03]'
-                    : 'bg-[#0C1018]/85 border-white/12'
-                } ${p.alive === false ? 'opacity-45 grayscale' : ''}`}
-              >
-                {/* Avatar with glowing active turn ring */}
-                <div className="relative shrink-0">
-                  <div
-                    className={`rounded-full p-0.5 ${
-                      p.isActive
-                        ? 'ring-2 ring-[#FFB800] shadow-[0_0_10px_#FFB800]'
-                        : ''
-                    }`}
-                  >
-                    <PlayerAvatar
-                      avatarId={p.avatarId || 'fox'}
-                      colorHex={p.colorHex}
-                      size="xs"
-                    />
-                  </div>
-                  {p.isActive && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#10D98B] ring-2 ring-[#0C1018]"
-                    />
+      <div className="relative shrink-0 z-40 pb-0.5 pointer-events-auto">
+        {myStatusExpanded && (
+          <div className="absolute bottom-full left-0 mb-1.5 w-[244px] sm:w-[276px] z-50 rounded-xl bg-[#0B0F19]/96 border border-white/20 p-2.5 shadow-2xl backdrop-blur-md text-left">
+            <div className="flex items-center justify-between gap-1.5 pb-1.5 border-b border-white/10">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className="inline-flex items-center gap-1 font-mono text-[10px] font-black shrink-0"
+                  style={{ color: ringHex }}
+                >
+                  {isClockwise ? (
+                    <RotateCw className="w-3 h-3" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" />
                   )}
-                </div>
-
-                {/* Name + Last Action / Status */}
-                <div className="min-w-0 leading-tight">
-                  <div className="flex items-center gap-1">
-                    <span
-                      className={`text-[11px] font-extrabold text-white truncate max-w-[66px] sm:max-w-[84px] ${
-                        p.alive === false ? 'line-through' : ''
-                      }`}
-                    >
-                      {p.name}
-                    </span>
-                    {isUnoDanger && (
-                      <span className="px-1.5 py-0.2 rounded-full bg-[#FF3B30] text-white font-display text-[9px] font-black tracking-tight animate-bounce shadow">
-                        UNO!
-                      </span>
-                    )}
-                    {!isUnoDanger && p.statusTag && (
-                      <span className="px-1 py-0.2 rounded bg-white/10 text-[9px] font-mono font-black text-[#FFD166] whitespace-nowrap">
-                        {translateGameText(p.statusTag, lang)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] font-mono font-bold text-[#9CA3AF] truncate max-w-[86px] tabular-nums">
-                    {p.lastAction
-                      ? translateGameText(p.lastAction, lang)
-                      : translateGameText(p.stat, lang)}
-                  </div>
-                </div>
-
-                {/* Mini Fanned Card-Back Stack + Big Card Count Badge */}
-                {count !== null && (
-                  <div className="relative flex items-center pl-1 shrink-0">
-                    <div className="relative w-5 h-6 flex items-center justify-center">
-                      {Array.from({ length: fanSlices }).map((_, sIdx) => (
-                        <span
-                          key={sIdx}
-                          aria-hidden="true"
-                          className="absolute w-3.5 h-5 rounded-[4px] bg-gradient-to-br from-[#FF4D2E] via-[#1E2638] to-[#0B0F19] border border-white/45 shadow-sm"
-                          style={{
-                            transform: `rotate(${(sIdx - (fanSlices - 1) / 2) * 10}deg) translateX(${
-                              (sIdx - (fanSlices - 1) / 2) * 1.5
-                            }px)`,
-                          }}
-                        />
-                      ))}
-                      <span
-                        className={`relative z-10 px-1 min-w-[18px] h-[18px] rounded-full font-mono text-[10px] font-black tabular-nums flex items-center justify-center shadow ${
-                          isUnoDanger
-                            ? 'bg-[#FF3B30] text-white ring-1 ring-white'
-                            : 'bg-[#0B0F19]/90 text-[#FFB800] border border-[#FFB800]/60'
-                        }`}
-                      >
-                        {count}
-                      </span>
-                    </div>
-                  </div>
+                  <span>{isClockwise ? t('CW', '顺时针') : t('CCW', '逆时针')}</span>
+                </span>
+                {activeTableTag && (
+                  <span
+                    className="px-1.5 py-0.5 rounded font-mono text-[9px] font-black truncate max-w-[116px]"
+                    style={{ backgroundColor: activeTableTag.bg, color: activeTableTag.fg }}
+                  >
+                    {activeTableTag.text}
+                  </span>
                 )}
               </div>
-            );
-          })
+              <button
+                type="button"
+                onClick={() => setMyStatusExpanded(false)}
+                aria-label={t('Close table status', '关闭牌桌状态')}
+                className="text-[#9CA3AF] hover:text-white cursor-pointer shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="mt-1.5 space-y-1 max-h-[176px] overflow-y-auto arcade-scrollbar pr-0.5">
+              {compactPlayers.map((p) => {
+                const count = p.isMe
+                  ? myHandCount
+                  : typeof p.cardCount === 'number'
+                  ? p.cardCount
+                  : null;
+                const isUno = count === 1 || p.statusTag === 'UNO!';
+                const statLabel = p.stat
+                  ? translateGameText(p.stat, lang)
+                  : count !== null
+                  ? `${count}🃏`
+                  : '';
+                const hasCardsInStat = statLabel.includes('🃏');
+                const tagText = isUno
+                  ? 'UNO!'
+                  : p.statusTag
+                  ? translateGameText(p.statusTag, lang)
+                  : null;
+                const tagTone = isUno ? 'danger' : p.statusTone;
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`rounded-lg px-1.5 py-1 border ${
+                      p.isActive
+                        ? p.isMe
+                          ? 'bg-[#0E241E] border-[#10D98B]/65'
+                          : 'bg-[#1D1B12] border-[#FFB800]/65'
+                        : 'bg-white/[0.03] border-white/8'
+                    } ${p.alive === false ? 'opacity-50' : ''}`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <PlayerAvatar
+                          avatarId={p.avatarId || 'fox'}
+                          colorHex={p.colorHex}
+                          size="xs"
+                          className="!w-4 !h-4 !text-[10px] !rounded-[5px]"
+                        />
+                        <span
+                          className={`text-[10.5px] font-extrabold text-white truncate ${
+                            p.alive === false ? 'line-through' : ''
+                          }`}
+                        >
+                          {p.isMe ? `${p.name} (${t('You', '你')})` : p.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {tagText && (
+                          <span
+                            className={`px-1 py-[1px] rounded font-mono text-[8.5px] font-black leading-none ${getToneCls(
+                              tagTone
+                            )}`}
+                          >
+                            {tagText}
+                          </span>
+                        )}
+                        <span className="font-mono text-[10px] font-black text-white tabular-nums">
+                          {statLabel}
+                          {!hasCardsInStat && count !== null ? ` · ${count}🃏` : ''}
+                        </span>
+                      </div>
+                    </div>
+                    {p.lastAction && (
+                      <div className="mt-0.5 pl-5 text-[9.5px] font-semibold text-[#9CA3AF] truncate">
+                        {translateGameText(p.lastAction, lang)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-1.5 pt-1.5 border-t border-white/10 space-y-0.5 text-[10px] leading-snug">
+              {situation?.lastMoveText && (
+                <div className="font-bold text-[#FDE68A] truncate">
+                  {translateGameText(situation.lastMoveText, lang)}
+                </div>
+              )}
+              <div className="text-[#CBD5E1] font-semibold">{hintText}</div>
+            </div>
+          </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => setMyStatusExpanded((prev) => !prev)}
+          aria-label={t('Toggle table & player status details', '展开或收起全员状态详情')}
+          className={`w-[110px] sm:w-[130px] rounded-xl px-1.5 py-1 border backdrop-blur-md text-left flex flex-col gap-0.5 cursor-pointer active:scale-[0.98] transition-all shadow-lg ${
+            isOut
+              ? 'bg-[#171216]/90 border-[#FF3B30]/55 opacity-80'
+              : isDanger
+              ? 'bg-[#260D11]/94 border-[#FF3B30] shadow-[0_0_10px_rgba(255,59,48,0.5)]'
+              : isTurnActiveNow
+              ? 'bg-[#0C1D1A]/92 border-[#10D98B] shadow-[0_0_10px_rgba(16,217,139,0.35)]'
+              : 'bg-[#0B0F18]/88 border-white/18'
+          }`}
+        >
+          {/* Compact Top Header: Turn Direction + Shot Clock */}
+          <div className="flex items-center justify-between gap-1 min-w-0">
+            <span
+              className="inline-flex items-center shrink-0"
+              style={{ color: ringHex }}
+              title={isClockwise ? t('Clockwise', '顺时针') : t('Reverse', '逆时针')}
+            >
+              {isClockwise ? (
+                <RotateCw className="w-3 h-3" />
+              ) : (
+                <RotateCcw className="w-3 h-3" />
+              )}
+            </span>
+            <span
+              className={`flex-1 text-center px-1 py-[1px] rounded font-mono text-[9px] font-black tabular-nums leading-none truncate ${
+                isOut
+                  ? 'bg-[#FF3B30]/25 text-[#FF8A80]'
+                  : isDanger
+                  ? 'bg-[#FF3B30] text-white animate-pulse'
+                  : isTurnActiveNow
+                  ? 'bg-[#10D98B] text-[#0A1913]'
+                  : 'bg-white/10 text-[#CBD5E1]'
+              }`}
+            >
+              {isOut
+                ? t('OUT', '出局')
+                : isTurnActiveNow
+                ? isDanger
+                  ? `${timeSecs}s!`
+                  : `${t('YOU', '你')} ${timeSecs}s`
+                : `${timeSecs}s`}
+            </span>
+          </div>
+
+          {/* Optional Active Table Badge (Color / Stack / Target) */}
+          {activeTableTag && (
+            <div
+              className="w-full px-1 py-[1px] rounded font-mono text-[8.5px] font-black leading-tight text-center truncate"
+              style={{ backgroundColor: activeTableTag.bg, color: activeTableTag.fg }}
+            >
+              {activeTableTag.text}
+            </div>
+          )}
+
+          {/* Unified Me + Opponents Slim Roster Rows */}
+          <div className="w-full flex flex-col gap-[2px] max-h-[82px] overflow-y-auto arcade-scrollbar">
+            {compactPlayers.map((p) => {
+              const count = p.isMe
+                ? myHandCount
+                : typeof p.cardCount === 'number'
+                ? p.cardCount
+                : null;
+              const isUno = count === 1 || p.statusTag === 'UNO!';
+              const statStr = p.stat
+                ? translateGameText(p.stat, lang)
+                : count !== null
+                ? `${count}🃏`
+                : '';
+              const showCriticalTag =
+                isUno ||
+                p.alive === false ||
+                p.statusTone === 'danger' ||
+                p.statusTone === 'warn';
+              const tagLabel = isUno
+                ? 'UNO!'
+                : showCriticalTag && p.statusTag
+                ? translateGameText(p.statusTag, lang)
+                : null;
+
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center justify-between gap-1 px-1 py-[1px] rounded text-[9px] leading-tight min-w-0 ${
+                    p.isActive
+                      ? p.isMe
+                        ? 'bg-[#10D98B]/20 text-white'
+                        : 'bg-[#FFB800]/22 text-white'
+                      : 'text-[#CBD5E1]'
+                  } ${p.alive === false ? 'opacity-45' : ''}`}
+                >
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span
+                      aria-hidden="true"
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        p.isActive ? 'ring-1 ring-white shadow-[0_0_6px_#FFB800]' : ''
+                      }`}
+                      style={{ backgroundColor: p.colorHex }}
+                    />
+                    <span
+                      className={`truncate font-bold ${
+                        p.isMe ? 'text-white font-extrabold' : ''
+                      } ${p.alive === false ? 'line-through' : ''}`}
+                    >
+                      {p.isMe ? t('You', '你') : p.name}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-0.5 shrink-0 font-mono tabular-nums">
+                    {tagLabel && (
+                      <span
+                        className={`px-1 rounded-[3px] text-[7.5px] font-black leading-[12px] ${
+                          isUno
+                            ? 'bg-[#FF3B30] text-white animate-pulse'
+                            : getToneCls(p.statusTone)
+                        }`}
+                      >
+                        {tagLabel}
+                      </span>
+                    )}
+                    <span className="text-[8.5px] font-black text-white/95 max-w-[40px] truncate">
+                      {statStr}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </button>
       </div>
     );
   };
 
   // =========================================================================
-  // ZONE B — CENTER ARENA OVERLAY (Turn Direction Pill + Wild Color Wheel)
+  // ZONE B — CENTER ARENA OVERLAY (Wild Color Wheel + Optional Dismissible Tip; Top Clear)
   // =========================================================================
   const renderUnoCenterTableControls = () => {
-    const isClockwise = (situation?.direction ?? 1) === 1;
-    const ringHex = activeColorSpec?.ring ?? playerColorHex ?? '#00C2FF';
-
     return (
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-2">
-        {/* Top Live Turn & Direction Pill on Felt */}
-        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[#090D16]/82 border border-white/15 backdrop-blur-md shadow-lg">
-          <span
-            className="inline-flex items-center gap-1 font-mono text-[11px] font-black"
-            style={{ color: ringHex }}
-          >
-            {isClockwise ? (
-              <RotateCw className="w-3.5 h-3.5" />
-            ) : (
-              <RotateCcw className="w-3.5 h-3.5" />
-            )}
-            <span>{isClockwise ? t('CLOCKWISE', '顺时针') : t('REVERSE', '逆时针')}</span>
-          </span>
-
-          {situation?.tableBadge && (
-            <>
-              <span className="text-white/25">·</span>
-              <span
-                className="px-2 py-0.5 rounded-full font-mono text-[10px] font-black shadow-sm"
-                style={{
-                  backgroundColor: situation.tableBadge.bg,
-                  color: situation.tableBadge.fg,
-                }}
-              >
-                {translateGameText(situation.tableBadge.text, lang)}
-              </span>
-            </>
-          )}
-
-          {situation?.lastMoveText && (
-            <>
-              <span className="text-white/25 hidden sm:inline">·</span>
-              <span className="text-[11px] font-bold text-[#E5E7EB] truncate max-w-[160px] sm:max-w-[240px]">
-                {translateGameText(situation.lastMoveText, lang)}
-              </span>
-            </>
-          )}
-        </div>
-
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end p-2">
         {/* 4-Quadrant UNO Wild Color Wheel Modal directly over the Center Table when choosing Wild Color */}
         {isColorClash && cardState.awaitingColorPick && (
           <div className="pointer-events-auto my-auto flex flex-col items-center gap-2 px-4 py-3 rounded-3xl bg-[#0B0F19]/92 border-2 border-white/25 backdrop-blur-md shadow-2xl">
@@ -1266,7 +1425,7 @@ export function CardControllerDeck({
         )}
 
         {/* Bottom-of-Table Coach / Hint Pill */}
-        {coachTip ? (
+        {coachTip && (
           <div className="pointer-events-auto flex items-center gap-2 px-3 py-1 rounded-full bg-[#090D16]/88 border border-[#00C2FF]/45 text-[11px] shadow-md max-w-[92%]">
             <Sparkles className="w-3.5 h-3.5 text-[#00C2FF] shrink-0" />
             <span className="font-bold text-[#E0F2FE] truncate">{coachTip}</span>
@@ -1281,8 +1440,6 @@ export function CardControllerDeck({
               </button>
             )}
           </div>
-        ) : (
-          <div />
         )}
       </div>
     );
@@ -1299,15 +1456,17 @@ export function CardControllerDeck({
     const isTurnActiveNow = Boolean(cardState.isActionRequired || cardState.isMyTurn);
     const tableFeltBg = activeColorSpec?.feltGradient ?? DEFAULT_TABLE_FELT;
 
-    // Collapsed Hand Mode (Full Table Inspection)
+    // Collapsed Hand Mode (Full Table Inspection — Top Completely Clear)
     if (handCollapsed) {
       const overviewLine = situation?.lastMoveText
         ? translateGameText(situation.lastMoveText, lang)
         : hintText;
 
       return (
-        <div className="flex-1 flex flex-col justify-between min-h-0 relative z-10 pointer-events-none">
-          {renderUnoOpponentArc()}
+        <div className="flex-1 flex flex-col justify-end gap-1.5 min-h-0 relative z-10 pointer-events-none">
+          <div className="px-1.5 flex items-end justify-start">
+            {renderUnifiedPocketRoster(isTurnActiveNow, hintText)}
+          </div>
 
           <div className="pointer-events-auto flex items-center justify-between gap-2 px-3 py-1.5 rounded-2xl bg-[#0D1017]/94 border border-white/15 backdrop-blur-md shrink-0 shadow-xl">
             <div className="flex items-center gap-2 min-w-0">
@@ -1369,7 +1528,7 @@ export function CardControllerDeck({
       );
     }
 
-    // Full Unified UNO Mobile Card Table View
+    // Full Unified UNO Mobile Card Table View (Top Edge 100% Clear)
     return (
       <div
         className="flex-1 flex flex-col justify-between min-h-0 relative z-10 rounded-2xl overflow-hidden pointer-events-auto"
@@ -1382,194 +1541,17 @@ export function CardControllerDeck({
           </div>
         )}
 
-        {/* ZONE A: Top Opponent Arc */}
-        <div className="relative z-10 shrink-0">
-          {renderUnoOpponentArc()}
-        </div>
-
-        {/* ZONE B: Center Table Felt + Interactive UNO Deck & Discard Overlay */}
+        {/* ZONE B: Center Table Felt (Top kept completely open for upper table seats) */}
         <div className="relative z-10 flex-1 min-h-[110px] w-full overflow-hidden pointer-events-none">
           {renderUnoCenterTableControls()}
         </div>
 
-        {/* ZONE C: Bottom Card Pad — [Mini Personal Status Chip (Left)] + [All-Visible Solid Hand (Center)] + [Draw/Actions (Right)] */}
+        {/* ZONE C: Bottom Card Pad — [Unified Me + Players Roster (Left)] + [All-Visible Solid Hand (Center)] + [Draw/Actions (Right)] */}
         <div className="relative z-10 w-full shrink-0 flex flex-col justify-end bg-transparent">
           {(() => {
-            const mePlayer = situation?.players.find((p) => p.isMe) ?? null;
-            const isOut = mePlayer?.alive === false;
-            const myHandCount = cardState.hand.length;
-            const isUno = myHandCount === 1 || mePlayer?.statusTag === 'UNO!';
-            const rawStat = mePlayer?.stat ? translateGameText(mePlayer.stat, lang) : `${myHandCount}🃏`;
-            const statHasCards = rawStat.includes('🃏');
-            const myTag = isUno
-              ? 'UNO!'
-              : mePlayer?.statusTag
-              ? translateGameText(mePlayer.statusTag, lang)
-              : cardState.badgeText
-              ? translateGameText(cardState.badgeText, lang)
-              : cardState.targetRank
-              ? `${t('Tgt', '目标')}:${cardState.targetRank}`
-              : null;
-            const myTagTone = isUno
-              ? 'danger'
-              : mePlayer?.statusTone ?? 'neutral';
-            const mySubText = mePlayer?.lastAction
-              ? translateGameText(mePlayer.lastAction, lang)
-              : hintText;
-
-            const tagColorCls =
-              myTagTone === 'danger'
-                ? 'bg-[#FF3B30] text-white'
-                : myTagTone === 'warn'
-                ? 'bg-[#FFB800] text-[#14120B]'
-                : myTagTone === 'good'
-                ? 'bg-[#10D98B] text-[#0A1913]'
-                : 'bg-white/15 text-[#E5E7EB]';
-
             return (
               <div className="w-full flex items-end justify-between gap-1.5 px-1.5 pb-1.5 pt-0.5">
-                {/* Left-Bottom Minimized Personal Status Chip (All info at a glance + tap for full details) */}
-                <div className="relative shrink-0 z-40 pb-0.5">
-                  {myStatusExpanded && (
-                    <div className="absolute bottom-full left-0 mb-1.5 w-[210px] z-50 rounded-xl bg-[#0B0F19]/96 border border-white/20 p-2 shadow-2xl backdrop-blur-md text-left">
-                      <div className="flex items-center justify-between gap-1.5 pb-1 border-b border-white/10">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <PlayerAvatar
-                            avatarId={mePlayer?.avatarId || 'fox'}
-                            colorHex={mePlayer?.colorHex || playerColorHex}
-                            size="xs"
-                          />
-                          <span className="text-[11px] font-extrabold text-white truncate">
-                            {mePlayer?.name || t('You', '你')}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setMyStatusExpanded(false)}
-                          aria-label={t('Close status', '关闭状态')}
-                          className="text-[#9CA3AF] hover:text-white cursor-pointer shrink-0"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="mt-1.5 space-y-1 text-[10px] leading-snug">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[#9CA3AF]">{t('Turn', '回合')}</span>
-                          <span
-                            className={`font-mono font-black ${
-                              isDanger
-                                ? 'text-[#FF4D4F]'
-                                : isTurnActiveNow
-                                ? 'text-[#10D98B]'
-                                : 'text-white'
-                            }`}
-                          >
-                            {isOut
-                              ? t('ELIMINATED', '已出局')
-                              : isTurnActiveNow
-                              ? `${t('YOUR TURN', '你的回合')} · ${timeSecs}s`
-                              : `${situation?.activePlayerName ? `${situation.activePlayerName} · ` : ''}${timeSecs}s`}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[#9CA3AF]">{t('Stats', '状态')}</span>
-                          <span className="font-mono font-black text-white">
-                            {rawStat}
-                            {!statHasCards ? ` · ${myHandCount}🃏` : ''}
-                          </span>
-                        </div>
-                        {myTag && (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[#9CA3AF]">{t('Tag', '标记')}</span>
-                            <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] font-black ${tagColorCls}`}>
-                              {myTag}
-                            </span>
-                          </div>
-                        )}
-                        {mePlayer?.lastAction && (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[#9CA3AF] shrink-0">{t('Last', '上步')}</span>
-                            <span className="font-bold text-[#E5E7EB] text-right">
-                              {translateGameText(mePlayer.lastAction, lang)}
-                            </span>
-                          </div>
-                        )}
-                        <div className="pt-1 border-t border-white/10 text-[#CBD5E1] font-semibold">
-                          {hintText}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setMyStatusExpanded((prev) => !prev)}
-                    aria-label={t('Toggle personal status details', '查看个人状态详情')}
-                    className={`w-[86px] sm:w-[104px] rounded-xl px-1.5 py-1 border backdrop-blur-md text-left flex flex-col gap-0.5 cursor-pointer active:scale-95 transition-all ${
-                      isOut
-                        ? 'bg-[#171216]/92 border-[#FF3B30]/55 opacity-75'
-                        : isDanger
-                        ? 'bg-[#260D11]/94 border-[#FF3B30] shadow-[0_0_10px_rgba(255,59,48,0.55)]'
-                        : isTurnActiveNow
-                        ? 'bg-[#0C1D1A]/94 border-[#10D98B] shadow-[0_0_10px_rgba(16,217,139,0.4)]'
-                        : 'bg-[#0B0F18]/90 border-white/18'
-                    }`}
-                  >
-                    {/* Row 1: Tiny Avatar + Turn/Timer Badge */}
-                    <div className="flex items-center justify-between gap-1 min-w-0">
-                      <PlayerAvatar
-                        avatarId={mePlayer?.avatarId || 'fox'}
-                        colorHex={mePlayer?.colorHex || playerColorHex}
-                        size="xs"
-                        className="!w-4 !h-4 !text-[10px] !rounded-[5px] !border"
-                      />
-                      <span
-                        className={`flex-1 text-center px-1 py-[1px] rounded font-mono text-[9px] font-black tabular-nums leading-none truncate ${
-                          isOut
-                            ? 'bg-[#FF3B30]/25 text-[#FF8A80]'
-                            : isDanger
-                            ? 'bg-[#FF3B30] text-white animate-pulse'
-                            : isTurnActiveNow
-                            ? 'bg-[#10D98B] text-[#0A1913]'
-                            : 'bg-white/10 text-[#CBD5E1]'
-                        }`}
-                      >
-                        {isOut
-                          ? t('OUT', '出局')
-                          : isTurnActiveNow
-                          ? isDanger
-                            ? `${timeSecs}s!`
-                            : `${t('YOU', '你')} ${timeSecs}s`
-                          : `${timeSecs}s`}
-                      </span>
-                    </div>
-
-                    {/* Row 2: Live Personal Stat + Tag / Card Count */}
-                    <div className="flex items-center justify-between gap-1 min-w-0">
-                      <span className="font-mono text-[10px] font-black text-white tabular-nums leading-tight truncate">
-                        {rawStat}
-                      </span>
-                      {myTag ? (
-                        <span
-                          className={`px-1 py-[1px] rounded font-mono text-[8px] font-black leading-none shrink-0 max-w-[44px] truncate ${tagColorCls} ${
-                            isUno ? 'animate-pulse' : ''
-                          }`}
-                        >
-                          {myTag}
-                        </span>
-                      ) : !statHasCards ? (
-                        <span className="font-mono text-[9px] font-black text-[#FFD166] tabular-nums leading-none shrink-0">
-                          {myHandCount}🃏
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {/* Row 3: Compact State / Last Action / Active Hint */}
-                    <div className="text-[8.5px] font-bold text-[#CBD5E1] leading-tight truncate">
-                      {mySubText}
-                    </div>
-                  </button>
-                </div>
+                {renderUnifiedPocketRoster(isTurnActiveNow, hintText)}
 
                 {/* Center: Fit-All Card Fan Container (Zero horizontal scroll) */}
                 <div

@@ -269,6 +269,22 @@
   animation-iteration-count: infinite;
 }
 
+@keyframes guideSelectGlowPulse {
+  0% {
+    box-shadow: 0 6px 18px rgba(16, 217, 139, 0.28);
+  }
+  45% {
+    box-shadow: 0 0 0 4px rgba(16, 217, 139, 0.32), 0 8px 26px rgba(16, 217, 139, 0.55);
+  }
+  100% {
+    box-shadow: 0 6px 18px rgba(16, 217, 139, 0.28);
+  }
+}
+
+.guide-select-pulse {
+  animation: guideSelectGlowPulse 900ms ease-out 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card-deal-anim,
   .swatch-pop-anim,
@@ -276,7 +292,8 @@
   .frenzy-stage-1,
   .frenzy-stage-2,
   .frenzy-streak,
-  .frenzy-ember {
+  .frenzy-ember,
+  .guide-select-pulse {
     animation: none;
   }
   .card-hand-item,

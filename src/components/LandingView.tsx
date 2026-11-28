@@ -621,12 +621,12 @@ export function LandingView({
             initial={{ opacity: 0, x: -14 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.45, delay: 0.06, ease: LANDING_EASE }}
-            className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white truncate min-w-0 flex items-center gap-2.5 select-none"
+            className="font-display text-base sm:text-xl font-extrabold tracking-tight text-white min-w-0 flex items-center gap-2.5 select-none"
           >
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#FF4D2E] to-[#00C2FF] flex items-center justify-center text-white shadow-[0_0_15px_rgba(255,77,46,0.3)]">
-              <Gamepad2 className="w-4 h-4" />
+            <div className="w-8 h-8 shrink-0 rounded-xl bg-gradient-to-br from-[#FF4D2E] to-[#00C2FF] flex items-center justify-center text-white shadow-[0_0_15px_rgba(255,77,46,0.3)]">
+              <Gamepad2 className="w-4 h-4 shrink-0" />
             </div>
-            <span>{t('JoinStick Arcade', 'JoinStick 街机派对')}</span>
+            <span className="truncate">{t('JoinStick Arcade', 'JoinStick 街机派对')}</span>
           </motion.a>
 
           <motion.div
