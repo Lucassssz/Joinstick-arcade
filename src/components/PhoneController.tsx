@@ -69,6 +69,7 @@ import { DirectArenaTouchDeck, SketchNormalDeck } from './DirectArenaTouchDeck';
 import { FrenzyBannerOverlay } from './FrenzyBannerOverlay';
 import { PocketArenaCanvas } from './PocketArenaCanvas';
 import { PocketLobbyView } from './PocketLobbyView';
+import { PocketRulesBanner } from './PocketRulesBanner';
 import { PhoneMatchOutcomeOverlay } from './PhoneMatchOutcomeOverlay';
 import { RuleChatbotDrawer } from './RuleChatbotDrawer';
 import {
@@ -4859,24 +4860,38 @@ export function PhoneController({
     );
   }
 
+  const handleToggleBriefingReady = () => {
+    triggerRoomFullscreen();
+    if (me.ready) {
+      wsRef.current?.send({ type: 'player:ready', ready: false });
+      return;
+    }
+    void ensureGameRendererReady(room.selectedGameId).then((ok) => {
+      if (ok) {
+        wsRef.current?.send({ type: 'player:ready', ready: true });
+      }
+    });
+  };
+
+  const handleHostStartFromBriefing = () => {
+    void ensureGameRendererReady(room.selectedGameId).then((ok) => {
+      if (ok) {
+        wsRef.current?.send({ type: 'game:dismiss-briefing' });
+      }
+    });
+  };
+
   // =====================================================================
-  // STATE 4B: INTERACTIVE RULES BRIEFING ON PHONE (NO COUNTDOWN — TAP READY!)
+  // STATE 4B: INTERACTIVE RULES BRIEFING ON PHONE (TV MODE — TAP READY!)
   // =====================================================================
-  if (room.status === 'BRIEFING') {
+  if (room.status === 'BRIEFING' && !isPocketRoom) {
     const schema = gameMeta.controllerSchema;
     const activeSettingOpt = gameMeta.settingOptions.find(
       (opt) => opt.value === room.gameSettingValue
     );
-    const hasDistinctDescription =
-      Boolean(gameMeta.description) &&
-      gameMeta.description.trim().toLowerCase() !== gameMeta.tagline.trim().toLowerCase();
 
     return renderConnectedShell(
-      <div
-        className={`relative flex flex-col justify-between h-full w-full mx-auto min-h-0 ${
-          isPocketRoom ? 'max-w-5xl' : 'max-w-3xl'
-        }`}
-      >
+      <div className="relative flex flex-col justify-between h-full w-full mx-auto min-h-0 max-w-3xl">
         {passHostOverlay}
         <div className="flex items-center justify-between gap-3 h-9 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
@@ -4936,242 +4951,11 @@ export function PhoneController({
           </div>
         </div>
 
-        {isPocketRoom ? (
-          /* POCKET MODE BRIEFING: Full Game Rules (Left 7 cols) + Controls & Ready (Right 5 cols) */
-          <div className="flex-1 min-h-0 grid grid-cols-12 gap-2.5 my-1.5">
-            {/* Left Column: Complete Game Rules & Objective */}
-            <div className="col-span-7 min-h-0 flex flex-col rounded-xl bg-[#161B24] border border-[#283142] p-3 overflow-hidden">
-              <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[#242C3D] shrink-0">
-                <div className="flex items-center gap-1.5 min-w-0 text-[11px] font-bold text-[#00C2FF]">
-                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                  <span className="whitespace-nowrap">{t('Game Rules', '游戏规则')}</span>
-                  <span className="text-[#6B7280]" aria-hidden="true">·</span>
-                  <span className="text-[#9CA3AF] font-semibold truncate">{gameMeta.category}</span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono tabular-nums">
-                  {activeSettingOpt && (
-                    <span className="text-[#E5E7EB] font-bold">
-                      {gameMeta.settingLabel}: {activeSettingOpt.label}
-                    </span>
-                  )}
-                  {room.activeMutator !== 'normal' && (
-                    <span
-                      className="font-black"
-                      style={{ color: activeMutatorSpec.accentHex }}
-                    >
-                      · {lang === 'zh' ? activeMutatorSpec.shortTagZh : activeMutatorSpec.shortTag}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-y-auto arcade-scrollbar pt-2 pr-1 space-y-2">
-                <div>
-                  <p className="text-xs sm:text-sm font-extrabold text-white leading-snug">
-                    {gameMeta.tagline}
-                  </p>
-                  {hasDistinctDescription && (
-                    <p className="text-[11px] sm:text-xs text-[#A5AEBD] leading-relaxed mt-0.5">
-                      {gameMeta.description}
-                    </p>
-                  )}
-                </div>
-
-                {gameMeta.rules.length > 0 && (
-                  <ol className="space-y-1.5 pt-1.5 border-t border-[#222938]">
-                    {gameMeta.rules.map((rule, idx) => (
-                      <li
-                        key={idx}
-                        className="flex items-start gap-2 text-[11px] sm:text-xs text-[#E5E7EB] leading-snug"
-                      >
-                        <span
-                          className="font-mono text-[10px] font-black tabular-nums mt-0.5 shrink-0"
-                          style={{ color: gameMeta.accentHex }}
-                        >
-                          {String(idx + 1).padStart(2, '0')}.
-                        </span>
-                        <span className="flex-1">{rule}</span>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-
-                {room.activeMutator !== 'normal' && (
-                  <div className="pt-1.5 border-t border-[#222938] text-[11px] leading-snug">
-                    <span
-                      className="font-extrabold"
-                      style={{ color: activeMutatorSpec.accentHex }}
-                    >
-                      {t('Chaos Rule', '混沌规则')}:{' '}
-                      {lang === 'zh' ? activeMutatorSpec.nameZh : activeMutatorSpec.name}
-                    </span>
-                    <span className="text-[#CBD5E1]">
-                      {' '}— {lang === 'zh' ? activeMutatorSpec.descriptionZh : activeMutatorSpec.description}
-                    </span>
-                    {activeMutatorSpec.invertControls && (
-                      <p className="text-[11px] font-extrabold text-[#FF3B9A] mt-0.5">
-                        ⚠ {t('Mirror Curse active: Joystick directions are flipped!', '镜像反转生效中：本局摇杆方向上下左右反转！')}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Right Column: Controls Guide + Ready CTA */}
-            <div className="col-span-5 min-h-0 flex flex-col justify-between gap-2">
-              <div className="flex-1 min-h-0 rounded-xl bg-[#161B24] border border-[#283142] p-2.5 flex flex-col gap-1.5 overflow-y-auto arcade-scrollbar">
-                <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-[#10D98B] shrink-0">
-                  <span>{t('Controls', '操作方式')}</span>
-                  {currentPadProfile && (
-                    <span className="font-mono text-[10px] text-[#E5E7EB] truncate">
-                      {activePadMode === 'card'
-                        ? t('Pad 4 · Card Table', '4号 · 手牌台')
-                        : activePadMode === 'arrows'
-                        ? t('Pad 2 · Arrows', '2号 · 大箭头')
-                        : activePadMode === 'trackpad'
-                        ? t('Pad 3 · Swipe', '3号 · 触控滑板')
-                        : t('Pad 1 · Stick', '1号 · 摇杆')}
-                    </span>
-                  )}
-                </div>
-
-                {isCardGame ? (
-                  <p className="text-[11px] text-[#D1D5DB] leading-snug">
-                    {schema.controlTip}
-                  </p>
-                ) : (
-                  <div className="space-y-1 text-[11px]">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[#9CA3AF] shrink-0">{t('Move', '移动')}</span>
-                      <span className="font-bold text-white truncate">{schema.joystickLabel}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[#9CA3AF] shrink-0">{t('Button A', 'A 键')}</span>
-                      <span className="font-bold truncate" style={{ color: schema.actionA.colorHex }}>
-                        {schema.actionA.label} · {schema.actionA.sublabel}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[#9CA3AF] shrink-0">{t('Button B', 'B 键')}</span>
-                      <span className="font-bold truncate" style={{ color: schema.actionB.colorHex }}>
-                        {schema.actionB.label} · {schema.actionB.sublabel}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {!isCardGame && (
-                  <div className="pt-1 mt-auto">
-                    <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-[#101217] border border-[#242934]">
-                      {(
-                        [
-                          { id: 'analog', en: '1 Stick', zh: '1 摇杆' },
-                          { id: 'arrows', en: '2 Arrows', zh: '2 箭头' },
-                          { id: 'trackpad', en: '3 Swipe', zh: '3 滑控' },
-                        ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => handleSelectArcadePad(opt.id)}
-                          className={`py-1 rounded text-[10px] font-bold cursor-pointer whitespace-nowrap transition-colors ${
-                            activeArcadePad === opt.id
-                              ? 'bg-[#FF4D2E] text-white'
-                              : 'text-[#9CA3AF] hover:text-white'
-                          }`}
-                        >
-                          {t(opt.en, opt.zh)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="shrink-0 space-y-1.5">
-                {rendererLoadState === 'error' && (
-                  <div className="flex items-center justify-between gap-2 rounded-xl bg-[#3B1219] border border-[#FF4D2E]/60 px-2.5 py-1.5 text-[11px] font-bold text-[#FCA5A5]">
-                    <span className="truncate">{t('Arena load failed', '加载竞技场失败')}</span>
-                    <button
-                      type="button"
-                      onClick={() => void ensureGameRendererReady(room.selectedGameId)}
-                      className="px-2 py-0.5 rounded bg-[#FF4D2E] text-white text-[10px] font-extrabold inline-flex items-center gap-1 shrink-0 cursor-pointer"
-                    >
-                      <RefreshCw className="w-3 h-3" aria-hidden="true" />
-                      <span>{t('Retry', '重试')}</span>
-                    </button>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  disabled={rendererLoadState === 'loading'}
-                  onClick={() => {
-                    triggerRoomFullscreen();
-                    if (me.ready) {
-                      wsRef.current?.send({ type: 'player:ready', ready: false });
-                      return;
-                    }
-                    void ensureGameRendererReady(room.selectedGameId).then((ok) => {
-                      if (ok) {
-                        wsRef.current?.send({ type: 'player:ready', ready: true });
-                      }
-                    });
-                  }}
-                  className="relative tactile-btn w-full h-14 sm:h-16 rounded-2xl font-display font-extrabold text-base sm:text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-70"
-                  style={
-                    me.ready
-                      ? {
-                          backgroundColor: '#10D98B',
-                          color: '#0A1913',
-                          boxShadow: '0 4px 0 #0A915D',
-                        }
-                      : {
-                          backgroundColor: '#FF4D2E',
-                          color: '#FFFFFF',
-                          boxShadow: '0 4px 0 #B82E17',
-                        }
-                  }
-                >
-                  {rendererLoadState === 'loading' ? (
-                    <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
-                  ) : (
-                    me.ready && <Check className="w-5 h-5" />
-                  )}
-                  <span>
-                    {rendererLoadState === 'loading'
-                      ? t('Loading Arena...', '正在加载竞技场...')
-                      : me.ready
-                      ? t('Ready! Waiting...', '已准备！等待其他人')
-                      : t("I'm Ready!", '我准备好了！')}
-                  </span>
-                </button>
-
-                <p className="text-[10px] sm:text-[11px] text-center text-[#A5AEBD] leading-tight inline-flex w-full items-center justify-center gap-1.5">
-                  {me.ready && (
-                    <Loader2 className="w-3 h-3 text-[#10D98B] animate-spin shrink-0" aria-hidden="true" />
-                  )}
-                  <span className="truncate">
-                    {me.ready
-                      ? t(
-                          `Waiting for ${unreadyHumans.map((p) => p.name).join(', ') || 'everyone'}...`,
-                          `等待 ${unreadyHumans.map((p) => p.name).join('、') || '全员'} 准备...`
-                        )
-                      : t(
-                          'Read the rules — match starts when everyone is Ready!',
-                          '看完规则点准备 — 全员准备后即刻开始！'
-                        )}
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div
-            className={`flex-1 min-h-0 grid ${
-              embedded ? 'grid-cols-1 gap-2.5 my-2' : 'grid-cols-2 gap-4 my-2 items-stretch'
-            }`}
-          >
+        <div
+          className={`flex-1 min-h-0 grid ${
+            embedded ? 'grid-cols-1 gap-2.5 my-2' : 'grid-cols-2 gap-4 my-2 items-stretch'
+          }`}
+        >
             <div className="p-3.5 rounded-xl bg-[#1A1E26] border border-[#2A303D] space-y-2 overflow-y-auto arcade-scrollbar">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-[#00C2FF]">
@@ -5307,18 +5091,7 @@ export function PhoneController({
               <button
                 type="button"
                 disabled={rendererLoadState === 'loading'}
-                onClick={() => {
-                  triggerRoomFullscreen();
-                  if (me.ready) {
-                    wsRef.current?.send({ type: 'player:ready', ready: false });
-                    return;
-                  }
-                  void ensureGameRendererReady(room.selectedGameId).then((ok) => {
-                    if (ok) {
-                      wsRef.current?.send({ type: 'player:ready', ready: true });
-                    }
-                  });
-                }}
+                onClick={handleToggleBriefingReady}
                 className="relative tactile-btn w-full h-18 rounded-2xl font-display font-extrabold text-lg cursor-pointer transition-colors flex items-center justify-center gap-2 select-none disabled:opacity-70"
                 style={
                   me.ready
@@ -5366,7 +5139,6 @@ export function PhoneController({
               </p>
             </div>
           </div>
-        )}
 
         {isRoomHost ? (
           <div className="flex items-center justify-between gap-2 shrink-0">
@@ -5381,13 +5153,7 @@ export function PhoneController({
               <button
                 type="button"
                 disabled={rendererLoadState === 'loading'}
-                onClick={() => {
-                  void ensureGameRendererReady(room.selectedGameId).then((ok) => {
-                    if (ok) {
-                      wsRef.current?.send({ type: 'game:dismiss-briefing' });
-                    }
-                  });
-                }}
+                onClick={handleHostStartFromBriefing}
                 className="h-8 px-3 rounded-lg bg-[#FFB800] hover:bg-[#FFC933] text-[11px] font-extrabold text-[#14120B] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-70"
               >
                 {rendererLoadState === 'loading' && (
@@ -6212,6 +5978,28 @@ export function PhoneController({
         />
       )}
 
+      {/* Pocket Mode Slide-Out Rules Briefing Banner (overlays live arena during BRIEFING) */}
+      {useIntegratedHud && (
+        <PocketRulesBanner
+          isOpen={room.status === 'BRIEFING'}
+          gameId={room.selectedGameId}
+          gameMeta={gameMeta}
+          activeSettingLabel={activeSettingOptLive?.label ?? null}
+          activeMutator={room.activeMutator}
+          activeMutatorSpec={activeMutatorSpec}
+          isCardGame={isCardGame}
+          pocketDirectTouch={currentPadProfile?.pocketDirectTouch ?? null}
+          players={room.players}
+          meReady={me.ready}
+          isRoomHost={isRoomHost}
+          rendererLoadState={rendererLoadState}
+          tournament={activeTournament}
+          onToggleReady={handleToggleBriefingReady}
+          onRetryRenderer={() => void ensureGameRendererReady(room.selectedGameId)}
+          onHostStartNow={handleHostStartFromBriefing}
+        />
+      )}
+
       {topControlBar}
 
       {/* Minimal Top-Right Pull-Down Tab when Pocket HUD is tucked up */}
@@ -6697,7 +6485,7 @@ export function PhoneController({
                 embedded={embedded}
                 pocketOverlay={useIntegratedHud}
                 hudOpacity={hudOpacity}
-                disabled={settingsOpen}
+                disabled={settingsOpen || (useIntegratedHud && room.status === 'BRIEFING')}
                 isTurboDrift={room.selectedGameId === 'turbo-drift'}
                 onVectorChange={handleSetVector}
                 onActionDown={onActionDown}
@@ -6728,7 +6516,7 @@ export function PhoneController({
                 embedded={embedded}
                 pocketOverlay={useIntegratedHud}
                 hudOpacity={hudOpacity}
-                disabled={settingsOpen}
+                disabled={settingsOpen || (useIntegratedHud && room.status === 'BRIEFING')}
                 isTurboDrift={room.selectedGameId === 'turbo-drift'}
                 onVectorChange={handleSetVector}
                 onPulseActionA={handlePulseActionA}
