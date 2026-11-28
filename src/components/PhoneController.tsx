@@ -96,6 +96,7 @@ import {
 import { CardControllerDeck, type PocketCardSituation } from './CardControllerDeck';
 import { PhoneControllerDemo } from './PhoneControllerDemo';
 import { createRenderFxState } from '../games/renderers';
+import type { LocalPaddlePrediction } from '../games/arcadeMotion';
 import { isGameRendererReady, preloadRenderer } from '../games/rendererRegistry';
 import { arcadeAudio } from '../lib/audio';
 import {
@@ -788,6 +789,7 @@ export function PhoneController({
   const latestSnapshotRef = useRef<GameSnapshot | null>(null);
   const latestCompetitiveRef = useRef<CompetitiveSnapshot | null>(null);
   const fxRef = useRef(createRenderFxState());
+  const localPredictionRef = useRef<LocalPaddlePrediction | null>(null);
   const hasPocketSnapRef = useRef<boolean>(false);
   const lastPocketHudBumpRef = useRef<number>(0);
   const pocketAudioStartedRef = useRef<boolean>(false);
@@ -1252,6 +1254,7 @@ export function PhoneController({
     }
     autoTapPulseRef.current = false;
     if (clearAutoTap) setAutoTapPinned(false);
+    localPredictionRef.current = null;
     inputRef.current = { dx: 0, dy: 0, a: false, b: false };
     lastSentRef.current = '';
     setStickActive(false);
@@ -6139,6 +6142,7 @@ export function PhoneController({
             highlightPlayerId={me.id}
             highlightColorHex={me.color.hex}
             showYouMarker={pocketShowYouMarker}
+            localPredictionRef={localPredictionRef}
           />
           {room.status === 'COUNTDOWN' && (
             <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
@@ -6607,6 +6611,9 @@ export function PhoneController({
                 cooldownA={cdA}
                 onSendDirectInput={handleSendDirectInput}
                 onPulseActionA={handlePulseActionA}
+                onLocalPrediction={(pred) => {
+                  localPredictionRef.current = pred;
+                }}
               />
             )}
           {!useIntegratedHud &&
@@ -6653,6 +6660,7 @@ export function PhoneController({
                   highlightPlayerId={me.id}
                   highlightColorHex={me.color.hex}
                   showYouMarker={room.status === 'COUNTDOWN'}
+                  localPredictionRef={localPredictionRef}
                 />
                 <DirectArenaTouchDeck
                   mode={currentPadProfile.pocketDirectTouch}
@@ -6666,6 +6674,9 @@ export function PhoneController({
                   cooldownA={cdA}
                   onSendDirectInput={handleSendDirectInput}
                   onPulseActionA={handlePulseActionA}
+                  onLocalPrediction={(pred) => {
+                    localPredictionRef.current = pred;
+                  }}
                 />
               </div>
             ) : activeArcadePad === 'arrows' ? (

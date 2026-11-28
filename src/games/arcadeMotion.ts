@@ -158,6 +158,21 @@ export interface ArcadeMotionState {
   prevColorDroppedIds: Set<number>;
   prevLightState: string;
   ambientEmitAccum: number;
+
+  // Local input prediction (Job B: direct-touch paddles)
+  predOffsetX: number;
+  predOffsetY: number;
+  predLastPlayerX: number | null;
+  predLastPlayerY: number | null;
+}
+
+export interface LocalPaddlePrediction {
+  gameId: GameId;
+  playerId: string;
+  active: boolean;
+  targetX: number;
+  targetY: number;
+  updatedAtMs: number;
 }
 
 function createAmbientMotes(): AmbientMote[] {
@@ -209,6 +224,10 @@ export function createArcadeMotionState(): ArcadeMotionState {
     prevColorDroppedIds: new Set(),
     prevLightState: '',
     ambientEmitAccum: 0,
+    predOffsetX: 0,
+    predOffsetY: 0,
+    predLastPlayerX: null,
+    predLastPlayerY: null,
   };
 }
 
@@ -419,6 +438,10 @@ function resetForGameSwitch(st: ArcadeMotionState, gameId: GameId): void {
   st.prevHexFallingIds.clear();
   st.prevColorDroppedIds.clear();
   st.prevLightState = '';
+  st.predOffsetX = 0;
+  st.predOffsetY = 0;
+  st.predLastPlayerX = null;
+  st.predLastPlayerY = null;
 }
 
 function getRoundMarker(snap: GameSnapshot): number | string | null {
@@ -672,50 +695,114 @@ function diffSnapshotForFX(prev: GameSnapshot, curr: GameSnapshot, st: ArcadeMot
 // ============================================================
 // SUB-TICK INTERPOLATION
 // ============================================================
-interface XYPoint {
-  x: number;
-  y: number;
+type AngleFieldName = 'angle' | 'hullAngle' | 'turretAngle' | 'aimAngle' | 'rot' | 'spinAngle' | 'flipRot';
+
+interface ScalarInterpSpec {
+  key: string;
+  maxJump: number;
 }
 
-function interpPointArray<T extends XYPoint>(
+function isFiniteNum(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function wrappedAngleDiff(a: number, b: number): number {
+  let diff = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
+  if (diff < -Math.PI) diff += Math.PI * 2;
+  return Math.abs(diff);
+}
+
+function interpPointArray<T extends object>(
   prevArr: T[] | undefined,
   currArr: T[] | undefined,
   alpha: number,
-  extraAngles?: ('angle' | 'hullAngle' | 'turretAngle' | 'aimAngle' | 'rot')[]
+  extraAngles?: AngleFieldName[],
+  maxJump = 135,
+  extraScalars?: ScalarInterpSpec[]
 ): T[] | undefined {
   if (!currArr || !prevArr || currArr.length === 0 || prevArr.length === 0) return currArr;
 
   const prevById = new Map<string, T>();
-  const hasId = typeof (currArr[0] as unknown as { id?: unknown }).id === 'string';
+  const hasId = typeof (currArr[0] as { id?: unknown }).id === 'string';
   if (hasId) {
     for (const item of prevArr) {
-      const id = (item as unknown as { id?: string }).id;
+      const id = (item as { id?: string }).id;
       if (id) prevById.set(id, item);
     }
   }
 
   return currArr.map((c, idx) => {
-    const id = hasId ? (c as unknown as { id?: string }).id : undefined;
+    const id = hasId ? (c as { id?: string }).id : undefined;
     const p = id ? prevById.get(id) : prevArr[idx];
     if (!p) return c;
-    const dist = Math.hypot(c.x - p.x, c.y - p.y);
-    // Teleport / respawn guard
-    if (dist > 135) return c;
 
-    const clone: Record<string, unknown> = { ...(c as unknown as Record<string, unknown>) };
-    clone.x = lerp(p.x, c.x, alpha);
-    clone.y = lerp(p.y, c.y, alpha);
+    const pRec = p as Record<string, unknown>;
+    const cRec = c as Record<string, unknown>;
+    const hasX = isFiniteNum(pRec.x) && isFiniteNum(cRec.x);
+    const hasY = isFiniteNum(pRec.y) && isFiniteNum(cRec.y);
+
+    if (hasX && hasY) {
+      if (Math.hypot((cRec.x as number) - (pRec.x as number), (cRec.y as number) - (pRec.y as number)) > maxJump) {
+        return c;
+      }
+    } else if (hasX) {
+      if (Math.abs((cRec.x as number) - (pRec.x as number)) > maxJump) return c;
+    } else if (hasY) {
+      if (Math.abs((cRec.y as number) - (pRec.y as number)) > maxJump) return c;
+    } else if (!extraScalars && !extraAngles) {
+      return c;
+    }
+
+    let mutated = false;
+    const clone: Record<string, unknown> = { ...cRec };
+
+    if (hasX) {
+      clone.x = lerp(pRec.x as number, cRec.x as number, alpha);
+      mutated = true;
+    }
+    if (hasY) {
+      clone.y = lerp(pRec.y as number, cRec.y as number, alpha);
+      mutated = true;
+    }
 
     if (extraAngles) {
-      const pRec = p as unknown as Record<string, unknown>;
-      const cRec = c as unknown as Record<string, unknown>;
       for (const k of extraAngles) {
-        if (typeof pRec[k] === 'number' && typeof cRec[k] === 'number') {
+        if (isFiniteNum(pRec[k]) && isFiniteNum(cRec[k])) {
           clone[k] = lerpAngle(pRec[k] as number, cRec[k] as number, alpha);
+          mutated = true;
         }
       }
     }
-    return clone as unknown as T;
+
+    if (extraScalars) {
+      for (const spec of extraScalars) {
+        if (isFiniteNum(pRec[spec.key]) && isFiniteNum(cRec[spec.key])) {
+          const pv = pRec[spec.key] as number;
+          const cv = cRec[spec.key] as number;
+          if (Math.abs(cv - pv) <= spec.maxJump) {
+            clone[spec.key] = lerp(pv, cv, alpha);
+            mutated = true;
+          }
+        }
+      }
+    }
+
+    return mutated ? (clone as T) : c;
+  });
+}
+
+function interpPlayersById<T extends { id: string }>(
+  prevPlayers: T[],
+  currPlayers: T[],
+  patchFn: (prev: T, curr: T) => T | null
+): T[] {
+  if (prevPlayers.length === 0 || currPlayers.length === 0) return currPlayers;
+  const prevMap = new Map<string, T>();
+  for (const p of prevPlayers) prevMap.set(p.id, p);
+  return currPlayers.map((c) => {
+    const p = prevMap.get(c.id);
+    if (!p) return c;
+    return patchFn(p, c) ?? c;
   });
 }
 
@@ -730,25 +817,47 @@ function buildInterpolatedSnapshot(
   const pRec = prev as unknown as Record<string, unknown>;
   const cRec = curr as unknown as Record<string, unknown>;
 
+  const isGridSpaceGame =
+    curr.gameId === 'maze-chomper' ||
+    curr.gameId === 'tunnel-dig' ||
+    curr.gameId === 'turf-ribbon';
+  const playerMaxJump = isGridSpaceGame ? 2.5 : 135;
+
   if (Array.isArray(cRec.players) && Array.isArray(pRec.players)) {
     const firstP = cRec.players[0] as Record<string, unknown> | undefined;
-    if (firstP && typeof firstP.x === 'number' && typeof firstP.y === 'number') {
+    if (firstP && (isFiniteNum(firstP.x) || isFiniteNum(firstP.y))) {
       out.players = interpPointArray(
-        pRec.players as XYPoint[],
-        cRec.players as XYPoint[],
+        pRec.players as Record<string, unknown>[],
+        cRec.players as Record<string, unknown>[],
         alpha,
-        ['angle', 'hullAngle', 'turretAngle', 'aimAngle']
+        ['angle', 'hullAngle', 'turretAngle', 'aimAngle', 'rot', 'spinAngle', 'flipRot'],
+        playerMaxJump,
+        [
+          { key: 'z', maxJump: 135 },
+          { key: 'zHeight', maxJump: 135 },
+          { key: 'clawDepth', maxJump: 0.35 },
+        ]
       );
     }
   }
 
   // Common moving entity arrays
-  const entityKeys: { key: string; angles?: ('angle' | 'rot')[] }[] = [
+  const entityKeys: {
+    key: string;
+    angles?: AngleFieldName[];
+    scalars?: ScalarInterpSpec[];
+    requireId?: boolean;
+  }[] = [
+    // Legacy covered arrays
     { key: 'bullets' },
     { key: 'shells' },
     { key: 'orbs' },
     { key: 'bolts' },
-    { key: 'meteors', angles: ['angle'] },
+    {
+      key: 'meteors',
+      angles: ['angle'],
+      scalars: [{ key: 'progress', maxJump: 0.35 }],
+    },
     { key: 'drones', angles: ['angle'] },
     { key: 'crabs', angles: ['angle'] },
     { key: 'items', angles: ['rot'] },
@@ -757,52 +866,801 @@ function buildInterpolatedSnapshot(
     { key: 'bonusBalls' },
     { key: 'extraPucks' },
     { key: 'waveProjectiles', angles: ['angle'] },
+    // Extended ID-backed / fixed-slot moving arrays
+    { key: 'fireballs', requireId: true },
+    { key: 'nets', requireId: true },
+    { key: 'shards', requireId: true },
+    { key: 'hazards', requireId: true },
+    { key: 'stars', requireId: true },
+    { key: 'ingredients', requireId: true },
+    { key: 'prizes', requireId: true },
+    { key: 'creeps', requireId: true },
+    { key: 'enemies', requireId: true },
+    { key: 'gems', requireId: true },
+    { key: 'threats', requireId: true },
+    { key: 'planes', angles: ['angle'], requireId: true },
+    { key: 'trains', requireId: true },
+    { key: 'fish', requireId: true },
+    { key: 'fruits', requireId: true },
+    { key: 'feathers', requireId: true },
+    { key: 'obstacles', angles: ['angle'], requireId: true },
+    { key: 'platforms', requireId: true },
+    { key: 'collectibles', requireId: true },
+    { key: 'marbles', requireId: true },
+    { key: 'projectiles', requireId: true },
+    { key: 'buckets', requireId: true },
+    { key: 'coins', requireId: true },
+    { key: 'aliens', requireId: true },
+    { key: 'barrels', requireId: true },
+    { key: 'targets', requireId: true },
+    { key: 'bombs', requireId: true },
+    { key: 'anvils', requireId: true, scalars: [{ key: 'progress', maxJump: 0.35 }] },
+    { key: 'pucks' }, // air-hockey-neo (1 fixed puck) & carrom-arena (id-backed)
+    { key: 'stones', requireId: true },
+    { key: 'pitches', requireId: true },
+    { key: 'notes', requireId: true },
+    { key: 'neutrals', requireId: true },
+    { key: 'gustRings', requireId: true },
   ];
 
   for (const ek of entityKeys) {
-    if (Array.isArray(cRec[ek.key]) && Array.isArray(pRec[ek.key])) {
+    const cArr = cRec[ek.key];
+    const pArr = pRec[ek.key];
+    if (Array.isArray(cArr) && Array.isArray(pArr) && cArr.length > 0 && pArr.length > 0) {
+      if (ek.requireId && typeof (cArr[0] as { id?: unknown }).id !== 'string') {
+        continue;
+      }
       out[ek.key] = interpPointArray(
-        pRec[ek.key] as XYPoint[],
-        cRec[ek.key] as XYPoint[],
+        pArr as Record<string, unknown>[],
+        cArr as Record<string, unknown>[],
         alpha,
-        ek.angles
+        ek.angles,
+        135,
+        ek.scalars
       );
     }
   }
 
-  // Single ball / puck
-  if (curr.gameId === 'turbo-striker' && prev.gameId === 'turbo-striker') {
-    const d = Math.hypot(curr.ball.x - prev.ball.x, curr.ball.y - prev.ball.y);
-    if (d < 135) {
-      out.ball = {
-        ...curr.ball,
-        x: lerp(prev.ball.x, curr.ball.x, alpha),
-        y: lerp(prev.ball.y, curr.ball.y, alpha),
-      };
+  // Game-specific single objects, 1D/normalized coordinates, nested arrays & cameras
+  switch (curr.gameId) {
+    case 'turbo-striker': {
+      if (prev.gameId !== 'turbo-striker') break;
+      const d = Math.hypot(curr.ball.x - prev.ball.x, curr.ball.y - prev.ball.y);
+      if (d < 135) {
+        out.ball = {
+          ...curr.ball,
+          x: lerp(prev.ball.x, curr.ball.x, alpha),
+          y: lerp(prev.ball.y, curr.ball.y, alpha),
+        };
+      }
+      break;
     }
-  }
 
-  if (curr.gameId === 'hyper-pong' && prev.gameId === 'hyper-pong') {
-    const d = Math.hypot(curr.puck.x - prev.puck.x, curr.puck.y - prev.puck.y);
-    if (d < 135) {
-      out.puck = {
-        ...curr.puck,
-        x: lerp(prev.puck.x, curr.puck.x, alpha),
-        y: lerp(prev.puck.y, curr.puck.y, alpha),
-      };
+    case 'hyper-pong': {
+      if (prev.gameId !== 'hyper-pong') break;
+      const d = Math.hypot(curr.puck.x - prev.puck.x, curr.puck.y - prev.puck.y);
+      if (d < 135) {
+        out.puck = {
+          ...curr.puck,
+          x: lerp(prev.puck.x, curr.puck.x, alpha),
+          y: lerp(prev.puck.y, curr.puck.y, alpha),
+        };
+      }
+      break;
     }
-  }
 
-  // Side-scroller smoothness in GravityFlip
-  if (curr.gameId === 'gravity-flip' && prev.gameId === 'gravity-flip') {
-    out.scrollX = lerp(prev.scrollX, curr.scrollX, alpha);
-    out.obstacles = interpPointArray(prev.obstacles, curr.obstacles, alpha);
-    out.coins = interpPointArray(prev.coins, curr.coins, alpha);
-    out.gates = interpPointArray(prev.gates, curr.gates, alpha);
-    out.pickups = interpPointArray(prev.pickups, curr.pickups, alpha);
+    case 'gravity-flip': {
+      if (prev.gameId !== 'gravity-flip') break;
+      if (Math.abs(curr.scrollX - prev.scrollX) < 135) {
+        out.scrollX = lerp(prev.scrollX, curr.scrollX, alpha);
+      }
+      out.obstacles = interpPointArray(prev.obstacles, curr.obstacles, alpha);
+      out.coins = interpPointArray(prev.coins, curr.coins, alpha);
+      out.gates = interpPointArray(prev.gates, curr.gates, alpha);
+      out.pickups = interpPointArray(prev.pickups, curr.pickups, alpha);
+      break;
+    }
+
+    case 'volley-smash': {
+      if (prev.gameId !== 'volley-smash') break;
+      const d = Math.hypot(curr.ball.x - prev.ball.x, curr.ball.y - prev.ball.y);
+      if (d < 135) {
+        out.ball = {
+          ...curr.ball,
+          x: lerp(prev.ball.x, curr.ball.x, alpha),
+          y: lerp(prev.ball.y, curr.ball.y, alpha),
+          z: Math.abs(curr.ball.z - prev.ball.z) < 135 ? lerp(prev.ball.z, curr.ball.z, alpha) : curr.ball.z,
+          targetX:
+            Math.abs(curr.ball.targetX - prev.ball.targetX) < 135
+              ? lerp(prev.ball.targetX, curr.ball.targetX, alpha)
+              : curr.ball.targetX,
+          targetY:
+            Math.abs(curr.ball.targetY - prev.ball.targetY) < 135
+              ? lerp(prev.ball.targetY, curr.ball.targetY, alpha)
+              : curr.ball.targetY,
+        };
+      }
+      break;
+    }
+
+    case 'rattan-volley': {
+      if (prev.gameId !== 'rattan-volley') break;
+      const d = Math.hypot(curr.ball.x - prev.ball.x, curr.ball.y - prev.ball.y);
+      if (d < 135) {
+        out.ball = {
+          ...curr.ball,
+          x: lerp(prev.ball.x, curr.ball.x, alpha),
+          y: lerp(prev.ball.y, curr.ball.y, alpha),
+          rot: lerpAngle(prev.ball.rot, curr.ball.rot, alpha),
+        };
+      }
+      break;
+    }
+
+    case 'disc-arena': {
+      if (prev.gameId !== 'disc-arena') break;
+      const d = Math.hypot(curr.disc.x - prev.disc.x, curr.disc.y - prev.disc.y);
+      if (d < 135) {
+        out.disc = {
+          ...curr.disc,
+          x: lerp(prev.disc.x, curr.disc.x, alpha),
+          y: lerp(prev.disc.y, curr.disc.y, alpha),
+        };
+      }
+      break;
+    }
+
+    case 'badminton-smash': {
+      if (prev.gameId !== 'badminton-smash') break;
+      const d = Math.hypot(curr.shuttle.x - prev.shuttle.x, curr.shuttle.y - prev.shuttle.y);
+      if (d < 135) {
+        out.shuttle = {
+          ...curr.shuttle,
+          x: lerp(prev.shuttle.x, curr.shuttle.x, alpha),
+          y: lerp(prev.shuttle.y, curr.shuttle.y, alpha),
+        };
+      }
+      break;
+    }
+
+    case 'carrom-arena': {
+      if (prev.gameId !== 'carrom-arena') break;
+      const d = Math.hypot(curr.striker.x - prev.striker.x, curr.striker.y - prev.striker.y);
+      if (d < 135) {
+        out.striker = {
+          ...curr.striker,
+          x: lerp(prev.striker.x, curr.striker.x, alpha),
+          y: lerp(prev.striker.y, curr.striker.y, alpha),
+        };
+      }
+      break;
+    }
+
+    case 'cannon-siege': {
+      if (prev.gameId !== 'cannon-siege') break;
+      if (curr.goldenTarget && prev.goldenTarget && Math.abs(curr.goldenTarget.y - prev.goldenTarget.y) < 60) {
+        out.goldenTarget = {
+          ...curr.goldenTarget,
+          y: lerp(prev.goldenTarget.y, curr.goldenTarget.y, alpha),
+        };
+      }
+      break;
+    }
+
+    case 'hook-shot': {
+      if (prev.gameId !== 'hook-shot') break;
+      if (curr.hooks.length > 0 && prev.hooks.length > 0) {
+        const prevByOwner = new Map(prev.hooks.map((h) => [h.ownerId, h]));
+        out.hooks = curr.hooks.map((c) => {
+          const p = prevByOwner.get(c.ownerId);
+          if (!p) return c;
+          if (Math.hypot(c.x2 - p.x2, c.y2 - p.y2) > 135) return c;
+          return {
+            ...c,
+            x1: Math.abs(c.x1 - p.x1) < 135 ? lerp(p.x1, c.x1, alpha) : c.x1,
+            y1: Math.abs(c.y1 - p.y1) < 135 ? lerp(p.y1, c.y1, alpha) : c.y1,
+            x2: lerp(p.x2, c.x2, alpha),
+            y2: lerp(p.y2, c.y2, alpha),
+          };
+        });
+      }
+      break;
+    }
+
+    case 'crown-heist': {
+      if (prev.gameId !== 'crown-heist') break;
+      if (Math.hypot(curr.crownX - prev.crownX, curr.crownY - prev.crownY) < 135) {
+        out.crownX = lerp(prev.crownX, curr.crownX, alpha);
+        out.crownY = lerp(prev.crownY, curr.crownY, alpha);
+      }
+      break;
+    }
+
+    case 'king-of-hill-neo': {
+      if (prev.gameId !== 'king-of-hill-neo') break;
+      if (Math.hypot(curr.zoneX - prev.zoneX, curr.zoneY - prev.zoneY) < 80) {
+        out.zoneX = lerp(prev.zoneX, curr.zoneX, alpha);
+        out.zoneY = lerp(prev.zoneY, curr.zoneY, alpha);
+      }
+      break;
+    }
+
+    case 'laser-jump-rope': {
+      if (prev.gameId !== 'laser-jump-rope') break;
+      if (wrappedAngleDiff(prev.beamAngle, curr.beamAngle) < 0.8) {
+        out.beamAngle = lerpAngle(prev.beamAngle, curr.beamAngle, alpha);
+      }
+      break;
+    }
+
+    case 'laser-maze-heist': {
+      if (prev.gameId !== 'laser-maze-heist') break;
+      if (prev.sweepers.length === curr.sweepers.length && curr.sweepers.length > 0) {
+        out.sweepers = curr.sweepers.map((c, idx) => {
+          const p = prev.sweepers[idx];
+          if (!p || wrappedAngleDiff(p.angle, c.angle) >= 0.8) return c;
+          return { ...c, angle: lerpAngle(p.angle, c.angle, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'laser-gauntlet': {
+      if (prev.gameId !== 'laser-gauntlet') break;
+      if (wrappedAngleDiff(prev.coreAngle, curr.coreAngle) < 0.8) {
+        out.coreAngle = lerpAngle(prev.coreAngle, curr.coreAngle, alpha);
+      }
+      if (prev.beams.length === curr.beams.length && curr.beams.length > 0) {
+        out.beams = curr.beams.map((c, idx) => {
+          const p = prev.beams[idx];
+          if (!p || wrappedAngleDiff(p.angle, c.angle) >= 0.08) return c;
+          return { ...c, angle: lerpAngle(p.angle, c.angle, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'starship-crew-chaos': {
+      if (prev.gameId !== 'starship-crew-chaos') break;
+      if (Math.hypot(curr.shipX - prev.shipX, curr.shipY - prev.shipY) < 135) {
+        out.shipX = lerp(prev.shipX, curr.shipX, alpha);
+        out.shipY = lerp(prev.shipY, curr.shipY, alpha);
+      }
+      if (wrappedAngleDiff(prev.shipAngle, curr.shipAngle) < 0.8) {
+        out.shipAngle = lerpAngle(prev.shipAngle, curr.shipAngle, alpha);
+      }
+      if (wrappedAngleDiff(prev.shieldAngle, curr.shieldAngle) < 0.8) {
+        out.shieldAngle = lerpAngle(prev.shieldAngle, curr.shieldAngle, alpha);
+      }
+      if (curr.stations.length > 0 && prev.stations.length > 0) {
+        const prevStations = new Map(prev.stations.map((s) => [s.id, s]));
+        out.stations = curr.stations.map((c) => {
+          const p = prevStations.get(c.id);
+          if (!p || Math.hypot(c.x - p.x, c.y - p.y) >= 135) return c;
+          return { ...c, x: lerp(p.x, c.x, alpha), y: lerp(p.y, c.y, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'rope-slice-physics': {
+      if (prev.gameId !== 'rope-slice-physics') break;
+      if (curr.ropes.length > 0 && prev.ropes.length > 0) {
+        const prevRopes = new Map(prev.ropes.map((r) => [r.id, r]));
+        out.ropes = curr.ropes.map((c) => {
+          const p = prevRopes.get(c.id);
+          if (!p || Math.hypot(c.orbX - p.orbX, c.orbY - p.orbY) >= 135) return c;
+          return { ...c, orbX: lerp(p.orbX, c.orbX, alpha), orbY: lerp(p.orbY, c.orbY, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'frog-crossing': {
+      if (prev.gameId !== 'frog-crossing') break;
+      if (prev.lanes.length === curr.lanes.length && curr.lanes.length > 0) {
+        out.lanes = curr.lanes.map((lane, lIdx) => {
+          const pLane = prev.lanes[lIdx];
+          if (!pLane || pLane.items.length !== lane.items.length || lane.items.length === 0) return lane;
+          return {
+            ...lane,
+            items: lane.items.map((item, iIdx) => {
+              const pItem = pLane.items[iIdx];
+              if (!pItem || Math.abs(item.x - pItem.x) >= 135) return item;
+              return { ...item, x: lerp(pItem.x, item.x, alpha) };
+            }),
+          };
+        });
+      }
+      break;
+    }
+
+    case 'coin-dozer': {
+      if (prev.gameId !== 'coin-dozer') break;
+      if (Math.abs(curr.pusherY - prev.pusherY) < 60) {
+        out.pusherY = lerp(prev.pusherY, curr.pusherY, alpha);
+      }
+      break;
+    }
+
+    case 'hoop-blitz': {
+      if (prev.gameId !== 'hoop-blitz') break;
+      if (Math.abs(curr.hoopX - prev.hoopX) < 80) {
+        out.hoopX = lerp(prev.hoopX, curr.hoopX, alpha);
+      }
+      break;
+    }
+
+    case 'penalty-duel': {
+      if (prev.gameId !== 'penalty-duel') break;
+      if (Math.abs(curr.keeperX - prev.keeperX) < 80) {
+        out.keeperX = lerp(prev.keeperX, curr.keeperX, alpha);
+      }
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.aimX - p.aimX) < 135 ? { ...c, aimX: lerp(p.aimX, c.aimX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'archery-wind': {
+      if (prev.gameId !== 'archery-wind') break;
+      if (Math.hypot(curr.targetX - prev.targetX, curr.targetY - prev.targetY) < 80) {
+        out.targetX = lerp(prev.targetX, curr.targetX, alpha);
+        out.targetY = lerp(prev.targetY, curr.targetY, alpha);
+      }
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) => {
+        if (Math.hypot(c.aimX - p.aimX, c.aimY - p.aimY) >= 135) return null;
+        return { ...c, aimX: lerp(p.aimX, c.aimX, alpha), aimY: lerp(p.aimY, c.aimY, alpha) };
+      });
+      break;
+    }
+
+    case 'peg-fever-bounce': {
+      if (prev.gameId !== 'peg-fever-bounce') break;
+      if (Math.abs(curr.bucketX - prev.bucketX) < 80) {
+        out.bucketX = lerp(prev.bucketX, curr.bucketX, alpha);
+      }
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.aimX - p.aimX) < 135 ? { ...c, aimX: lerp(p.aimX, c.aimX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'five-second-microgames': {
+      if (prev.gameId !== 'five-second-microgames') break;
+      if (Math.hypot(curr.hazardX - prev.hazardX, curr.hazardY - prev.hazardY) < 135) {
+        out.hazardX = lerp(prev.hazardX, curr.hazardX, alpha);
+        out.hazardY = lerp(prev.hazardY, curr.hazardY, alpha);
+      }
+      break;
+    }
+
+    case 'bridge-load-stress': {
+      if (prev.gameId !== 'bridge-load-stress') break;
+      if (Math.hypot(curr.truckX - prev.truckX, curr.truckY - prev.truckY) < 135) {
+        out.truckX = lerp(prev.truckX, curr.truckX, alpha);
+        out.truckY = lerp(prev.truckY, curr.truckY, alpha);
+      }
+      break;
+    }
+
+    case 'block-hop': {
+      if (prev.gameId !== 'block-hop') break;
+      if (Math.hypot(curr.cameraX - prev.cameraX, curr.cameraY - prev.cameraY) < 135) {
+        out.cameraX = lerp(prev.cameraX, curr.cameraX, alpha);
+        out.cameraY = lerp(prev.cameraY, curr.cameraY, alpha);
+      }
+      break;
+    }
+
+    case 'platform-leap': {
+      if (prev.gameId !== 'platform-leap') break;
+      if (Math.abs(curr.cameraY - prev.cameraY) < 135) {
+        out.cameraY = lerp(prev.cameraY, curr.cameraY, alpha);
+      }
+      if (Math.abs(curr.lavaY - prev.lavaY) < 135) {
+        out.lavaY = lerp(prev.lavaY, curr.lavaY, alpha);
+      }
+      break;
+    }
+
+    case 'egg-rush': {
+      if (prev.gameId !== 'egg-rush') break;
+      if (Math.abs(curr.cameraX - prev.cameraX) < 135) {
+        out.cameraX = lerp(prev.cameraX, curr.cameraX, alpha);
+      }
+      break;
+    }
+
+    case 'sky-climb': {
+      if (prev.gameId !== 'sky-climb') break;
+      if (Math.abs(curr.cameraY - prev.cameraY) < 135) {
+        out.cameraY = lerp(prev.cameraY, curr.cameraY, alpha);
+      }
+      break;
+    }
+
+    case 'flappy-flock': {
+      if (prev.gameId !== 'flappy-flock') break;
+      if (Math.abs(curr.scrollX - prev.scrollX) < 135) {
+        out.scrollX = lerp(prev.scrollX, curr.scrollX, alpha);
+      }
+      if (prev.pipes.length === curr.pipes.length && curr.pipes.length > 0) {
+        out.pipes = curr.pipes.map((c, idx) => {
+          const p = prev.pipes[idx];
+          if (!p || Math.abs(c.x - p.x) >= 135) return c;
+          return { ...c, x: lerp(p.x, c.x, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'hill-torque-climb': {
+      if (prev.gameId !== 'hill-torque-climb') break;
+      if (Math.abs(curr.cameraX - prev.cameraX) < 135) {
+        out.cameraX = lerp(prev.cameraX, curr.cameraX, alpha);
+      }
+      if (prev.terrainHeights.length === curr.terrainHeights.length && curr.terrainHeights.length > 0) {
+        out.terrainHeights = curr.terrainHeights.map((c, idx) => {
+          const p = prev.terrainHeights[idx];
+          if (!p || Math.abs(c.y - p.y) >= 135) return c;
+          return { ...c, y: lerp(p.y, c.y, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'three-lane-metro': {
+      if (prev.gameId !== 'three-lane-metro') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.zHeight - p.zHeight) < 135 ? { ...c, zHeight: lerp(p.zHeight, c.zHeight, alpha) } : null
+      );
+      if (curr.obstacles.length > 0 && prev.obstacles.length > 0) {
+        const prevObs = new Map(prev.obstacles.map((o) => [o.id, o]));
+        out.obstacles = curr.obstacles.map((c) => {
+          const p = prevObs.get(c.id);
+          if (!p || Math.abs(c.z - p.z) >= 0.25) return c;
+          return { ...c, z: lerp(p.z, c.z, alpha) };
+        });
+      }
+      break;
+    }
+
+    case 'slither-feast': {
+      if (prev.gameId !== 'slither-feast') break;
+      if (curr.snakes.length > 0 && prev.snakes.length > 0) {
+        const prevSnakes = new Map(prev.snakes.map((s) => [s.id, s]));
+        out.snakes = curr.snakes.map((c) => {
+          const p = prevSnakes.get(c.id);
+          if (!p || !c.alive || !p.alive) return c;
+          const nextAngle = wrappedAngleDiff(p.angle, c.angle) < 0.8 ? lerpAngle(p.angle, c.angle, alpha) : c.angle;
+          let nextSegments = c.segments;
+          if (
+            c.segments.length > 0 &&
+            p.segments.length > 0 &&
+            Math.hypot(c.segments[0].x - p.segments[0].x, c.segments[0].y - p.segments[0].y) < 40
+          ) {
+            nextSegments = c.segments.map((seg, idx) => {
+              const pSeg = p.segments[idx];
+              if (!pSeg) return seg;
+              const dist = Math.hypot(seg.x - pSeg.x, seg.y - pSeg.y);
+              if (dist > (idx === 0 ? 40 : 25)) return seg;
+              return { x: lerp(pSeg.x, seg.x, alpha), y: lerp(pSeg.y, seg.y, alpha) };
+            });
+          }
+          return { ...c, angle: nextAngle, segments: nextSegments };
+        });
+      }
+      break;
+    }
+
+    case 'seesaw-balance': {
+      if (prev.gameId !== 'seesaw-balance') break;
+      if (Math.abs(curr.beamTilt - prev.beamTilt) < 0.25) {
+        out.beamTilt = lerp(prev.beamTilt, curr.beamTilt, alpha);
+      }
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) => ({
+        ...c,
+        offset: Math.abs(c.offset - p.offset) < 135 ? lerp(p.offset, c.offset, alpha) : c.offset,
+        z: Math.abs(c.z - p.z) < 135 ? lerp(p.z, c.z, alpha) : c.z,
+      }));
+      break;
+    }
+
+    case 'wobbly-timber-pull': {
+      if (prev.gameId !== 'wobbly-timber-pull') break;
+      if (Math.abs(curr.tiltAngle - prev.tiltAngle) < 0.2) {
+        out.tiltAngle = lerp(prev.tiltAngle, curr.tiltAngle, alpha);
+      }
+      break;
+    }
+
+    case 'tilt-labyrinth': {
+      if (prev.gameId !== 'tilt-labyrinth') break;
+      if (Math.abs(curr.tiltX - prev.tiltX) < 0.5) {
+        out.tiltX = lerp(prev.tiltX, curr.tiltX, alpha);
+      }
+      if (Math.abs(curr.tiltY - prev.tiltY) < 0.5) {
+        out.tiltY = lerp(prev.tiltY, curr.tiltY, alpha);
+      }
+      break;
+    }
+
+    case 'tug-titan': {
+      if (prev.gameId !== 'tug-titan') break;
+      if (Math.abs(curr.ropeOffset - prev.ropeOffset) < 0.3) {
+        out.ropeOffset = lerp(prev.ropeOffset, curr.ropeOffset, alpha);
+      }
+      break;
+    }
+
+    case 'stack-tower': {
+      if (prev.gameId !== 'stack-tower') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.moverX - p.moverX) < 0.25 ? { ...c, moverX: lerp(p.moverX, c.moverX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'home-run-derby': {
+      if (prev.gameId !== 'home-run-derby') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.laneX - p.laneX) < 135 ? { ...c, laneX: lerp(p.laneX, c.laneX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'skee-roll': {
+      if (prev.gameId !== 'skee-roll') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.aimX - p.aimX) < 135 ? { ...c, aimX: lerp(p.aimX, c.aimX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'pin-strike': {
+      if (prev.gameId !== 'pin-strike') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.laneX - p.laneX) < 135 ? { ...c, laneX: lerp(p.laneX, c.laneX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'canoe-sprint': {
+      if (prev.gameId !== 'canoe-sprint') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) => ({
+        ...c,
+        laneX: Math.abs(c.laneX - p.laneX) < 135 ? lerp(p.laneX, c.laneX, alpha) : c.laneX,
+        dist: Math.abs(c.dist - p.dist) < 135 ? lerp(p.dist, c.dist, alpha) : c.dist,
+      }));
+      break;
+    }
+
+    case 'hotpot-rush': {
+      if (prev.gameId !== 'hotpot-rush') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.hypot(c.tipX - p.tipX, c.tipY - p.tipY) < 135
+          ? { ...c, tipX: lerp(p.tipX, c.tipX, alpha), tipY: lerp(p.tipY, c.tipY, alpha) }
+          : null
+      );
+      break;
+    }
+
+    case 'melon-merge': {
+      if (prev.gameId !== 'melon-merge') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) => ({
+        ...c,
+        aimX: Math.abs(c.aimX - p.aimX) < 0.25 ? lerp(p.aimX, c.aimX, alpha) : c.aimX,
+        fruits: interpPointArray(p.fruits, c.fruits, alpha, undefined, 0.35) ?? c.fruits,
+      }));
+      break;
+    }
+
+    case 'curling-masters': {
+      if (prev.gameId !== 'curling-masters') break;
+      out.players = interpPlayersById(prev.players, curr.players, (p, c) =>
+        Math.abs(c.aimX - p.aimX) < 135 ? { ...c, aimX: lerp(p.aimX, c.aimX, alpha) } : null
+      );
+      break;
+    }
+
+    case 'maze-chomper': {
+      if (prev.gameId !== 'maze-chomper') break;
+      out.ghosts = interpPointArray(prev.ghosts, curr.ghosts, alpha, undefined, 2.5);
+      break;
+    }
+
+    case 'tunnel-dig': {
+      if (prev.gameId !== 'tunnel-dig') break;
+      out.boulders = interpPointArray(prev.boulders, curr.boulders, alpha, undefined, 2.5);
+      out.monsters = interpPointArray(prev.monsters, curr.monsters, alpha, undefined, 2.5);
+      break;
+    }
+
+    case 'chain-gang-climb': {
+      if (prev.gameId !== 'chain-gang-climb') break;
+      if (isFiniteNum(curr.scrollY) && isFiniteNum(prev.scrollY) && Math.abs(curr.scrollY - prev.scrollY) < 135) {
+        out.scrollY = lerp(prev.scrollY, curr.scrollY, alpha);
+      }
+      break;
+    }
+
+    case 'bubble-pop-arc': {
+      if (prev.gameId !== 'bubble-pop-arc') break;
+      if (isFiniteNum(curr.ceilingY) && isFiniteNum(prev.ceilingY) && Math.abs(curr.ceilingY - prev.ceilingY) < 40) {
+        out.ceilingY = lerp(prev.ceilingY, curr.ceilingY, alpha);
+      }
+      if (prev.shots.length === curr.shots.length && curr.shots.length > 0) {
+        out.shots = interpPointArray(prev.shots, curr.shots, alpha, undefined, 135);
+      }
+      break;
+    }
   }
 
   return out as unknown as GameSnapshot;
+}
+
+const PADDLE_PREDICTION_GAMES = new Set<GameId>([
+  'hyper-pong',
+  'air-hockey-neo',
+  'ping-pong-pro',
+]);
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function resetPaddlePrediction(st: ArcadeMotionState): void {
+  st.predOffsetX = 0;
+  st.predOffsetY = 0;
+  st.predLastPlayerX = null;
+  st.predLastPlayerY = null;
+}
+
+function getPaddlePredictionBounds(
+  gameId: GameId,
+  player: Record<string, unknown>
+): { minX: number; maxX: number; minY: number; maxY: number; maxOffset: number } | null {
+  const px = player.x as number;
+  const py = player.y as number;
+  if (gameId === 'hyper-pong') {
+    const r = isFiniteNum(player.radius) ? player.radius : 34;
+    const isLeft = player.side === 'left';
+    return {
+      minX: isLeft ? 54 + r : 600 + r + 8,
+      maxX: isLeft ? 600 - r - 8 : 1200 - 54 - r,
+      minY: 54 + r,
+      maxY: 720 - 54 - r,
+      maxOffset: Math.max(48, r * 2),
+    };
+  }
+  if (gameId === 'air-hockey-neo') {
+    const isLeft = player.side === 'left';
+    return {
+      minX: isLeft ? 92 : 600 + 34,
+      maxX: isLeft ? 600 - 34 : 1200 - 92,
+      minY: 98,
+      maxY: 720 - 98,
+      maxOffset: 64,
+    };
+  }
+  if (gameId === 'ping-pong-pro') {
+    const isVert = player.side === 'left' || player.side === 'right';
+    return isVert
+      ? { minX: px, maxX: px, minY: 150, maxY: 590, maxOffset: 96 }
+      : { minX: 220, maxX: 980, minY: py, maxY: py, maxOffset: 96 };
+  }
+  return null;
+}
+
+function applyLocalPaddlePrediction(
+  snap: GameSnapshot,
+  rawSnap: GameSnapshot,
+  st: ArcadeMotionState,
+  localPrediction: LocalPaddlePrediction | null | undefined,
+  nowMs: number
+): GameSnapshot {
+  if (!PADDLE_PREDICTION_GAMES.has(snap.gameId)) {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  const rawStatus = (rawSnap as unknown as { status?: unknown }).status;
+  if (typeof rawStatus === 'string' && rawStatus !== 'PLAYING') {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  if (!localPrediction || localPrediction.gameId !== snap.gameId || !localPrediction.playerId) {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  const snapRec = snap as unknown as { players?: Record<string, unknown>[] };
+  if (!Array.isArray(snapRec.players)) {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  const meIdx = snapRec.players.findIndex((p) => p.id === localPrediction.playerId);
+  if (meIdx < 0) {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  const me = snapRec.players[meIdx];
+  if (
+    me.alive === false ||
+    me.eliminated === true ||
+    !isFiniteNum(me.x) ||
+    !isFiniteNum(me.y)
+  ) {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  const bounds = getPaddlePredictionBounds(snap.gameId, me);
+  if (!bounds) {
+    resetPaddlePrediction(st);
+    return snap;
+  }
+
+  // Zero predicted offset immediately on serve / goal reset teleports
+  if (st.predLastPlayerX !== null && st.predLastPlayerY !== null) {
+    if (Math.hypot(me.x - st.predLastPlayerX, me.y - st.predLastPlayerY) > 135) {
+      st.predOffsetX = 0;
+      st.predOffsetY = 0;
+    }
+  }
+  st.predLastPlayerX = me.x;
+  st.predLastPlayerY = me.y;
+
+  const spring = 1 - Math.exp(-16 * st.dt);
+  const ageMs = nowMs - localPrediction.updatedAtMs;
+  const isTouchFresh =
+    localPrediction.active &&
+    ageMs >= -50 &&
+    ageMs <= 150 &&
+    isFiniteNum(localPrediction.targetX) &&
+    isFiniteNum(localPrediction.targetY);
+
+  if (isTouchFresh) {
+    const clampedTargetX = clampNum(localPrediction.targetX, bounds.minX, bounds.maxX);
+    const clampedTargetY = clampNum(localPrediction.targetY, bounds.minY, bounds.maxY);
+    let desiredOffX = clampedTargetX - me.x;
+    let desiredOffY = clampedTargetY - me.y;
+    const dist = Math.hypot(desiredOffX, desiredOffY);
+    if (dist > bounds.maxOffset) {
+      const scale = bounds.maxOffset / dist;
+      desiredOffX *= scale;
+      desiredOffY *= scale;
+    }
+    st.predOffsetX = lerp(st.predOffsetX, desiredOffX, spring);
+    st.predOffsetY = lerp(st.predOffsetY, desiredOffY, spring);
+  } else {
+    st.predOffsetX = lerp(st.predOffsetX, 0, spring);
+    st.predOffsetY = lerp(st.predOffsetY, 0, spring);
+    if (Math.hypot(st.predOffsetX, st.predOffsetY) < 0.25) {
+      st.predOffsetX = 0;
+      st.predOffsetY = 0;
+    }
+  }
+
+  if (st.predOffsetX === 0 && st.predOffsetY === 0) {
+    return snap;
+  }
+
+  const nextPlayers = snapRec.players.slice();
+  nextPlayers[meIdx] = {
+    ...me,
+    x: clampNum(me.x + st.predOffsetX, bounds.minX, bounds.maxX),
+    y: clampNum(me.y + st.predOffsetY, bounds.minY, bounds.maxY),
+  };
+
+  return {
+    ...(snap as unknown as Record<string, unknown>),
+    players: nextPlayers,
+  } as unknown as GameSnapshot;
 }
 
 // ============================================================
@@ -810,7 +1668,8 @@ function buildInterpolatedSnapshot(
 // ============================================================
 export function prepareArcadeFrame(
   rawSnap: GameSnapshot,
-  st: ArcadeMotionState
+  st: ArcadeMotionState,
+  localPrediction?: LocalPaddlePrediction | null
 ): GameSnapshot {
   const nowMs = performance.now();
   const rawDt = st.lastFrameMs > 0 ? (nowMs - st.lastFrameMs) / 1000 : 1 / 60;
@@ -820,6 +1679,7 @@ export function prepareArcadeFrame(
 
   if (CARD_GAME_IDS.has(rawSnap.gameId)) {
     st.activeGameId = rawSnap.gameId;
+    resetPaddlePrediction(st);
     return rawSnap;
   }
 
@@ -856,10 +1716,12 @@ export function prepareArcadeFrame(
       : 1;
   st.interpAlpha = interpAlpha;
 
-  const snap =
+  const interpSnap =
     st.prevSnap && st.currSnap
       ? buildInterpolatedSnapshot(st.prevSnap, st.currSnap, interpAlpha)
       : rawSnap;
+
+  const snap = applyLocalPaddlePrediction(interpSnap, rawSnap, st, localPrediction, nowMs);
 
   // Step 60fps per-player squash, flash, and dash/boost afterimages
   const dt = st.dt;

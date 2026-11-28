@@ -11,6 +11,7 @@ import {
   type MiniGolfProSnapshot,
 } from '../shared/types';
 import type { PocketDirectTouchMode } from '../shared/padProfiles';
+import type { LocalPaddlePrediction } from '../games/arcadeMotion';
 import { useLanguage } from '../lib/i18n';
 
 const SKETCH_BRUSH_COLORS = ['#111827', '#EF4444', '#2563EB', '#10B981', '#F59E0B', '#9333EA'];
@@ -27,6 +28,7 @@ interface DirectArenaTouchDeckProps {
   cooldownA: number;
   onSendDirectInput: (patch: Partial<ControllerInput>, force?: boolean) => void;
   onPulseActionA: () => void;
+  onLocalPrediction?: (pred: LocalPaddlePrediction | null) => void;
 }
 
 const GOLF_CANCEL_PULL = 22;
@@ -145,6 +147,7 @@ export function DirectArenaTouchDeck({
   cooldownA,
   onSendDirectInput,
   onPulseActionA,
+  onLocalPrediction,
 }: DirectArenaTouchDeckProps) {
   const { t } = useLanguage();
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -203,6 +206,7 @@ export function DirectArenaTouchDeck({
     activePointerIdRef.current = null;
     isDraggingRef.current = false;
     lastMoveWorldRef.current = null;
+    onLocalPrediction?.(null);
     onSendDirectInput(
       {
         dx: 0,
@@ -461,6 +465,14 @@ export function DirectArenaTouchDeck({
       } else {
         lastTapAtRef.current = now;
       }
+      onLocalPrediction?.({
+        gameId,
+        playerId,
+        active: true,
+        targetX: world.x,
+        targetY: world.y,
+        updatedAtMs: performance.now(),
+      });
       onSendDirectInput(
         {
           dx: 0,
@@ -568,6 +580,16 @@ export function DirectArenaTouchDeck({
         }
       }
       lastMoveWorldRef.current = { x: world.x, y: world.y, at: now };
+      if (mode === 'paddle-drag') {
+        onLocalPrediction?.({
+          gameId,
+          playerId,
+          active: true,
+          targetX: world.x,
+          targetY: world.y,
+          updatedAtMs: now,
+        });
+      }
       onSendDirectInput(
         {
           dx: 0,
@@ -646,6 +668,16 @@ export function DirectArenaTouchDeck({
         true
       );
     } else {
+      if (mode === 'paddle-drag') {
+        onLocalPrediction?.({
+          gameId,
+          playerId,
+          active: false,
+          targetX: world.x,
+          targetY: world.y,
+          updatedAtMs: performance.now(),
+        });
+      }
       onSendDirectInput(
         {
           dx: 0,

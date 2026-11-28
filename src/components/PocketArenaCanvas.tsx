@@ -10,6 +10,7 @@ import {
 } from '../shared/types';
 import { useLanguage } from '../lib/i18n';
 import { renderGameSnapshot, type RenderFxState } from '../games/renderers';
+import type { LocalPaddlePrediction } from '../games/arcadeMotion';
 import { isGameRendererReady, preloadRenderer } from '../games/rendererRegistry';
 
 interface PocketArenaCanvasProps {
@@ -26,6 +27,7 @@ interface PocketArenaCanvasProps {
   highlightColorHex?: string;
   showYouMarker?: boolean;
   hidePlayerId?: string | null;
+  localPredictionRef?: MutableRefObject<LocalPaddlePrediction | null>;
 }
 
 function drawYouBeacon(
@@ -213,6 +215,7 @@ export function PocketArenaCanvas({
   highlightColorHex = '#10D98B',
   showYouMarker = false,
   hidePlayerId = null,
+  localPredictionRef,
 }: PocketArenaCanvasProps) {
   const { lang, t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -307,6 +310,8 @@ export function PocketArenaCanvas({
         if (!hasSnapshot) setHasSnapshot(true);
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          fxRef.current.localPrediction =
+            status === 'PLAYING' ? (localPredictionRef?.current ?? null) : null;
           renderGameSnapshot(
             ctx,
             snap,

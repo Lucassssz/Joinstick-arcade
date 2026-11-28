@@ -78,6 +78,7 @@ import {
   getMotionTime,
   getPodFx,
   getSpringBannerAnim,
+  LocalPaddlePrediction,
   prepareArcadeFrame,
   setActiveArcadeMotion,
 } from './arcadeMotion';
@@ -90,6 +91,7 @@ export interface RenderFxState {
   shake: number;
   arcade: ArcadeMotionState;
   card: JuicyTableFX;
+  localPrediction?: LocalPaddlePrediction | null;
 }
 
 export function createRenderFxState(): RenderFxState {
@@ -1078,7 +1080,7 @@ export function renderGameSnapshot(
       )?.name ?? null)
     : null;
   setHiddenTablePlayer(hidePlayerId, hiddenPlayerName);
-  const snap = prepareArcadeFrame(rawSnap, fx.arcade);
+  const snap = prepareArcadeFrame(rawSnap, fx.arcade, fx.localPrediction);
   setActiveArcadeMotion(fx.arcade);
   setActiveCardFx(fx.card);
   ctx.save();
