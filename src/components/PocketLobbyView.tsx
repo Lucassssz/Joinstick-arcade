@@ -1037,6 +1037,8 @@ export function PocketLobbyView({
         isOpen={ruleBotOpen}
         onClose={() => setRuleBotOpen(false)}
         activeGameId={room.selectedGameId}
+        roomPlayerCount={room.players.length}
+        onSelectGame={isRoomHost ? (gameId) => onSelectGame(gameId) : undefined}
       />
     </div>
   );

@@ -6,10 +6,32 @@ import {
   getGameMeta,
   HERITAGE_GAME_IDS,
 } from '../shared/games';
-import { GAME_FRENZY_PERKS } from '../shared/modifiers';
+import { GAME_FRENZY_PERKS, isGameSuitableForPlayerCount } from '../shared/modifiers';
 import { getPadTutorialGuide } from '../shared/padProfiles';
 import type { GameId, GameMetadata } from '../shared/types';
 import { getLocalizedGameMeta, type Language } from './i18n';
+
+export type Intent =
+  | 'greeting'
+  | 'recommend'
+  | 'compare'
+  | 'controls'
+  | 'settings'
+  | 'players'
+  | 'rules'
+  | 'unknown';
+
+export interface RuleBotSession {
+  lastGameId?: GameId | null;
+  lastCandidates?: GameId[];
+  lastIntent?: Intent | null;
+  partySize?: number | null;
+}
+
+export interface RuleBotOptions {
+  canSelectGame?: boolean;
+  roomPlayerCount?: number | null;
+}
 
 export interface RuleBotSuggestedGame {
   id: GameId;
@@ -29,7 +51,7 @@ export interface RuleBotChoice {
   label: string;
   sublabel?: string;
   accentHex?: string;
-  action: 'menu' | 'category' | 'topic' | 'open-picker' | 'prompt';
+  action: 'menu' | 'category' | 'topic' | 'open-picker' | 'prompt' | 'select-game';
   value: string;
 }
 
@@ -42,6 +64,7 @@ export interface RuleBotReply {
   suggestedGames?: RuleBotSuggestedGame[];
   choices?: RuleBotChoice[];
   quickPrompts: string[];
+  session?: RuleBotSession;
 }
 
 interface GuideTopicEntry {
@@ -1139,7 +1162,152 @@ function matchGuideTopic(query: string): GuideTopicEntry | null {
   return bestScore >= 2 ? best : null;
 }
 
-type Intent = 'greeting' | 'recommend' | 'controls' | 'settings' | 'players' | 'rules' | 'unknown';
+function isComparisonQuery(query: string): boolean {
+  const norm = normalizeText(query);
+  const compact = compactText(query);
+  if (
+    /(which (?:one |game )?(?:is )?(?:faster|shorter|quicker|simpler|easier|better for beginners|best for beginners|longer|harder)|compare (?:them|these|those|both)|difference between|\bvs\b|easier to learn|quickest|shortest|simplest)/.test(
+      norm
+    )
+  ) {
+    return true;
+  }
+  return /(哪个|哪款|哪一个|哪部).*(更快|更短|更简单|更容易|更适合新手|新手|好上手|更久|比较|对比|区别)|(对比一下|比较一下|有什么区别|怎么选)/.test(
+    compact
+  );
+}
+
+function hasPronounFollowUpCue(query: string): boolean {
+  const norm = normalizeText(query);
+  const compact = compactText(query);
+  if (/\b(its|it|that game|this game|and the|what about)\b/.test(norm)) {
+    return true;
+  }
+  return /(它的|它|这款|那款|这个游戏|那个游戏)/.test(compact);
+}
+
+function parseOrdinalIndex(query: string): number | null {
+  const norm = normalizeText(query);
+  const compact = compactText(query);
+
+  const enWordMap: Record<string, number> = {
+    first: 0,
+    '1st': 0,
+    second: 1,
+    '2nd': 1,
+    third: 2,
+    '3rd': 2,
+    fourth: 3,
+    '4th': 3,
+    fifth: 4,
+    '5th': 4,
+    sixth: 5,
+    '6th': 5,
+  };
+
+  for (const [token, idx] of Object.entries(enWordMap)) {
+    const re = new RegExp(`\\b(?:the\\s+)?${token}(?:\\s+one|\\s+game|\\s+option)?\\b`, 'i');
+    if (re.test(norm)) return idx;
+  }
+
+  const enOpt = norm.match(/\b(?:option|choice|number|pick|game)\s*([1-6])\b/i);
+  if (enOpt) return Number(enOpt[1]) - 1;
+
+  const hashOpt = query.match(/(?:^|\s)#([1-6])\b/);
+  if (hashOpt) return Number(hashOpt[1]) - 1;
+
+  const zhOrdMap: Record<string, number> = {
+    '一': 0,
+    '1': 0,
+    '二': 1,
+    '两': 1,
+    '2': 1,
+    '三': 2,
+    '3': 2,
+    '四': 3,
+    '4': 3,
+    '五': 4,
+    '5': 4,
+    '六': 5,
+    '6': 5,
+  };
+  const zhMatch = compact.match(/第([一二两三四五六1-6])(?:个|款|项|条)?/);
+  if (zhMatch) {
+    const mapped = zhOrdMap[zhMatch[1]];
+    if (mapped !== undefined) return mapped;
+  }
+
+  if (/^(?:that one|that|那个|那一个|那款)$/.test(compact)) {
+    return 0;
+  }
+
+  return null;
+}
+
+const WORD_TO_NUM: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  '一': 1,
+  '二': 2,
+  '两': 2,
+  '三': 3,
+  '四': 4,
+  '五': 5,
+  '六': 6,
+  '七': 7,
+  '八': 8,
+};
+
+function parsePartySizeToken(tok: string): number | null {
+  const lower = tok.toLowerCase();
+  if (/^[1-8]$/.test(lower)) return Number(lower);
+  return WORD_TO_NUM[lower] ?? null;
+}
+
+function parsePartySizeFromQuery(query: string): number | null {
+  const norm = normalizeText(query);
+  const compact = compactText(query);
+
+  // Explicit ranges like "3-4 players", "5-8 players", "3-4人", "5-8人"
+  const enRange = query.match(/\b([1-8])\s*[-–~]\s*([1-8])\s*(?:players?|people|persons?|p)\b/i);
+  if (enRange) return Math.min(8, Math.max(1, Number(enRange[2])));
+  const zhRange = query.match(/([1-8])\s*[-–~到至]\s*([1-8])\s*(?:个)?(?:人|玩家)/);
+  if (zhRange) return Math.min(8, Math.max(1, Number(zhRange[2])));
+
+  // Explicit solo / duo words
+  if (/\b(solo|1p|single player|one player|alone)\b/.test(norm) || /(单人|独自|一个人|1个人|1人)/.test(compact)) {
+    return 1;
+  }
+  if (
+    /\b(2p|couple|duel|double)\b/.test(norm) ||
+    /(双人|两人|两个人|2个人|2人)/.test(compact)
+  ) {
+    return 2;
+  }
+
+  // English "<num> people/players" or "we are <num>" / "for <num>"
+  const enCountAfter = norm.match(
+    /\b([1-8]|one|two|three|four|five|six|seven|eight)\s*(?:players?|people|persons?|friends?|of us|p)\b/
+  );
+  if (enCountAfter) return parsePartySizeToken(enCountAfter[1]);
+
+  const enVerbNum = norm.match(
+    /\b(?:we are|there are|got|have|for|with|group of|party of)\s+([1-8]|one|two|three|four|five|six|seven|eight)\b/
+  );
+  if (enVerbNum) return parsePartySizeToken(enVerbNum[1]);
+
+  // Chinese "<num>个人" / "<num>人" / "<num>位"
+  const zhCount = compact.match(/([一二两三四五六七八1-8])(?:个|位)?(?:人|玩家|朋友)/);
+  if (zhCount) return parsePartySizeToken(zhCount[1]);
+
+  return null;
+}
 
 function detectIntent(query: string): Intent {
   const norm = normalizeText(query);
@@ -1151,6 +1319,9 @@ function detectIntent(query: string): Intent {
     )
   ) {
     return 'greeting';
+  }
+  if (isComparisonQuery(query)) {
+    return 'compare';
   }
   if (
     /(recommend|suggest|best game|fun game|what game|which game|list.*game|find.*game|any.*game|推荐|好玩|有什么游戏|找游戏|哪些游戏|适合几人)/.test(
@@ -1186,8 +1357,27 @@ function detectIntent(query: string): Intent {
   return 'unknown';
 }
 
-function buildGameFollowUpChoices(meta: GameMetadata, lang: Language, currentIntent: Intent): RuleBotChoice[] {
+function buildSelectGameChoice(meta: GameMetadata, lang: Language): RuleBotChoice {
+  return {
+    id: `select_${meta.id}`,
+    label: lang === 'zh' ? '就玩这个' : 'Select this game',
+    sublabel: lang === 'zh' ? `将房间切换为 ${meta.name}` : `Switch room to ${meta.name}`,
+    accentHex: '#10D98B',
+    action: 'select-game',
+    value: meta.id,
+  };
+}
+
+function buildGameFollowUpChoices(
+  meta: GameMetadata,
+  lang: Language,
+  currentIntent: Intent,
+  canSelectGame = false
+): RuleBotChoice[] {
   const list: RuleBotChoice[] = [];
+  if (canSelectGame) {
+    list.push(buildSelectGameChoice(meta, lang));
+  }
   if (currentIntent !== 'rules') {
     list.push({
       id: `g_rules_${meta.id}`,
@@ -1226,7 +1416,12 @@ function buildGameFollowUpChoices(meta: GameMetadata, lang: Language, currentInt
   return list;
 }
 
-function buildGameRulesReply(item: IndexedGame, lang: Language, intent: Intent): RuleBotReply {
+function buildGameRulesReply(
+  item: IndexedGame,
+  lang: Language,
+  intent: Intent,
+  canSelectGame = false
+): RuleBotReply {
   const meta = lang === 'zh' ? item.zh : item.en;
   const padGuide = getPadTutorialGuide(item.id, lang);
   const schema = meta.controllerSchema;
@@ -1239,7 +1434,8 @@ function buildGameRulesReply(item: IndexedGame, lang: Language, intent: Intent):
     { label: padGuide.padShortLabel },
   ];
 
-  const choices = buildGameFollowUpChoices(meta, lang, intent === 'unknown' ? 'rules' : intent);
+  const effectiveIntent: Intent = intent === 'unknown' || intent === 'compare' ? 'rules' : intent;
+  const choices = buildGameFollowUpChoices(meta, lang, effectiveIntent, canSelectGame);
   const quickPrompts =
     lang === 'zh'
       ? ['返回主菜单', '搜索其他游戏', '自定义手柄']
@@ -1383,7 +1579,213 @@ function buildGameRulesReply(item: IndexedGame, lang: Language, intent: Intent):
   };
 }
 
-function buildRecommendationReply(query: string, lang: Language, activeGameId?: GameId | null): RuleBotReply {
+function getDefaultSettingDisplay(meta: GameMetadata): { label: string; value: number; isTimeSeconds: boolean } {
+  const opt = meta.settingOptions.find((o) => o.value === meta.defaultSetting);
+  const optLabel = opt ? opt.label : String(meta.defaultSetting);
+  const isTimeSeconds =
+    /(time|timer|duration|秒|时长)/i.test(meta.settingLabel) || /\b\d+\s*s\b|秒/i.test(optLabel);
+  return {
+    label: optLabel,
+    value: meta.defaultSetting,
+    isTimeSeconds,
+  };
+}
+
+function buildCompareReply(
+  candidateIds: GameId[],
+  query: string,
+  lang: Language
+): RuleBotReply {
+  const index = getGameIndex();
+  const items = candidateIds
+    .map((id) => index.find((g) => g.id === id))
+    .filter((g): g is IndexedGame => Boolean(g))
+    .slice(0, 6);
+
+  if (items.length < 2) {
+    return buildWelcomeReply(null, lang);
+  }
+
+  const norm = normalizeText(query);
+  const compact = compactText(query);
+  const asksFaster =
+    /(faster|shorter|quicker|quickest|shortest)/.test(norm) || /(更快|更短)/.test(compact);
+  const asksBeginner =
+    /(simpler|easier|beginner|simplest)/.test(norm) ||
+    /(更简单|更容易|更适合新手|新手|好上手)/.test(compact);
+
+  const summaries = items.map((item) => {
+    const meta = lang === 'zh' ? item.zh : item.en;
+    const def = getDefaultSettingDisplay(meta);
+    return {
+      item,
+      meta,
+      genreLabel: genreLabelFor(item.genre, lang),
+      def,
+    };
+  });
+
+  const bullets = summaries.map(({ meta, genreLabel, def }) =>
+    lang === 'zh'
+      ? `${meta.name}：${genreLabel}（${meta.category}）· ${meta.minPlayers}–${meta.maxPlayers}人（${meta.playerModeLabel}）· 默认${meta.settingLabel}：${def.label}`
+      : `${meta.name}: ${genreLabel} (${meta.category}) · ${meta.minPlayers}–${meta.maxPlayers} players (${meta.playerModeLabel}) · Default ${meta.settingLabel}: ${def.label}`
+  );
+
+  let pickSentence = '';
+
+  if (asksFaster) {
+    const allTimed = summaries.every((s) => s.def.isTimeSeconds);
+    const sameSettingUnit = summaries.every(
+      (s) => s.meta.settingLabel.toLowerCase() === summaries[0].meta.settingLabel.toLowerCase()
+    );
+
+    if (allTimed || sameSettingUnit) {
+      const sorted = [...summaries].sort((a, b) => a.def.value - b.def.value);
+      const minVal = sorted[0].def.value;
+      const maxVal = sorted[sorted.length - 1].def.value;
+      if (minVal === maxVal) {
+        pickSentence =
+          lang === 'zh'
+            ? `这些游戏的默认「${sorted[0].meta.settingLabel}」均为 ${sorted[0].def.label}，单局预设时长/回合数相同，以下为你列出各自参数对比：`
+            : `All of these share the same default ${sorted[0].meta.settingLabel} (${sorted[0].def.label}), so their preset match lengths do not differ—here is each summary:`;
+      } else {
+        const winners = sorted.filter((s) => s.def.value === minVal);
+        const winnerNames = winners.map((w) => w.meta.name).join(' / ');
+        pickSentence =
+          lang === 'zh'
+            ? `按默认「${winners[0].meta.settingLabel}」数值最短来看，推荐选 ${winnerNames}（默认 ${winners[0].def.label}）。`
+            : `Based on the shortest default ${winners[0].meta.settingLabel}, pick ${winnerNames} (default ${winners[0].def.label}).`;
+      }
+    } else {
+      const hasArcade = summaries.filter((s) => s.item.genre === 'arcade');
+      const hasTimed = summaries.filter((s) => s.def.isTimeSeconds);
+      if (hasTimed.length > 0 && hasTimed.length < summaries.length) {
+        const fastestTimed = [...hasTimed].sort((a, b) => a.def.value - b.def.value)[0];
+        pickSentence =
+          lang === 'zh'
+            ? `这几款游戏的设置单位不完全相同（有按秒计时，也有按回合/目标计分），不能直接横向换算；其中带固定倒计时的 ${fastestTimed.meta.name}（默认 ${fastestTimed.def.label}）节奏最可控。`
+            : `These games use different setting units (seconds vs. rounds/points), so their presets are not directly comparable; ${fastestTimed.meta.name} uses a fixed timer (default ${fastestTimed.def.label}).`;
+      } else if (hasArcade.length > 0 && hasArcade.length < summaries.length) {
+        const arcNames = hasArcade.map((s) => s.meta.name).join(' / ');
+        pickSentence =
+          lang === 'zh'
+            ? `这几款默认设置单位不同，不能直接比数值；若按类型来看，街机类的 ${arcNames} 为即时动作节奏。`
+            : `Their default settings use different units; by genre, Arcade pick ${arcNames} runs real-time action rounds.`;
+      } else {
+        pickSentence =
+          lang === 'zh'
+            ? '这些游戏的默认设置单位不同，在规则数据上无法直接判定哪款更快，以下是各款真实参数对比：'
+            : 'Their default settings use different units, so catalog fields do not meaningfully separate which is shorter—here are their summaries:';
+      }
+    }
+  } else if (asksBeginner) {
+    const arcadeOnes = summaries.filter((s) => s.item.genre === 'arcade');
+    const soloOnes = summaries.filter((s) => s.meta.suitableFor.includes('solo'));
+    if (arcadeOnes.length > 0 && arcadeOnes.length < summaries.length) {
+      const names = arcadeOnes.map((s) => s.meta.name).join(' / ');
+      pickSentence =
+        lang === 'zh'
+          ? `若按类型区分，街机类的 ${names} 属于即时直觉操作（相对棋盘/卡牌回合规则更少），以下列出全部真实参数对比：`
+          : `By genre, Arcade pick ${names} uses direct real-time controls rather than turn-based Board/Card rules—here are the summaries:`;
+    } else if (soloOnes.length > 0 && soloOnes.length < summaries.length) {
+      const names = soloOnes.map((s) => s.meta.name).join(' / ');
+      pickSentence =
+        lang === 'zh'
+          ? `这两组游戏的类型与默认设置相近；其中支持单人（1P）的 ${names} 可以先独自试玩熟悉规则。`
+          : `Their genres and default settings are similar; ${names} supports Solo (1P) if you want to practice first.`;
+    } else {
+      pickSentence =
+        lang === 'zh'
+          ? '这些游戏在同类型与默认设置上没有明显的难易差异，以下列出各款真实参数供你挑选：'
+          : 'The catalog fields (genre, player range, and default settings) do not meaningfully separate their beginner friendliness—here are both summaries:';
+    }
+  } else {
+    pickSentence =
+      lang === 'zh'
+        ? '以下是这几款候选游戏基于真实目录数据的参数对比：'
+        : 'Here is a side-by-side comparison using each game’s catalog settings:';
+  }
+
+  return {
+    title: lang === 'zh' ? '候选游戏参数对比' : 'Game Comparison',
+    text: pickSentence,
+    bullets,
+    suggestedGames: items.map((g) => toSuggestedGame(g, lang)),
+    choices: [
+      ...items.slice(0, 3).map((item, idx) => {
+        const meta = lang === 'zh' ? item.zh : item.en;
+        return {
+          id: `cmp_pick_${item.id}`,
+          label: lang === 'zh' ? `查看第${idx + 1}款：${meta.name}` : `View #${idx + 1}: ${meta.name}`,
+          accentHex: meta.accentHex,
+          action: 'prompt' as const,
+          value: lang === 'zh' ? `${meta.name} 怎么玩？` : `How to play ${meta.name}`,
+        };
+      }),
+      mainMenuChoice(lang),
+    ],
+    quickPrompts:
+      lang === 'zh'
+        ? ['第一个怎么玩？', '第二个怎么玩？', '返回主菜单']
+        : ['The first one', 'The second one', 'Main menu'],
+  };
+}
+
+function buildPartySizeQuestionReply(lang: Language): RuleBotReply {
+  return {
+    title: lang === 'zh' ? '你们一共有几位玩家？' : 'How many players are playing?',
+    text:
+      lang === 'zh'
+        ? '告诉我当前人数，我就只推荐人数完全适配的游戏（绝不推荐坐不下的游戏）：'
+        : 'Pick your group size first so I only recommend games that fit every player:',
+    choices: [
+      {
+        id: 'size_1',
+        label: lang === 'zh' ? '单人' : 'Solo',
+        sublabel: lang === 'zh' ? '1 位玩家' : '1 player',
+        accentHex: '#00C2FF',
+        action: 'prompt',
+        value: lang === 'zh' ? '推荐1个人玩的游戏' : 'Recommend games for 1 player',
+      },
+      {
+        id: 'size_2',
+        label: lang === 'zh' ? '2人' : '2 players',
+        sublabel: lang === 'zh' ? '双人对决' : 'Head-to-head',
+        accentHex: '#10D98B',
+        action: 'prompt',
+        value: lang === 'zh' ? '推荐2个人玩的游戏' : 'Recommend games for 2 players',
+      },
+      {
+        id: 'size_4',
+        label: lang === 'zh' ? '3–4人' : '3–4 players',
+        sublabel: lang === 'zh' ? '小聚会人数' : 'Small group',
+        accentHex: '#FFB800',
+        action: 'prompt',
+        value: lang === 'zh' ? '推荐4个人玩的游戏' : 'Recommend games for 4 players',
+      },
+      {
+        id: 'size_8',
+        label: lang === 'zh' ? '5–8人' : '5–8 players',
+        sublabel: lang === 'zh' ? '大型派对满房' : 'Big party group',
+        accentHex: '#A855F7',
+        action: 'prompt',
+        value: lang === 'zh' ? '推荐8个人玩的游戏' : 'Recommend games for 8 players',
+      },
+    ],
+    quickPrompts:
+      lang === 'zh'
+        ? ['推荐卡牌游戏', '推荐棋盘游戏', '推荐街机游戏']
+        : ['Recommend card games', 'Recommend board games', 'Recommend arcade games'],
+  };
+}
+
+function buildRecommendationReply(
+  query: string,
+  lang: Language,
+  activeGameId?: GameId | null,
+  session?: RuleBotSession,
+  roomPlayerCount?: number | null
+): { reply: RuleBotReply; resolvedPartySize: number | null | undefined } {
   const norm = normalizeText(query);
   const index = getGameIndex();
 
@@ -1396,78 +1798,172 @@ function buildRecommendationReply(query: string, lang: Language, activeGameId?: 
   const wantsMulti = /(party|multiplayer|group|friends|3\+|4 player|多人|聚会|派对|朋友)/.test(norm);
   const wantsSimilar = /(similar|like this|more like|类似|差不多)/.test(norm);
 
-  let pool = index;
+  const queryPartySize = parsePartySizeFromQuery(query);
+  const sessionPartySize =
+    session && session.partySize && session.partySize >= 1 ? session.partySize : null;
+  const roomSize =
+    roomPlayerCount && roomPlayerCount >= 1 ? Math.min(8, Math.round(roomPlayerCount)) : null;
+
+  const effectivePartySize = queryPartySize ?? sessionPartySize ?? roomSize ?? null;
+  const hasGenreOrMoodHint =
+    wantsCard ||
+    wantsBoard ||
+    wantsArcade ||
+    wantsHeritage ||
+    wantsSimilar ||
+    wantsSolo ||
+    wantsTwo ||
+    wantsMulti;
+
+  // When NO party size is known and NO genre/mood hint is given, ask party size first
+  if (effectivePartySize == null && !hasGenreOrMoodHint) {
+    return {
+      reply: buildPartySizeQuestionReply(lang),
+      resolvedPartySize: session?.partySize ?? null,
+    };
+  }
+
+  // First filter any pool by player suitability whenever party size is known
+  let partyPool = index;
+  if (effectivePartySize != null) {
+    const suitable = index.filter(
+      (g) =>
+        isGameSuitableForPlayerCount(g.en, effectivePartySize) &&
+        g.en.minPlayers <= effectivePartySize &&
+        g.en.maxPlayers >= effectivePartySize
+    );
+    if (suitable.length > 0) {
+      partyPool = suitable;
+    }
+  }
+
+  let pool = partyPool;
   let filterLabelEn = 'Popular Party Picks';
   let filterLabelZh = '热门派对推荐';
 
   if (wantsSimilar && activeGameId) {
     const activeItem = index.find((g) => g.id === activeGameId);
     if (activeItem) {
-      pool = index.filter((g) => g.id !== activeGameId && g.genre === activeItem.genre);
+      const sim = partyPool.filter((g) => g.id !== activeGameId && g.genre === activeItem.genre);
+      if (sim.length > 0) pool = sim;
       filterLabelEn = `More ${genreLabelFor(activeItem.genre, 'en')} Games Like ${activeItem.en.name}`;
       filterLabelZh = `和 ${activeItem.zh.name} 类似的${genreLabelFor(activeItem.genre, 'zh')}游戏`;
     }
   } else {
     if (wantsCard) {
-      pool = pool.filter((g) => g.genre === 'card');
+      const cardPool = pool.filter((g) => g.genre === 'card');
+      if (cardPool.length > 0) pool = cardPool;
       filterLabelEn = 'Card Games';
       filterLabelZh = '热门卡牌游戏';
     } else if (wantsBoard) {
-      pool = pool.filter((g) => g.genre === 'board');
+      const boardPool = pool.filter((g) => g.genre === 'board');
+      if (boardPool.length > 0) pool = boardPool;
       filterLabelEn = 'Board & Tabletop Games';
       filterLabelZh = '热门棋盘桌游';
     } else if (wantsArcade) {
-      pool = pool.filter((g) => g.genre === 'arcade');
+      const arcadePool = pool.filter((g) => g.genre === 'arcade');
+      if (arcadePool.length > 0) pool = arcadePool;
       filterLabelEn = 'Fast Arcade Games';
       filterLabelZh = '爽快街机游戏';
     } else if (wantsHeritage) {
-      pool = pool.filter((g) => g.isHeritage);
+      const heritagePool = pool.filter((g) => g.isHeritage);
+      if (heritagePool.length > 0) pool = heritagePool;
       filterLabelEn = 'Malaysian & Heritage Classics';
       filterLabelZh = '马来西亚与传统经典';
     }
 
-    if (wantsSolo) {
-      const soloFiltered = pool.filter((g) => g.en.suitableFor.includes('solo') || g.en.minPlayers <= 1);
-      if (soloFiltered.length > 0) pool = soloFiltered;
-      filterLabelEn = `${filterLabelEn} (Solo)`;
-      filterLabelZh = `${filterLabelZh}（单人可玩）`;
-    } else if (wantsTwo) {
-      const twoFiltered = pool.filter((g) => g.en.suitableFor.includes('double'));
-      if (twoFiltered.length > 0) pool = twoFiltered;
-      filterLabelEn = `${filterLabelEn} (2 Players)`;
-      filterLabelZh = `${filterLabelZh}（双人对战）`;
-    } else if (wantsMulti) {
-      const multiFiltered = pool.filter((g) => g.en.suitableFor.includes('multiplayer'));
-      if (multiFiltered.length > 0) pool = multiFiltered;
-      filterLabelEn = `${filterLabelEn} (Multiplayer)`;
-      filterLabelZh = `${filterLabelZh}（多人聚会）`;
+    if (effectivePartySize == null) {
+      if (wantsSolo) {
+        const soloFiltered = pool.filter((g) => g.en.suitableFor.includes('solo') || g.en.minPlayers <= 1);
+        if (soloFiltered.length > 0) pool = soloFiltered;
+        filterLabelEn = `${filterLabelEn} (Solo)`;
+        filterLabelZh = `${filterLabelZh}（单人可玩）`;
+      } else if (wantsTwo) {
+        const twoFiltered = pool.filter((g) => g.en.suitableFor.includes('double'));
+        if (twoFiltered.length > 0) pool = twoFiltered;
+        filterLabelEn = `${filterLabelEn} (2 Players)`;
+        filterLabelZh = `${filterLabelZh}（双人对战）`;
+      } else if (wantsMulti) {
+        const multiFiltered = pool.filter((g) => g.en.suitableFor.includes('multiplayer'));
+        if (multiFiltered.length > 0) pool = multiFiltered;
+        filterLabelEn = `${filterLabelEn} (Multiplayer)`;
+        filterLabelZh = `${filterLabelZh}（多人聚会）`;
+      }
     }
+  }
+
+  if (effectivePartySize != null) {
+    filterLabelEn = `${filterLabelEn} (${effectivePartySize}P)`;
+    filterLabelZh = `${filterLabelZh}（${effectivePartySize}人）`;
   }
 
   const picks = pool.slice(0, 6);
   const suggestedGames = picks.map((p) => toSuggestedGame(p, lang));
 
+  const partyContextText =
+    effectivePartySize != null
+      ? roomSize === effectivePartySize && queryPartySize == null
+        ? lang === 'zh'
+          ? `针对你们房间目前的 ${effectivePartySize} 位玩家，找到 ${pool.length} 款人数完全匹配的游戏！点击任意一款查看规则与操作：`
+          : `For your ${effectivePartySize} players in the room, found ${pool.length} games that fit everyone! Tap any game below to view its rules & controls:`
+        : lang === 'zh'
+        ? `已按 ${effectivePartySize} 人筛选出 ${pool.length} 款全员可玩的游戏！点击任意游戏立刻查看规则与操作：`
+        : `Filtered for ${effectivePartySize} ${effectivePartySize === 1 ? 'player' : 'players'} — found ${pool.length} games that seat everyone! Tap any game below for rules & controls:`
+      : lang === 'zh'
+      ? `在 ${GAME_CATALOG.length} 款游戏中为你找到 ${pool.length} 款匹配项目！点击任意游戏立刻查看规则与操作：`
+      : `Found ${pool.length} matching games across our ${GAME_CATALOG.length}-game catalog! Tap any game below to view its rules & controls:`;
+
   return {
-    title: lang === 'zh' ? filterLabelZh : filterLabelEn,
-    text:
-      lang === 'zh'
-        ? `在 ${GAME_CATALOG.length} 款游戏中为你找到 ${pool.length} 款匹配项目！点击任意游戏立刻查看规则与操作：`
-        : `Found ${pool.length} matching games across our ${GAME_CATALOG.length}-game catalog! Tap any game below to view its rules & controls:`,
-    suggestedGames,
-    choices: [
-      {
-        id: 'rec_picker',
-        label: lang === 'zh' ? `搜索全部 ${GAME_CATALOG.length} 款` : `Browse All ${GAME_CATALOG.length} Games`,
-        accentHex: '#00C2FF',
-        action: 'open-picker',
-        value: 'picker',
-      },
-      mainMenuChoice(lang),
-    ],
-    quickPrompts:
-      lang === 'zh'
-        ? ['推荐卡牌游戏', '推荐棋盘游戏', '推荐马来西亚经典', '返回主菜单']
-        : ['Recommend card games', 'Recommend board games', 'Malaysian classics', 'Main menu'],
+    resolvedPartySize: queryPartySize ?? session?.partySize ?? (roomSize ?? null),
+    reply: {
+      title: lang === 'zh' ? filterLabelZh : filterLabelEn,
+      text: partyContextText,
+      suggestedGames,
+      choices: [
+        {
+          id: 'rec_picker',
+          label: lang === 'zh' ? `搜索全部 ${GAME_CATALOG.length} 款` : `Browse All ${GAME_CATALOG.length} Games`,
+          accentHex: '#00C2FF',
+          action: 'open-picker',
+          value: 'picker',
+        },
+        mainMenuChoice(lang),
+      ],
+      quickPrompts:
+        lang === 'zh'
+          ? ['哪一款更快？', '第二个怎么玩？', '推荐卡牌游戏', '返回主菜单']
+          : ['Which is faster?', 'The second one', 'Recommend card games', 'Main menu'],
+    },
+  };
+}
+
+function finalizeReplySession(
+  reply: RuleBotReply,
+  intent: Intent,
+  prevSession?: RuleBotSession,
+  partySizeOverride?: number | null
+): RuleBotReply {
+  const nextCandidates =
+    reply.suggestedGames && reply.suggestedGames.length >= 2
+      ? reply.suggestedGames.map((g) => g.id)
+      : prevSession?.lastCandidates;
+
+  const nextLastGameId =
+    reply.resolvedGameId !== undefined
+      ? reply.resolvedGameId
+      : prevSession?.lastGameId ?? null;
+
+  const nextPartySize =
+    partySizeOverride !== undefined ? partySizeOverride : prevSession?.partySize ?? null;
+
+  return {
+    ...reply,
+    session: {
+      lastGameId: nextLastGameId,
+      lastCandidates: nextCandidates,
+      lastIntent: intent,
+      partySize: nextPartySize,
+    },
   };
 }
 
@@ -1493,64 +1989,156 @@ export function buildWelcomeReply(activeGameId: GameId | null | undefined, lang:
 export function resolveGuideChoice(
   choice: RuleBotChoice,
   lang: Language,
-  contextGameId?: GameId | null
+  contextGameId?: GameId | null,
+  session?: RuleBotSession,
+  options?: RuleBotOptions
 ): RuleBotReply {
   if (choice.action === 'menu') {
-    return buildWelcomeReply(contextGameId, lang);
+    const welcome = buildWelcomeReply(contextGameId, lang);
+    return {
+      ...welcome,
+      session: {
+        lastGameId: contextGameId ?? null,
+        lastCandidates: [],
+        lastIntent: 'greeting',
+        partySize: session?.partySize ?? null,
+      },
+    };
   }
   if (choice.action === 'category') {
-    return buildCategoryReply(choice.value as GuideCategoryId, lang);
+    return finalizeReplySession(
+      buildCategoryReply(choice.value as GuideCategoryId, lang),
+      'unknown',
+      session
+    );
   }
   if (choice.action === 'topic') {
     const found = GUIDE_TOPICS.find((t) => t.id === choice.value);
-    if (found) return buildTopicReply(found, lang);
+    if (found) return finalizeReplySession(buildTopicReply(found, lang), 'unknown', session);
   }
-  return answerRuleQuestion(choice.value, lang, contextGameId);
+  return answerRuleQuestion(choice.value, lang, contextGameId, session, options);
 }
 
 export function answerRuleQuestion(
   rawQuery: string,
   lang: Language,
-  contextGameId?: GameId | null
+  contextGameId?: GameId | null,
+  session?: RuleBotSession,
+  options?: RuleBotOptions
 ): RuleBotReply {
   const query = rawQuery.trim();
-  if (!query) return buildWelcomeReply(contextGameId, lang);
+  const canSelectGame = Boolean(options?.canSelectGame);
+  const useSession = session !== undefined;
+
+  if (!query) {
+    const welcome = buildWelcomeReply(contextGameId, lang);
+    return {
+      ...welcome,
+      session: {
+        lastGameId: contextGameId ?? null,
+        lastCandidates: session?.lastCandidates,
+        lastIntent: 'greeting',
+        partySize: session?.partySize ?? null,
+      },
+    };
+  }
 
   const intent = detectIntent(query);
   const gameMatch = findMatchingGames(query);
   const topicMatch = matchGuideTopic(query);
 
   if (intent === 'greeting') {
-    return buildWelcomeReply(contextGameId, lang);
+    const welcome = buildWelcomeReply(contextGameId, lang);
+    return {
+      ...welcome,
+      session: {
+        lastGameId: contextGameId ?? null,
+        lastCandidates: session?.lastCandidates,
+        lastIntent: 'greeting',
+        partySize: session?.partySize ?? null,
+      },
+    };
+  }
+
+  // 0A. Comparison questions against session.lastCandidates (when session parameter is provided)
+  if (useSession && intent === 'compare' && (session.lastCandidates?.length ?? 0) >= 2) {
+    return finalizeReplySession(
+      buildCompareReply(session.lastCandidates!, query, lang),
+      'compare',
+      session
+    );
+  }
+
+  // 0B. Ordinal references against session.lastCandidates (when session parameter is provided)
+  if (useSession && (session.lastCandidates?.length ?? 0) >= 1) {
+    const ordIdx = parseOrdinalIndex(query);
+    if (ordIdx !== null && ordIdx >= 0 && ordIdx < session.lastCandidates!.length) {
+      const targetId = session.lastCandidates![ordIdx];
+      const targetItem = getGameIndex().find((g) => g.id === targetId);
+      if (targetItem) {
+        const subIntent: Intent =
+          intent === 'controls' || intent === 'settings' || intent === 'players' ? intent : 'rules';
+        return finalizeReplySession(
+          buildGameRulesReply(targetItem, lang, subIntent, canSelectGame),
+          subIntent,
+          session
+        );
+      }
+    }
   }
 
   // 1. Explicit recommendations
   if (intent === 'recommend' && (!gameMatch.best || gameMatch.score < 95)) {
-    return buildRecommendationReply(query, lang, contextGameId);
+    const { reply, resolvedPartySize } = buildRecommendationReply(
+      query,
+      lang,
+      (useSession ? session.lastGameId : undefined) ?? contextGameId,
+      useSession ? session : undefined,
+      options?.roomPlayerCount
+    );
+    return finalizeReplySession(reply, 'recommend', session, resolvedPartySize);
   }
 
   // 2. Explicit game mentioned in query (high confidence)
   if (gameMatch.best && gameMatch.score >= 70) {
-    const reply = buildGameRulesReply(gameMatch.best, lang, intent === 'unknown' ? 'rules' : intent);
+    const effectiveIntent = intent === 'unknown' || intent === 'compare' ? 'rules' : intent;
+    const reply = buildGameRulesReply(gameMatch.best, lang, effectiveIntent, canSelectGame);
     if (gameMatch.runnersUp.length > 0 && gameMatch.score < 105) {
       reply.suggestedGames = gameMatch.runnersUp.slice(0, 3).map((g) => toSuggestedGame(g, lang));
     }
-    return reply;
+    return finalizeReplySession(reply, effectiveIntent, session);
   }
 
-  // 3. Platform tutorial or troubleshooting topic match
+  const rememberedGameId = (useSession ? session.lastGameId : undefined) ?? contextGameId ?? null;
+  const isFollowUpAttribute =
+    intent === 'controls' || intent === 'settings' || intent === 'players' || intent === 'rules';
+
+  // 3A. Pronoun follow-up about remembered/session game takes precedence over generic topics
+  if (rememberedGameId && isFollowUpAttribute && hasPronounFollowUpCue(query)) {
+    const rememberedItem = getGameIndex().find((g) => g.id === rememberedGameId);
+    if (rememberedItem) {
+      return finalizeReplySession(
+        buildGameRulesReply(rememberedItem, lang, intent, canSelectGame),
+        intent,
+        session
+      );
+    }
+  }
+
+  // 3B. Platform tutorial or troubleshooting topic match
   if (topicMatch) {
-    return buildTopicReply(topicMatch, lang);
+    return finalizeReplySession(buildTopicReply(topicMatch, lang), intent, session);
   }
 
-  // 4. Follow-up question about currently active/remembered game
-  if (
-    contextGameId &&
-    (intent === 'controls' || intent === 'settings' || intent === 'players' || intent === 'rules')
-  ) {
-    const ctxItem = getGameIndex().find((g) => g.id === contextGameId);
+  // 4. Follow-up question about currently active or remembered game
+  if (rememberedGameId && isFollowUpAttribute) {
+    const ctxItem = getGameIndex().find((g) => g.id === rememberedGameId);
     if (ctxItem) {
-      return buildGameRulesReply(ctxItem, lang, intent);
+      return finalizeReplySession(
+        buildGameRulesReply(ctxItem, lang, intent, canSelectGame),
+        intent,
+        session
+      );
     }
   }
 
@@ -1570,34 +2158,42 @@ export function answerRuleQuestion(
       };
     });
     runnerChoices.push(mainMenuChoice(lang));
-    return {
-      title: lang === 'zh' ? `你是不是想找「${bestMeta.name}」？` : `Did you mean ${bestMeta.name}?`,
-      text:
-        lang === 'zh'
-          ? `根据你的关键词匹配到以下最接近的游戏，点击任意一款立即查看完整规则：`
-          : `Here are the closest matching games—tap one below to open its full rules & controls:`,
-      suggestedGames: candidates.map((g) => toSuggestedGame(g, lang)),
-      choices: runnerChoices,
-      quickPrompts:
-        lang === 'zh'
-          ? ['返回主菜单', '推荐街机游戏', '推荐棋盘游戏']
-          : ['Main menu', 'Recommend arcade games', 'Recommend board games'],
-    };
+    return finalizeReplySession(
+      {
+        title: lang === 'zh' ? `你是不是想找「${bestMeta.name}」？` : `Did you mean ${bestMeta.name}?`,
+        text:
+          lang === 'zh'
+            ? `根据你的关键词匹配到以下最接近的游戏，点击任意一款立即查看完整规则：`
+            : `Here are the closest matching games—tap one below to open its full rules & controls:`,
+        suggestedGames: candidates.map((g) => toSuggestedGame(g, lang)),
+        choices: runnerChoices,
+        quickPrompts:
+          lang === 'zh'
+            ? ['返回主菜单', '推荐街机游戏', '推荐棋盘游戏']
+            : ['Main menu', 'Recommend arcade games', 'Recommend board games'],
+      },
+      intent,
+      session
+    );
   }
 
   // 6. Helpful smart fallback back to the 6 preset categories
-  return {
-    title: lang === 'zh' ? '不太确定你想问什么 — 可以直接点下面分类！' : 'Not sure what you meant—pick a category below!',
-    text:
-      lang === 'zh'
-        ? `你可以点选下方任意教程分类，或直接输入 ${GAME_CATALOG.length} 款游戏中的任意名称（如“UNO”、“骗子酒馆”、“21点”、“五子棋”）：`
-        : `Tap any guide category below, or type any of our ${GAME_CATALOG.length} game names (like “Color Clash”, “Liar’s Deck”, “Lucky 21”, or “Bumper Brawl”):`,
-    choices: buildMainMenuChoices(contextGameId, lang),
-    quickPrompts:
-      lang === 'zh'
-        ? ['新手入门教程', '200 款游戏规则', '常见问题排查']
-        : ['Getting started', '200 game rules', 'Quick fixes'],
-  };
+  return finalizeReplySession(
+    {
+      title: lang === 'zh' ? '不太确定你想问什么 — 可以直接点下面分类！' : 'Not sure what you meant—pick a category below!',
+      text:
+        lang === 'zh'
+          ? `你可以点选下方任意教程分类，或直接输入 ${GAME_CATALOG.length} 款游戏中的任意名称（如“UNO”、“骗子酒馆”、“21点”、“五子棋”）：`
+          : `Tap any guide category below, or type any of our ${GAME_CATALOG.length} game names (like “Color Clash”, “Liar’s Deck”, “Lucky 21”, or “Bumper Brawl”):`,
+      choices: buildMainMenuChoices(contextGameId, lang),
+      quickPrompts:
+        lang === 'zh'
+          ? ['新手入门教程', '200 款游戏规则', '常见问题排查']
+          : ['Getting started', '200 game rules', 'Quick fixes'],
+    },
+    'unknown',
+    session
+  );
 }
 
 export function getAllSearchableGames(lang: Language): RuleBotSuggestedGame[] {

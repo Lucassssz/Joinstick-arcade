@@ -6777,6 +6777,7 @@ export function PhoneController({
         isOpen={ruleBotOpen}
         onClose={() => setRuleBotOpen(false)}
         activeGameId={room.selectedGameId}
+        roomPlayerCount={room.players.length}
       />
     </div>
   );

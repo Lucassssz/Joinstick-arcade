@@ -2125,6 +2125,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           isOpen={ruleBotOpen}
           onClose={() => setRuleBotOpen(false)}
           activeGameId={room.selectedGameId}
+          roomPlayerCount={room.players.length}
+          onSelectGame={(gameId) => handleSelectGame(gameId)}
         />
       </div>
     );
@@ -3227,6 +3229,8 @@ export function HostMonitor({ initialGameId = 'bumper-brawl', onExit }: HostMoni
           isOpen={ruleBotOpen}
           onClose={() => setRuleBotOpen(false)}
           activeGameId={room.selectedGameId}
+          roomPlayerCount={room.players.length}
+          onSelectGame={(gameId) => handleSelectGame(gameId)}
         />
       </div>
     );

@@ -4,6 +4,7 @@ import {
   Bot,
   ChevronRight,
   Home,
+  Play,
   RotateCcw,
   Search,
   Send,
@@ -19,6 +20,7 @@ import {
   resolveGuideChoice,
   type RuleBotChoice,
   type RuleBotReply,
+  type RuleBotSession,
   type RuleBotSuggestedGame,
 } from '../lib/ruleChatbotEngine';
 
@@ -33,15 +35,23 @@ interface RuleChatbotDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   activeGameId?: GameId | null;
+  roomPlayerCount?: number | null;
+  onSelectGame?: (gameId: GameId) => void;
 }
 
 export function RuleChatbotDrawer({
   isOpen,
   onClose,
   activeGameId = null,
+  roomPlayerCount = null,
+  onSelectGame,
 }: RuleChatbotDrawerProps) {
   const { lang, t } = useLanguage();
   const [focusedGameId, setFocusedGameId] = useState<GameId | null>(activeGameId);
+  const [session, setSession] = useState<RuleBotSession>(() => ({
+    lastGameId: activeGameId ?? null,
+    partySize: roomPlayerCount != null && roomPlayerCount > 0 ? roomPlayerCount : null,
+  }));
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const welcome = buildWelcomeReply(activeGameId, lang);
     return [{ id: 'welcome_0', sender: 'bot', text: welcome.text, reply: welcome }];
@@ -54,6 +64,18 @@ export function RuleChatbotDrawer({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const prevLangRef = useRef(lang);
   const prevActiveGameRef = useRef<GameId | null>(activeGameId);
+  const prevOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    const wasOpen = prevOpenRef.current;
+    prevOpenRef.current = isOpen;
+    if (!wasOpen && isOpen && roomPlayerCount != null && roomPlayerCount > 0) {
+      setSession((prev) => ({
+        ...prev,
+        partySize: roomPlayerCount,
+      }));
+    }
+  }, [isOpen, roomPlayerCount]);
 
   useEffect(() => {
     const gameChanged = prevActiveGameRef.current !== activeGameId;
@@ -63,10 +85,16 @@ export function RuleChatbotDrawer({
       prevLangRef.current = lang;
       if (gameChanged) setFocusedGameId(activeGameId);
       const nextFocus = gameChanged ? activeGameId : focusedGameId;
+      setSession({
+        lastGameId: nextFocus ?? null,
+        lastCandidates: [],
+        lastIntent: null,
+        partySize: roomPlayerCount != null && roomPlayerCount > 0 ? roomPlayerCount : null,
+      });
       const welcome = buildWelcomeReply(nextFocus, lang);
       setMessages([{ id: `welcome_${Date.now()}`, sender: 'bot', text: welcome.text, reply: welcome }]);
     }
-  }, [activeGameId, lang, focusedGameId]);
+  }, [activeGameId, lang, focusedGameId, roomPlayerCount]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -90,9 +118,17 @@ export function RuleChatbotDrawer({
 
   if (!isOpen) return null;
 
+  const botOptions = {
+    canSelectGame: Boolean(onSelectGame),
+    roomPlayerCount: roomPlayerCount ?? null,
+  };
+
   const appendExchange = (userText: string, reply: RuleBotReply) => {
     if (reply.resolvedGameId) {
       setFocusedGameId(reply.resolvedGameId);
+    }
+    if (reply.session) {
+      setSession(reply.session);
     }
     const now = Date.now();
     setMessages((prev) => [
@@ -108,7 +144,7 @@ export function RuleChatbotDrawer({
     const trimmed = questionText.trim();
     if (!trimmed) return;
     const contextId = overrideGameId !== undefined ? overrideGameId : focusedGameId;
-    const reply = answerRuleQuestion(trimmed, lang, contextId);
+    const reply = answerRuleQuestion(trimmed, lang, contextId, session, botOptions);
     appendExchange(trimmed, reply);
   };
 
@@ -118,7 +154,12 @@ export function RuleChatbotDrawer({
       setPickerSearch('');
       return;
     }
-    const reply = resolveGuideChoice(choice, lang, focusedGameId);
+    if (choice.action === 'select-game') {
+      onSelectGame?.(choice.value as GameId);
+      onClose();
+      return;
+    }
+    const reply = resolveGuideChoice(choice, lang, focusedGameId, session, botOptions);
     appendExchange(choice.label, reply);
   };
 
@@ -132,12 +173,19 @@ export function RuleChatbotDrawer({
 
   const handleGoMainMenu = () => {
     setPickerOpen(false);
+    setSession({
+      lastGameId: activeGameId ?? null,
+      lastCandidates: [],
+      lastIntent: 'greeting',
+      partySize: session.partySize ?? (roomPlayerCount != null && roomPlayerCount > 0 ? roomPlayerCount : null),
+    });
     const welcome = buildWelcomeReply(activeGameId, lang);
     appendExchange(t('Main Menu', '返回主菜单'), welcome);
   };
 
   const handleReset = () => {
     setFocusedGameId(activeGameId);
+    setSession({});
     setPickerOpen(false);
     setPickerSearch('');
     const welcome = buildWelcomeReply(activeGameId, lang);
@@ -299,11 +347,38 @@ export function RuleChatbotDrawer({
                 {isLatestBotMsg && reply?.choices && reply.choices.length > 0 && (
                   <div className="pl-8 grid grid-cols-2 gap-1.5">
                     {reply.choices.map((choice) => {
+                      if (choice.action === 'select-game') {
+                        return (
+                          <button
+                            key={choice.id}
+                            type="button"
+                            onClick={() => handleSelectChoice(choice)}
+                            className="col-span-2 group px-3 py-2.5 rounded-xl bg-[#10D98B] hover:bg-[#34E8A3] text-[#052E16] text-left flex items-center justify-between gap-2 cursor-pointer active:scale-[0.98] transition-all shadow-[0_6px_18px_rgba(16,217,139,0.28)]"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <Play className="w-3.5 h-3.5 fill-current shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <div className="font-display text-xs font-black leading-tight truncate">
+                                  {choice.label}
+                                </div>
+                                {choice.sublabel && (
+                                  <div className="text-[10px] font-bold text-[#052E16]/80 leading-tight truncate mt-0.5">
+                                    {choice.sublabel}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-[#052E16] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                          </button>
+                        );
+                      }
+
+                      const secondaryChoices = reply.choices!.filter((c) => c.action !== 'select-game');
                       const isFullWidth =
                         choice.action === 'menu' ||
                         choice.id.startsWith('current_') ||
-                        (reply.choices!.length % 2 === 1 &&
-                          choice.id === reply.choices![reply.choices!.length - 1].id);
+                        (secondaryChoices.length % 2 === 1 &&
+                          choice.id === secondaryChoices[secondaryChoices.length - 1]?.id);
                       const accent = choice.accentHex ?? '#00C2FF';
                       return (
                         <button
